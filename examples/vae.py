@@ -1,3 +1,8 @@
+"""VAE example from numpyro.
+
+original: https://github.com/pyro-ppl/numpyro/blob/master/examples/vae.py
+"""
+
 import argparse
 import os
 import time
@@ -10,7 +15,7 @@ from jax.experimental import optimizers, stax
 from jax.random import PRNGKey
 
 import numpyro.distributions as dist
-from numpyro.examples.datasets import MNIST, load_dataset
+from datasets import MNIST, load_dataset
 from numpyro.handlers import param, sample
 from numpyro.svi import elbo, svi
 
@@ -125,8 +130,7 @@ def binarize(rng, batch):
     :param batch: Batch of data with continous values in interval [0, 1]
     :return: tuple(rng, binarized_batch).
     """
-    rng, sample_rng = random.split(rng, 2) # everytime something needs rng as input but doesn't return it, we split the rng
-    return rng, random.bernoulli(sample_rng, batch).astype(batch.dtype)
+    return random.bernoulli(rng, batch).astype(batch.dtype)
 
 
 
@@ -149,29 +153,20 @@ def main(args):
 
     # preparing random number generators and loading data
     rng = PRNGKey(0)
-    rng, rng_enc, rng_dec = random.split(rng, 3)
+    rng, rng_enc, rng_dec, rng_shuffle_train = random.split(rng, 4)
     train_init, train_fetch = load_dataset(MNIST, batch_size=args.batch_size, split='train')
     test_init, test_fetch = load_dataset(MNIST, batch_size=args.batch_size, split='test')
 
-    # load_dataset documentation ("reverse engineered" since official code comes without it):
-    # load_dataset(dataset, batch_size=None, split='train', shuffle=True)
-    # returns: (init_fn: () -> (num_batches, dataset_sample_indices), get_batch: (i, dataset_sample_indices) -> batch
-    # where dataset_sample_indices is the list of (shuffled) indices of all items in the dataset
-    # get_batch returns the next batch_size amount of items from the data set as specified in dataset_sample_indices
-    #
-    # note(lumip): load_dataset uses numpy.random for shuffling and is thus not coupled to the PRNG routines of JAX
-    # that are used throughout the rest of this file (does this impede reproducability in suffling?)
-
-
     # initializing model and training algorithms
-    num_train, train_idx = train_init()
+    rng_shuffle_train, rng_train_init = random.split(rng_shuffle_train, 2)
+    num_train, train_idx = train_init(rng=rng_train_init)
     _, encoder_params = encoder_init(rng_enc, (args.batch_size, out_dim))
     _, decoder_params = decoder_init(rng_dec, (args.batch_size, args.z_dim))
     params = {'encoder': encoder_params, 'decoder': decoder_params}
 
     # note(lumip): why these?
-    rng, sample_batch = binarize(rng, train_fetch(0, train_idx)[0])
-    rng, svi_init_rng = random.split(rng, 2)
+    rng, rng_binarize, svi_init_rng = random.split(rng, 3)
+    sample_batch = binarize(rng_binarize, train_fetch(0, train_idx)[0])
     opt_state = svi_init(svi_init_rng, (sample_batch,), (sample_batch,), params)
 
     # functions for training tasks
@@ -186,8 +181,8 @@ def main(args):
         """
         def body_fn(i, val):
             loss_sum, opt_state, rng = val
-            rng, batch = binarize(rng, train_fetch(i, train_idx)[0])
-            rng, update_rng = random.split(rng, 2)
+            rng, rng_binarize, update_rng = random.split(rng, 3)
+            batch = binarize(rng_binarize, train_fetch(i, train_idx)[0])
             loss, opt_state, rng = svi_update(i, opt_state, update_rng, (batch,), (batch,),)
             loss_sum += loss
             return loss_sum, opt_state, rng
@@ -205,8 +200,8 @@ def main(args):
         """
         def body_fn(i, val):
             loss_sum, rng = val
-            rng, batch = binarize(rng, test_fetch(i, test_idx)[0])
-            rng, eval_rng = random.split(rng, 2)
+            rng, rng_binarize, eval_rng = random.split(rng, 3)
+            batch = binarize(rng_binarize, test_fetch(i, test_idx)[0])
             loss = svi_eval(opt_state, eval_rng, (batch,), (batch,)) / len(batch)
             loss_sum += loss
             return loss_sum, rng
@@ -229,7 +224,8 @@ def main(args):
         assert(num_epochs > 0)
         img = test_fetch(0, test_idx)[0][0]
         plt.imsave(os.path.join(RESULTS_DIR, "epoch_{:0{}d}_original.png".format(epoch, (int(np.log10(num_epochs))+1))), img, cmap='gray')
-        _, test_sample = binarize(rng, img)
+        rng, rng_binarize = random.split(rng, 2)
+        test_sample = binarize(rng_binarize, img)
         params = get_params(opt_state)
         z_mean, z_var = encode(params['encoder'], test_sample.reshape([1, -1]))
         z = dist.Normal(z_mean, z_var).sample(rng)
@@ -239,7 +235,8 @@ def main(args):
     # main training loop
     for i in range(args.num_epochs):
         t_start = time.time()
-        num_train, train_idx = train_init()
+        rng_shuffle_train, rng_train_init = random.split(rng_shuffle_train, 2)
+        num_train, train_idx = train_init(rng=rng_train_init)
         _, opt_state, rng = epoch_train(opt_state, rng)
         rng, rng_test, rng_recons = random.split(rng, 3)
         num_test, test_idx = test_init()
