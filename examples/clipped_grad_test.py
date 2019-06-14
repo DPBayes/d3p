@@ -98,23 +98,45 @@ print("gradient norms:\n\t{}".format([[np.linalg.norm(v) for v in g] for g in gr
 
 print("\n########################\n")
 
-w = np.array([
-    1., 1.
-])
 
-x = np.array([
-    [3., 4.],
-    [6., 8.],
-    [9., 0.1],
-])
+# note(lumip): these don't work. due to the way JAX computes the gradient using vector-Jacobian product
+# it is not possible to clip per-sample gradients using a custom transformation :(
+
+# @jax.custom_transforms
+# def sum_clip_grad_norm(x, threshold):
+#     return np.sum(x)
+
+# def sum_clip_grad_norm_gradient(x, g, threshold):
+#     print(g)
+#     return np.ones_like(x)*g
+
+# jax.defvjp_all(
+#     sum_clip_grad_norm,
+#     lambda x, c:
+#         (np.sum(x),
+#          lambda g:
+#             (sum_clip_grad_norm_gradient(x, g, c), 1.)#(g/np.maximum(1., row_wise_norm(g)/c), 1.)
+#         )
+# )
+
+# def test_loss(w, x):
+#     assert(w.shape[0] == x.shape[1])
+#     m = np.matmul(x, w)
+#     return sum_clip_grad_norm(m, 8.0)
+#     # return np.sum(m)
 
 
-@clip_gradient_norms(8)
-def test_loss(w, x):
-    assert(w.shape[0] == x.shape[1])
-    return np.sum(np.matmul(x, w))
+# w = np.array([
+#     1., 1.
+# ])
 
-(value, gradient) = jax.value_and_grad(test_loss, argnums=(0))(w, x)
-print("test_dotp_sum(x, y): {}".format(value))
-print("gradients:\n\t{}".format(gradient))
-print("gradient norms:\n\t{}".format(np.linalg.norm(gradient)))
+# x = np.array([
+#     [3., 4.],
+#     [6., 8.],
+#     [9., 0.1],
+# ])
+
+# (value, gradient) = jax.value_and_grad(test_loss, argnums=(0))(w, x)
+# print("test_dotp_sum(x, y): {}".format(value))
+# print("gradients:\n\t{}".format(gradient))
+# print("gradient norms:\n\t{}".format(np.linalg.norm(gradient)))
