@@ -36,12 +36,16 @@ def clip_grad_norm(x, threshold):
     """
     return x
 
+def row_wise_norm(x):
+    axis = len(x.shape) - 1
+    return np.linalg.norm(x, axis=axis, keepdims=True)
+
 jax.defvjp_all(
     clip_grad_norm,
     lambda x, c:
         (x,
          lambda g:
-            (g/np.maximum(1., np.linalg.norm(g)/c), 1.)
+            (g/np.maximum(1., row_wise_norm(g)/c), 1.)
         )
 )
 
@@ -82,13 +86,35 @@ y = np.array([
     [2.3, -1.75],
 ])
 
-@clip_gradient_norms(5.0)
+@clip_gradient_norms(8)
 def test_dotp_sum(x, y):
-    # return np.tensordot(x, y) # this is equivalent to: sum(row_wise_dot(x, y))
-    return np.sum(np.diag(np.matmul(x, np.transpose(y)))) # this also
+    return np.tensordot(x, y) # this is equivalent to: sum(row_wise_dot(x, y))
+    # return np.sum(np.diag(np.matmul(x, np.transpose(y)))) # this also
 
 (value, gradients) = jax.value_and_grad(test_dotp_sum, argnums=(0,1))(x, y)
 print("test_dotp_sum(x, y): {}".format(value))
 print("gradients:\n\t{}".format(gradients))
 print("gradient norms:\n\t{}".format([[np.linalg.norm(v) for v in g] for g in gradients]))
-# todo(lumip): clipping doesn't work properly as of yet. figure out why
+
+print("\n########################\n")
+
+w = np.array([
+    1., 1.
+])
+
+x = np.array([
+    [3., 4.],
+    [6., 8.],
+    [9., 0.1],
+])
+
+
+@clip_gradient_norms(8)
+def test_loss(w, x):
+    assert(w.shape[0] == x.shape[1])
+    return np.sum(np.matmul(x, w))
+
+(value, gradient) = jax.value_and_grad(test_loss, argnums=(0))(w, x)
+print("test_dotp_sum(x, y): {}".format(value))
+print("gradients:\n\t{}".format(gradient))
+print("gradient norms:\n\t{}".format(np.linalg.norm(gradient)))
