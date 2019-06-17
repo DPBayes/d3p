@@ -236,11 +236,11 @@ def main(args):
     # main training loop
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng_shuffle_train, rng_train_init = random.split(rng_shuffle_train, 2)
+        rng_shuffle_train, rng_train_init, rng_test_init = random.split(rng_shuffle_train, 3)
         num_train, train_idx = train_init(rng=rng_train_init)
         _, opt_state, rng = epoch_train(opt_state, rng)
         rng, rng_test, rng_recons = random.split(rng, 3)
-        num_test, test_idx = test_init()
+        num_test, test_idx = test_init(rng=rng_test_init)
         test_loss = eval_test(opt_state, rng_test)
         reconstruct_img(i, args.num_epochs, opt_state, rng_recons)
         print("Epoch {}: loss = {} ({:.2f} s.)".format(i, test_loss, time.time() - t_start))
