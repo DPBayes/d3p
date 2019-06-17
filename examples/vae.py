@@ -17,7 +17,8 @@ from jax.random import PRNGKey
 import numpyro.distributions as dist
 from datasets import MNIST, load_dataset
 from numpyro.handlers import param, sample
-from svi import per_sample_elbo, elbo, svi # from numpyro.svi
+# from numpyro.svi import elbo, svi
+from svi import per_sample_elbo as elbo, svi
 
 
 def sigmoid(x):
@@ -147,7 +148,7 @@ def main(args):
     # note(lumip): after looking into it a bit more, a gradient clipping decorator for Optimizer would probably be a good idea
     #   i.e. GradientClippedOptimizer(Optimizer, min, max) that takes the gradients, clips them, and passes them on to given optimizer
 
-    svi_init, svi_update, svi_eval = svi(model, guide, per_sample_elbo, opt_init, opt_update, get_params,
+    svi_init, svi_update, svi_eval = svi(model, guide, elbo, opt_init, opt_update, get_params,
                                          encode=encode, decode=decode, z_dim=args.z_dim)
     svi_update = jit(svi_update)
 

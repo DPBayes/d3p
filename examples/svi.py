@@ -5,7 +5,8 @@ original: https://github.com/pyro-ppl/numpyro/blob/master/numpyro/svi.py
 
 import os
 
-from jax import random, value_and_grad
+from jax import random, value_and_grad, vjp
+import jax.api
 
 import jax.numpy as np
 
@@ -79,7 +80,59 @@ def svi(model, guide, loss, optim_init, optim_update, get_params, **kwargs):
         """
         model_init, guide_init = _seed(model, guide, rng)
         params = get_params(opt_state)
-        loss_val, grads = value_and_grad(loss)(params, model_init, guide_init, model_args, guide_args, kwargs)
+        # vjp(loss, )
+
+        # note(lumip): using a vmapped jax.linearize(fun, *primals) could help speeding up forward differentiation
+        # mode and (somewhat) negate the performance cost to incurred by per-sample differentiation,
+        # if I understand the implication of its documentation correctly.
+        onp = jax.api.onp
+        def per_sample_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
+
+            def value_and_grad_f(*args, **kwargs):
+                f = jax.linear_util.wrap_init(fun, kwargs)
+                f_partial, dyn_args = jax.api._argnums_partial(f, argnums, args)
+                if not has_aux:
+                    ans, vjp_py = vjp(f_partial, *dyn_args)
+                else:
+                    ans, vjp_py, aux = vjp(f_partial, *dyn_args, has_aux=True)
+                
+                dtype = np.result_type(ans)
+                if not (holomorphic or np.issubdtype(dtype, onp.floating)):
+                    msg = ("Gradient only defined for real-output functions (with dtype that "
+                            "is a subdtype of np.floating), but got dtype {}. For holomorphic "
+                            "differentiation, pass holomorphic=True.")
+                    raise TypeError(msg.format(dtype))
+
+                assert(len(ans.shape) == 1)
+                batch_size = ans.shape[0]
+                one_hot_vecs = np.eye(batch_size, dtype=dtype)
+                
+                grads = jax.vmap(lambda v: vjp_py(v)[0] if isinstance(argnums, int) else vjp_py(v))(one_hot_vecs)
+
+                if not has_aux:
+                    return ans, grads
+                else:
+                    return (ans, aux), grads
+
+            return value_and_grad_f
+
+        per_sample_loss, per_sample_grads = per_sample_value_and_grad(loss)(params, model_init, guide_init, model_args, guide_args, kwargs)
+        # per_sample_grads will be tree of jax np.arrays of shape [batch_size, (param_shape)] for each parameter
+
+
+        # loss_val, grad_vjp = vjp(np.sum, per_sample_loss)
+        # grads = grad_vjp(per_sample_grads)
+
+
+        # import jax.tree_util
+        from jax.tree_util import tree_multimap, tree_map
+        def sum_them_grads(grads):
+            return np.sum(grads, axis=0)
+        grads = tree_map(sum_them_grads, per_sample_grads)
+
+        loss_val = np.sum(per_sample_loss)
+
+
         opt_state = optim_update(i, grads, opt_state)
         rng, = random.split(rng, 1)
         return loss_val, opt_state, rng
@@ -99,7 +152,7 @@ def svi(model, guide, loss, optim_init, optim_update, get_params, **kwargs):
         """
         model_init, guide_init = _seed(model, guide, rng)
         params = get_params(opt_state)
-        return loss(params, model_init, guide_init, model_args, guide_args, kwargs)
+        return np.sum(loss(params, model_init, guide_init, model_args, guide_args, kwargs))
 
     # Make local functions visible from the global scope once
     # `svi` is called for sphinx doc generation.
@@ -143,22 +196,33 @@ def elbo(param_map, model, guide, model_args, guide_args, kwargs):
 
 
 def per_sample_log_density(model, model_args, model_kwargs, params):
+    # note(lumip): I assumed here that all sites with samples will two-dimensional shape
+    # of size (batch_size, site_dim), where batch_size is common for all sites.
+    # is that an assumption that always holds?
+
     model = substitute(model, params)
     model_trace = trace(model).get_trace(*model_args, **model_kwargs)
-    log_joint = 0.
-    per_sample_log_joint = None
+    # note(lumip): explicit loop below faster? indicated by direct comparison, could be noise though. test!
+    per_sample_log_joint = np.sum(
+        [np.sum(site['fn'].log_prob(site['value']), axis=1)
+            for site in model_trace.values()
+            if site['type'] == 'sample'
+        ],
+        axis=0
+    )
+    # per_sample_log_joint = None
     # todo(lumip): is there a way to get the batch size and init per_sample_log_joint already?
-    for site in model_trace.values():
-        if site['type'] == 'sample':
-            # site['value'] holds the traced sampled values and has shape (batch x sample_dim)
-            if per_sample_log_joint is None:
-                # todo(lumip): is it guaranteed that len(shape) == 2 always?
-                per_sample_log_joint = np.sum(site['fn'].log_prob(site['value']), axis=1) 
-            else:
-                assert(per_sample_log_joint.shape[0] == site['value'].shape[0])
-                per_sample_log_joint += np.sum(site['fn'].log_prob(site['value']), axis=1)
-    log_joint = np.sum(per_sample_log_joint)
-    return log_joint, model_trace
+    # for site in model_trace.values():
+    #     if site['type'] == 'sample':
+    #         # site['value'] holds the traced sampled values and has shape (batch x sample_dim)
+    #         if per_sample_log_joint is None:
+    #             # todo(lumip): is it guaranteed that len(shape) == 2 always?
+    #             per_sample_log_joint = np.sum(site['fn'].log_prob(site['value']), axis=1) 
+    #         else:
+    #             assert(per_sample_log_joint.shape[0] == site['value'].shape[0])
+    #             per_sample_log_joint += np.sum(site['fn'].log_prob(site['value']), axis=1)
+
+    return per_sample_log_joint, model_trace
 
 
 def per_sample_elbo(param_map, model, guide, model_args, guide_args, kwargs):
