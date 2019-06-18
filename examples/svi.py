@@ -21,14 +21,15 @@ def _seed(model, guide, rng):
     return model_init, guide_init
 
 
-def svi(model, guide, loss, optim_init, optim_update, get_params, **kwargs):
+def svi(model, guide, per_sample_loss_fn, combined_loss_fn, optim_init, optim_update, get_params, **kwargs):
     """
     Stochastic Variational Inference given an ELBo loss objective.
 
     :param model: Python callable with Pyro primitives for the model.
     :param guide: Python callable with Pyro primitives for the guide
         (recognition network).
-    :param loss: ELBo loss, i.e. negative Evidence Lower Bound, to minimize.
+    :param per_sample_loss_fn: ELBo loss, i.e. negative Evidence Lower Bound, to minimize, per sample.
+    :param combined_loss_fn: Function to combine the per-sample loss values. For ELBo this is np.sum.
     :param optim_init: initialization function returned by a JAX optimizer.
         see: :mod:`jax.experimental.optimizers`.
     :param optim_update: update function for the optimizer
@@ -38,6 +39,10 @@ def svi(model, guide, loss, optim_init, optim_update, get_params, **kwargs):
         that remain constant during fitting.
     :return: tuple of `(init_fn, update_fn, evaluate)`.
     """
+
+    def loss_fn(*args, **kwargs):
+        return combined_loss_fn(per_sample_loss_fn(*args, **kwargs))
+
     def init_fn(rng, model_args=(), guide_args=(), params=None):
         """
 
@@ -80,7 +85,6 @@ def svi(model, guide, loss, optim_init, optim_update, get_params, **kwargs):
         """
         model_init, guide_init = _seed(model, guide, rng)
         params = get_params(opt_state)
-        # vjp(loss, )
 
         # note(lumip): using a vmapped jax.linearize(fun, *primals) could help speeding up forward differentiation
         # mode and (somewhat) negate the performance cost to incurred by per-sample differentiation,
@@ -116,22 +120,21 @@ def svi(model, guide, loss, optim_init, optim_update, get_params, **kwargs):
 
             return value_and_grad_f
 
-        per_sample_loss, per_sample_grads = per_sample_value_and_grad(loss)(params, model_init, guide_init, model_args, guide_args, kwargs)
-        # per_sample_grads will be tree of jax np.arrays of shape [batch_size, (param_shape)] for each parameter
+        per_sample_loss, per_sample_grads = per_sample_value_and_grad(per_sample_loss_fn)(
+            params, model_init, guide_init, model_args, guide_args, kwargs
+        )
+        # per_sample_grads will be jax tree of jax np.arrays of shape [batch_size, (param_shape)] for each parameter
+        
+        # get total loss and loss combination jvp (forward differentiation) function
+        loss_val, loss_jvp = jax.linearize(combined_loss_fn, per_sample_loss)
 
-
-        # loss_val, grad_vjp = vjp(np.sum, per_sample_loss)
-        # grads = grad_vjp(per_sample_grads)
-
-
-        # import jax.tree_util
-        from jax.tree_util import tree_multimap, tree_map
-        def sum_them_grads(grads):
-            return np.sum(grads, axis=0)
-        grads = tree_map(sum_them_grads, per_sample_grads)
-
-        loss_val = np.sum(per_sample_loss)
-
+        # combine gradients for all parameters according to the loss combination jvp func
+        def combine_gradients(grads):
+            return loss_jvp(grads)
+            # note(lumip): this currently fails due to a bug(?) in jax which tries to assert that the shape
+            #       of the gradients is equal to that of the primals here (only for jit'ed functions).
+            #       reported to the issue tracker as https://github.com/google/jax/issues/871
+        grads = jax.tree_util.tree_map(combine_gradients, per_sample_grads)
 
         opt_state = optim_update(i, grads, opt_state)
         rng, = random.split(rng, 1)
@@ -152,7 +155,7 @@ def svi(model, guide, loss, optim_init, optim_update, get_params, **kwargs):
         """
         model_init, guide_init = _seed(model, guide, rng)
         params = get_params(opt_state)
-        return np.sum(loss(params, model_init, guide_init, model_args, guide_args, kwargs))
+        return loss_fn(params, model_init, guide_init, model_args, guide_args, kwargs)
 
     # Make local functions visible from the global scope once
     # `svi` is called for sphinx doc generation.
