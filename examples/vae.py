@@ -160,9 +160,14 @@ def main(args):
 
     per_sample_loss = per_sample_elbo
     combined_loss = np.sum
+
+    def gradient_manipulation(T): # stupidity for now. this does serve no purpose except for demonstrating that per-sample gradients can be manipulated
+        return [t/np.linalg.norm(t) for t in T]
+
     svi_init, svi_update, svi_eval = svi(
         model, guide, per_sample_loss, combined_loss, opt_init, opt_update, 
-        get_params, encode=encode, decode=decode, z_dim=args.z_dim
+        get_params, gradient_manipulation,
+        encode=encode, decode=decode, z_dim=args.z_dim
     )
     svi_update = jit(svi_update)
 

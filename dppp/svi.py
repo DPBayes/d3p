@@ -84,7 +84,8 @@ def per_sample_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
 
 
 def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
-        optim_init, optim_update, get_params, **kwargs):
+        optim_init, optim_update, get_params, ps_grad_manipulation_fn = None,
+        **kwargs):
     """
     Stochastic Variational Inference given a per-sample loss objective and a
     loss combiner function.
@@ -107,6 +108,8 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
     :param optim_update: update function for the optimizer
     :param get_params: function to get current parameters values given the
         optimizer state.
+    :param ps_grad_manipulation_fn: optional function that allows to manipulate
+        the gradient for each sample.
     :param `**kwargs`: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     :return: tuple of `(init_fn, update_fn, evaluate)`.
@@ -164,8 +167,33 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
         # per_sample_grads will be jax tree of jax np.arrays of shape
         #   [batch_size, (param_shape)] for each parameter
 
-        # todo(lumip): this is the place to perform per-sample gradient
-        #   manipulation, e.g., clipping
+        # flatten it out
+        flat_ps_grads_tree, ps_grads_tree_def = jax.tree_flatten(
+            per_sample_grads
+        )
+
+        # apply per-sample gradient manipulation, if present
+        if ps_grad_manipulation_fn is not None:
+            flat_ps_grads_tree = jax.vmap(ps_grad_manipulation_fn, in_axes=0)(
+                flat_ps_grads_tree
+            )
+        # todo(lumip, all): by flattening the tree before passing it into
+        #   gradient manipulation, we lose all information on which value
+        #   belongs to which parameter. on the other hand, we have plain and
+        #   straightforward access to the values, which might be all we need.
+        #   think about whether that is okay or whether ps_grad_manipulation_fn
+        #   should just get the whole tree per sample to get all available
+        #   information
+
+        per_sample_grads = jax.tree_unflatten(
+            ps_grads_tree_def, flat_ps_grads_tree
+        )
+
+        # todo(lumip): can maybe apply gradient combination here instead of
+        #   mapping over the reconstructed tree? think about that!
+        
+        # if ps_grad_manipulation_fn is not None:
+        #     ps_grad_manipulation_fn()
 
         # get total loss and loss combiner jvp (forward differentiation) func
         loss_val, loss_jvp = jax.linearize(loss_combiner_fn, per_sample_loss)
