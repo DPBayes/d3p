@@ -3,8 +3,14 @@
 original: https://github.com/pyro-ppl/numpyro/blob/master/examples/vae.py
 """
 
-import argparse
 import os
+
+# allow example to find dppp without installing
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+#### 
+
+import argparse
 import time
 
 import matplotlib.pyplot as plt
@@ -15,10 +21,11 @@ from jax.experimental import optimizers, stax
 from jax.random import PRNGKey
 
 import numpyro.distributions as dist
-from datasets import MNIST, load_dataset
 from numpyro.handlers import param, sample
-# from numpyro.svi import elbo, svi
-from svi import per_sample_elbo, svi
+
+from dppp.svi import per_sample_elbo, svi
+
+from datasets import MNIST, load_dataset
 
 
 def sigmoid(x):
@@ -27,9 +34,11 @@ def sigmoid(x):
 
 # TODO: move to JAX
 def _elemwise_no_params(fun, **kwargs):
-    def init_fun(rng, input_shape): return input_shape, ()
+    def init_fun(rng, input_shape):
+        return input_shape, ()
 
-    def apply_fun(params, inputs, rng=None): return fun(inputs, **kwargs)
+    def apply_fun(params, inputs, rng=None):
+        return fun(inputs, **kwargs)
 
     return init_fun, apply_fun
 
@@ -43,11 +52,12 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
 def encoder(hidden_dim, z_dim):
-    """defines the encoder, i.e., the network taking as from observations to latent variables
+    """Defines the encoder, i.e., the network taking us from observations 
+        to (a distribution of) latent variables.
 
-    z is following a normal distribution, needs mean and varaince
+    z is following a normal distribution, thus needs mean and variance.
     
-    network structure:
+    Network structure:
     x -> dense layer of hidden_dim with softplus activation --> dense layer of z_dim ( = means/loc of z)
                                                             |-> dense layer of z_dim with (elementwise) exp() as activation func ( = variance of z )
     note(lumip): I believe the exp() as activation function is solely to ensure positivity of the variance
@@ -65,9 +75,10 @@ def encoder(hidden_dim, z_dim):
 
 
 def decoder(hidden_dim, out_dim):
-    """defines the decoder, i.e., the network taking us from latent variables back to observations (or at least observation space)
+    """Defines the decoder, i.e., the network taking us from latent
+        variables back to observations (or at least observation space).
     
-    network structure:
+    Network structure:
     z -> dense layer of hidden_dim with softplus activation -> dense layer of out_dim with sigmoid activation
 
     :param hidden_dim: number of nodes in the hidden layer
@@ -118,13 +129,18 @@ def guide(batch, encode, **kwargs):
 
 @jit
 def binarize(rng, batch):
-    """Binarizes a batch of observations with values in [0,1] by sampling from a Bernoulli distribution and using the original observations as means
+    """Binarizes a batch of observations with values in [0,1] by sampling from
+        a Bernoulli distribution and using the original observations as means.
     
-    Reason: this example assumes a Bernoulli distribution for the decoder output and thus requires inputs to be binary values as well.
+    Reason: This example assumes a Bernoulli distribution for the decoder output
+    and thus requires inputs to be binary values as well.
 
-    note(lumip): from an answer to a pyro github issue for similar VAE example code using MNIST ( https://github.com/pyro-ppl/pyro/issues/529#issuecomment-342670366 ):
-    "be aware to only do this once, as repeated sampling of the data provides unfair regularization to the model and also inflates likelihood scores"
-    which is not how binarize is currently used throughout this file, i.e., repeated sampling occurs. Is that intended? what is "unfair" regularization
+    note(lumip): From an answer to a pyro github issue for similar VAE example
+    code using MNIST ( https://github.com/pyro-ppl/pyro/issues/529#issuecomment-342670366 ):
+    "be aware to only do this once, as repeated sampling of the data provides
+    unfair regularization to the model and also inflates likelihood scores".
+    This is not how binarize is currently used throughout this file, i.e.,
+    repeated sampling occurs. Is that intended? what is "unfair" regularization
     supposed to mean in that context, though?
 
     :param rng: rng seed key
@@ -144,8 +160,10 @@ def main(args):
 
     per_sample_loss = per_sample_elbo
     combined_loss = np.sum
-    svi_init, svi_update, svi_eval = svi(model, guide, per_sample_loss, combined_loss, opt_init, opt_update, 
-                                         get_params, encode=encode, decode=decode, z_dim=args.z_dim)
+    svi_init, svi_update, svi_eval = svi(
+        model, guide, per_sample_loss, combined_loss, opt_init, opt_update, 
+        get_params, encode=encode, decode=decode, z_dim=args.z_dim
+    )
     svi_update = jit(svi_update)
 
     # preparing random number generators and loading data
@@ -180,7 +198,9 @@ def main(args):
             loss_sum, opt_state, rng = val
             rng, rng_binarize, update_rng = random.split(rng, 3)
             batch = binarize(rng_binarize, train_fetch(i, train_idx)[0])
-            loss, opt_state, rng = svi_update(i, opt_state, update_rng, (batch,), (batch,),)
+            loss, opt_state, rng = svi_update(
+                i, opt_state, update_rng, (batch,), (batch,),
+            )
             loss_sum += loss
             return loss_sum, opt_state, rng
 
@@ -210,8 +230,9 @@ def main(args):
     def reconstruct_img(epoch, num_epochs, opt_state, rng):
         """Reconstructs an image for the given epoch
 
-        Obtains a sample from the testing data set and passes it through the VAE. Stores the result as image file
-        'epoch_{epoch}_recons.png' and the original input as 'epoch_{epoch}_original.png' in folder '.results'.
+        Obtains a sample from the testing data set and passes it through the
+        VAE. Stores the result as image file 'epoch_{epoch}_recons.png' and
+        the original input as 'epoch_{epoch}_original.png' in folder '.results'.
 
         :param epoch: Number of the current epoch
         :param num_epochs: Number of total epochs
@@ -220,26 +241,44 @@ def main(args):
         """
         assert(num_epochs > 0)
         img = test_fetch(0, test_idx)[0][0]
-        plt.imsave(os.path.join(RESULTS_DIR, "epoch_{:0{}d}_original.png".format(epoch, (int(np.log10(num_epochs))+1))), img, cmap='gray')
+        plt.imsave(
+            os.path.join(RESULTS_DIR, "epoch_{:0{}d}_original.png".format(
+                epoch, (int(np.log10(num_epochs))+1))
+            ),
+            img,
+            cmap='gray'
+        )
         rng, rng_binarize = random.split(rng, 2)
         test_sample = binarize(rng_binarize, img)
         params = get_params(opt_state)
         z_mean, z_var = encode(params['encoder'], test_sample.reshape([1, -1]))
         z = dist.Normal(z_mean, z_var).sample(rng)
         img_loc = decode(params['decoder'], z).reshape([28, 28])
-        plt.imsave(os.path.join(RESULTS_DIR, "epoch_{:0{}d}_recons.png".format(epoch, (int(np.log10(num_epochs))+1))), img_loc, cmap='gray')
+        plt.imsave(
+            os.path.join(RESULTS_DIR, "epoch_{:0{}d}_recons.png".format(
+                epoch, (int(np.log10(num_epochs))+1))
+            ),
+            img_loc,
+            cmap='gray'
+        )
 
     # main training loop
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng_shuffle_train, rng_train_init, rng_test_init = random.split(rng_shuffle_train, 3)
+        rng_shuffle_train, rng_train_init, rng_test_init = random.split(
+            rng_shuffle_train, 3
+        )
         num_train, train_idx = train_init(rng=rng_train_init)
         _, opt_state, rng = epoch_train(opt_state, rng)
+
         rng, rng_test, rng_recons = random.split(rng, 3)
         num_test, test_idx = test_init(rng=rng_test_init)
         test_loss = eval_test(opt_state, rng_test)
+
         reconstruct_img(i, args.num_epochs, opt_state, rng_recons)
-        print("Epoch {}: loss = {} ({:.2f} s.)".format(i, test_loss, time.time() - t_start))
+        print("Epoch {}: loss = {} ({:.2f} s.)".format(
+            i, test_loss, time.time() - t_start
+        ))
 
 
 if __name__ == '__main__':
