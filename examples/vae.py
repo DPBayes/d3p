@@ -141,12 +141,6 @@ def main(args):
     encoder_init, encode = encoder(args.hidden_dim, args.z_dim)
     decoder_init, decode = decoder(args.hidden_dim, out_dim)
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
-    # note(lumip): pyro has a ClippedAdam optimizer ( https://github.com/pyro-ppl/pyro/blob/dev/pyro/optim/clipped_adam.py ).
-    #   That could be what we want but I haven't yet figured out whether that clips gradients per sample or in total.
-    #   However, modifying the optimizer is probably the most reasonable thing to do to get per-sample clipped gradients
-    #   to work as that would allow usage not only in numpyro but in principle all the way back to pytorch and pyro
-    # note(lumip): after looking into it a bit more, a gradient clipping decorator for Optimizer would probably be a good idea
-    #   i.e. GradientClippedOptimizer(Optimizer, min, max) that takes the gradients, clips them, and passes them on to given optimizer
 
     per_sample_loss = per_sample_elbo
     combined_loss = np.sum

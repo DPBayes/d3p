@@ -86,9 +86,6 @@ def svi(model, guide, per_sample_loss_fn, combined_loss_fn, optim_init, optim_up
         model_init, guide_init = _seed(model, guide, rng)
         params = get_params(opt_state)
 
-        # note(lumip): using a vmapped jax.linearize(fun, *primals) could help speeding up forward differentiation
-        # mode and (somewhat) negate the performance cost to incurred by per-sample differentiation,
-        # if I understand the implication of its documentation correctly.
         onp = jax.api.onp
         def per_sample_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
 

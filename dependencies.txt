@@ -1,7 +1,0 @@
-# note(lumip): since this is very experimental right now, it's not a proper python package yet and no full setup.py exists
-# I'll just record some minimal depencies here
-
-jax>=0.1.37 # we need jax.defvjp, which is only available starting from this version
-numpyro>=0.1.0
-
-# note(lumip, 2019-06-13): install numpyro first (which installs jax 0.1.35 as dependency as of today at least), then install jax 0.1.37 and jaxlib 0.1.20
