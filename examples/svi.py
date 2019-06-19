@@ -128,13 +128,18 @@ def svi(model, guide, per_sample_loss_fn, combined_loss_fn, optim_init, optim_up
         # get total loss and loss combination jvp (forward differentiation) function
         loss_val, loss_jvp = jax.linearize(combined_loss_fn, per_sample_loss)
 
-        # combine gradients for all parameters according to the loss combination jvp func
-        def combine_gradients(grads):
-            return loss_jvp(grads)
-            # note(lumip): this currently fails due to a bug(?) in jax which tries to assert that the shape
-            #       of the gradients is equal to that of the primals here (only for jit'ed functions).
-            #       reported to the issue tracker as https://github.com/google/jax/issues/871
-        grads = jax.tree_util.tree_map(combine_gradients, per_sample_grads)
+        def map_over_secondary_dims(f):
+            def map_over_secondary_dims_f(T):
+                T_ = T.reshape((T.shape[0], -1))
+                Z_ = jax.vmap(f, in_axes=1)(T_)
+                return Z_.reshape(T.shape[1:])
+            return map_over_secondary_dims_f
+
+        # mapping loss combination jvp func over all secondary dimensions of gradient collections/matrices
+        loss_jvp = map_over_secondary_dims(loss_jvp)
+
+        # combine gradients for all parameters in the gradient jax tree according to the loss combination jvp func
+        grads = jax.tree_util.tree_map(loss_jvp, per_sample_grads)
 
         opt_state = optim_update(i, grads, opt_state)
         rng, = random.split(rng, 1)
