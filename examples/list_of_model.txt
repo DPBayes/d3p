@@ -1,0 +1,15 @@
+List of desired models:
+
+- Bayesian logistic regression
+	* y_i ~ Bernoulli(w*x_i+intercept), where x_i are predictors and y_i is observed
+	* w ~ MVN(0,I), intercept ~ N(0,1)
+
+- Gaussian mixture model
+	* f(x) = sum_k pi_k * phi(x; mu_k, sigma_k^2), where phi denotes Gaussian pdf
+	* pi_k ~ Dirichlet(alpha), where alpha \in R_+^k
+	* mu_k ~ Normal(0, 1)
+	* sigma_k ~ Gamma(a0, b0), where a0,b0 > 0
+	* Also, multivariate case of the same distribution. Just change Normals to MVN and Gamma to multivariate version.
+
+- Mixture of factor analyzers
+	* http://mlg.eng.cam.ac.uk/zoubin/papers/nips99.pdf
