@@ -217,13 +217,17 @@ def per_sample_log_density(model, model_args, model_kwargs, params):
     Similar to numpyro's `log_density`, the model is conditioned on `params` and
     then the logarithmic probability of the outcomes given in `model_args` and
     `model_kwargs` are computed.
-    However, all `model_args` are understood to align different samples along
-    the first axis. The result is a vector of corresponding length giving the
-    log probability for each sample.
+    However, all sampled variables are understood to align different samples
+    along the first axis (whether in model_args or params). Computing the
+    per-sample log_density requires observations of all variables, including
+    latent ones and the corresponding amount of samples (size of the first axis)
+    must be identical for all.
+    The result is a vector of corresponding length giving the log probability
+    for each sample.
 
     :param model: The model for which to evaluate the 
-    :param model_args: Samples for the model
-    :param model_kwargs:
+    :param model_args: arguments for calling the model function
+    :param model_kwargs: keyword arguments for calling the model function
     :param params: fixed parameters for the model (the corresponding model
         variables will be fixed to these, i.e., the model is conditioned on
         params)
@@ -231,11 +235,29 @@ def per_sample_log_density(model, model_args, model_kwargs, params):
     # note(lumip): I assumed here that all sites with samples will have
     #   two-dimensional shape of size (batch_size, site_dim), where batch_size
     #   is common for all sites. is that an assumption that always holds?
+    #   the way sampling works and possible jitting by jax makes this somewhat 
+    #   hard to assert, so for now if that condition is not met, we will get
+    #   an unspecified shape error internally.
+    # todo(lumip): revisit this later and work out a nicer solution
 
     model = substitute(model, params)
     model_trace = trace(model).get_trace(*model_args, **model_kwargs)
-    # note(lumip): explicit loop below faster? indicated by direct comparison,
-    #   could be noise though. test!
+    
+    # note(lumip): the part below wasn't working because the second assertion
+    #   was not evaulated directly when this functions context was jit'ed by jax
+    #   and thus would not catch the shape errors it was intended to catch
+
+    # # ensure all samples have the same shape and len(shape) == 2
+    # sample_shapes = [site['value'].shape
+    #                  for site in model_trace.values()
+    #                  if site['type'] == 'sample']
+    # r_shape = sample_shapes[0]
+
+    # assert(len(r_shape) == 2)
+    # assert(np.all([s_shape == r_shape for s_shape in sample_shapes]), 
+    #     "samples observed for variables differ in shape. most there were"
+    #     "different amounts of samples given for each variable")
+
     per_sample_log_joint = np.sum(
         [np.sum(site['fn'].log_prob(site['value']), axis=1)
             for site in model_trace.values()
@@ -243,25 +265,6 @@ def per_sample_log_density(model, model_args, model_kwargs, params):
         ],
         axis=0
     )
-    # per_sample_log_joint = None
-    # todo(lumip): is there a way to get the batch size and init
-    #   per_sample_log_joint already?
-    # for site in model_trace.values():
-    #     if site['type'] == 'sample':
-    #         # site['value'] holds the traced sampled values and has shape
-    #         #     (batch x sample_dim)
-    #         if per_sample_log_joint is None:
-    #             # todo(lumip): is it guaranteed that len(shape) == 2 always?
-    #             per_sample_log_joint = np.sum(site['fn'].log_prob(
-    #                 site['value']), axis=1
-    #             )
-    #         else:
-    #             assert(
-    #                 per_sample_log_joint.shape[0] == site['value'].shape[0]
-    #             )
-    #             per_sample_log_joint += np.sum(site['fn'].log_prob(
-    #                 site['value']), axis=1
-    #             )
 
     return per_sample_log_joint, model_trace
 
