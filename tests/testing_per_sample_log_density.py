@@ -33,20 +33,25 @@ obs = onp.random.rand(2, 10)
 # variant 1. single z, broadcasted to all obs
 z1 = np.array([[True, True, False, True, False, False, False, False, False, True]])
 z1 = np.broadcast_to(z1, (2, z1.shape[1]))
+psv1 = {'x', 'z'}
 
 # variant 2. single z
 z2 = np.array([True, True, False, True, False, False, False, False, False, True])
+psv2 = {'x'}
 
 # variant 2.1. single z, column
 z21 = np.array([[True, True, False, True, False, False, False, False, False, True]])
+psv21 = {'x'}
 
 # variant 3. separate z for all obs
 z3 = np.array([[True, True, False, True, False, False, False, False, False, True],
               [False, False, True, True, False, False, True, True, False, True]])
+psv3 = {'x', 'z'}
 
 zs = (z1, z2, z21, z3)
+psvs = (psv1, psv2, psv21, psv3)
 
-for z in zs:
+for z, psv in zip(zs, psvs):
     # computing expected per-sample log probability
     log_prob_z = dist.Bernoulli(np.ones((10,))*0.5).log_prob(z)
     log_prob_obs = dist.Normal(z, np.ones((10,))).log_prob(obs)
@@ -55,7 +60,7 @@ for z in zs:
     per_sample_log_prob = per_sample_log_prob_z + per_sample_log_prob_obs
 
     # invoking per_sample_log_density and comparing to expected
-    d, _ = per_sample_log_density(model, (obs,), {}, {'z': z}, obs.shape[0])
+    d, _ = per_sample_log_density(model, (obs,), {}, {'z': z}, psv)
     assert(np.allclose(per_sample_log_prob, d))
 
     # summing per-sample results and compare to numpyro's log_density function
@@ -89,7 +94,7 @@ per_sample_log_probs = per_sample_log_prob_x + per_sample_log_prob_z + (log_prob
 
 # invoking per_sample_log_density and comparing to expected
 model2 = seed(model2, jax.random.PRNGKey(1))
-d2, _ = per_sample_log_density(model2, (d,), {}, {'z': z, 'x': x, 'mus': mus}, x.shape[0])
+d2, _ = per_sample_log_density(model2, (d,), {}, {'z': z, 'x': x, 'mus': mus}, {'x'})
 assert(np.allclose(per_sample_log_probs, d2))
 
 # summing per-sample results and compare to numpyro's log_density function
@@ -115,7 +120,7 @@ per_sample_log_probs = per_sample_log_prob_x + (log_prob_b/N)
 
 # invoking per_sample_log_density and comparing to expected
 seed(model3, jax.random.PRNGKey(2))
-d3, _ = per_sample_log_density(model3, (N,), {}, {'b': b_true, 'x': x}, N)
+d3, _ = per_sample_log_density(model3, (N,), {}, {'b': b_true, 'x': x}, {'x'})
 assert(np.allclose(per_sample_log_probs, d3))
 
 # summing per-sample results and compare to numpyro's log_density function

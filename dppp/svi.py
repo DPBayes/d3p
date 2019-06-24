@@ -214,7 +214,8 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
 
     return init_fn, update_fn, evaluate
 
-def per_sample_log_density(model, model_args, model_kwargs, params, num_samples):
+def per_sample_log_density(
+    model, model_args, model_kwargs, params, per_sample_variables):
     """
     Evaluates the log_density of a model for each given sample.
 
@@ -233,42 +234,44 @@ def per_sample_log_density(model, model_args, model_kwargs, params, num_samples)
     for each sample. Summing over the output vector gives the same result as
     numpyro's `log_density` function.
 
-    !ATTENTION!: Due to the above, there is an edge case that will lead to
-    potentially erroneous behavior: If the model contains latent variables that
-    are not per-sample but appear to have the same number of samples (e.g., 
-    mixture models with n modes and only n data samples) the probability of the
-    each instance of the latent variable will be attributed to a per-sample
-    instance.
-    todo(lumip): fix this! requires a way to identify which variables are
-    per-sample and which are not, which appears to be complicated without
-    passing a corresponding dictionary as parameter.
-    todo(lumip, all): usage of "sample" is ambigous (refer to a sample from
-    a distribution and a data sample). find a better term for the later and be
-    clearer about it.
-
     :param model: The model for which to evaluate the 
     :param model_args: arguments for calling the model function
     :param model_kwargs: keyword arguments for calling the model function
     :param params: fixed parameters for the model (the corresponding model
         variables will be fixed to these, i.e., the model is conditioned on
         params)
-    :param num_samples: Number of samples(/instances of the observed variables)
+    :param per_sample_variables: Names of the variables that have per-sample
+        contribution to the (log) probabilities.
     """
 
     model = substitute(model, params)
     model_trace = trace(model).get_trace(*model_args, **model_kwargs)
 
-    def axis_aware_per_sample_sum(x):
-        if len(x.shape) <= 0:
+    # determine num_samples from first encountered sample variable
+    num_samples = None
+    for site in model_trace.values():
+        if site['name'] in per_sample_variables:
+            assert(len(site['value'].shape)>0)
+            num_samples = site['value'].shape[0]
+            break
+
+    # helper function to sum per sample and not crash when the axes do not align
+    def axis_aware_per_sample_sum(x, name):
+        if len(x.shape) > 2:
+            raise TypeError("invalid shape in sampled data in "
+                "per_sample_log_density. too many axes: {}".format(x.shape))
+        if len(x.shape) < 2:
             x = x.reshape(-1, 1)
-        if len(x.shape) == 2 and x.shape[0] == num_samples:
+        if name in per_sample_variables:
+            assert(x.shape[0] == num_samples)
             return np.sum(x, axis=1)
-        elif len(x.shape) <= 2:
-                return np.ones(num_samples)*(np.sum(x)/num_samples)
-        raise TypeError("invalid shape in sampled data in per_sample_log_density")
+        else:
+            return np.ones(num_samples) * (np.sum(x) / num_samples)
 
     per_site_sums = \
-        [axis_aware_per_sample_sum(site['fn'].log_prob(site['value']))
+        [axis_aware_per_sample_sum(
+            site['fn'].log_prob(site['value']), site['name']
+         )
          for site in model_trace.values()
          if site['type'] == 'sample']
 
@@ -278,7 +281,8 @@ def per_sample_log_density(model, model_args, model_kwargs, params, num_samples)
 
 
 def per_sample_elbo(
-    param_map, num_samples, model, guide, model_args, guide_args, kwargs):
+    param_map, per_sample_variables, model, guide,
+    model_args, guide_args, kwargs):
     """
     Per-sample version of the most basic implementation of the Evidence
     Lower Bound, which is the fundamental objective in Variational Inference.
@@ -288,7 +292,8 @@ def per_sample_elbo(
 
     :param dict param_map: dictionary of current parameter values keyed by site
         name.
-    :param num_samples: Number of samples(/instances of the observed variables)
+    :param per_sample_variables: Names of the variables that have per-sample
+        contribution to the (log) probabilities.
     :param model: Python callable with Pyro primitives for the model.
     :param guide: Python callable with Pyro primitives for the guide
         (recognition network).
@@ -301,10 +306,11 @@ def per_sample_elbo(
         minimized.
     """
     guide_log_density, guide_trace = per_sample_log_density(
-        guide, guide_args, kwargs, param_map, num_samples
+        guide, guide_args, kwargs, param_map, per_sample_variables
     )
     model_log_density, _ = per_sample_log_density(
-        replay(model, guide_trace), model_args, kwargs, param_map, num_samples
+        replay(model, guide_trace), model_args, kwargs, param_map, 
+        per_sample_variables
     )
     elbo = model_log_density - guide_log_density
     # Return (-elbo) since by convention we do gradient descent on a loss and
