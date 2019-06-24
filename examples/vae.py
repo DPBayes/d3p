@@ -162,7 +162,8 @@ def main(args):
     combined_loss = np.sum
     svi_init, svi_update, svi_eval = svi(
         model, guide, per_sample_loss, combined_loss, opt_init, opt_update, 
-        get_params, encode=encode, decode=decode, z_dim=args.z_dim
+        get_params, args.batch_size, encode=encode, decode=decode,
+        z_dim=args.z_dim
     )
     svi_update = jit(svi_update)
 
@@ -173,14 +174,14 @@ def main(args):
     test_init, test_fetch = load_dataset(MNIST, batch_size=args.batch_size, split='test')
 
     # initializing model and training algorithms
-    rng_shuffle_train, rng_train_init = random.split(rng_shuffle_train, 2)
-    num_train, train_idx = train_init(rng=rng_train_init)
     _, encoder_params = encoder_init(rng_enc, (args.batch_size, out_dim))
     _, decoder_params = decoder_init(rng_dec, (args.batch_size, args.z_dim))
     params = {'encoder': encoder_params, 'decoder': decoder_params}
 
     # note(lumip): why these?
     rng, rng_binarize, svi_init_rng = random.split(rng, 3)
+    rng_shuffle_train, rng_train_init = random.split(rng_shuffle_train, 2)
+    _, train_idx = train_init(rng=rng_train_init)
     sample_batch = binarize(rng_binarize, train_fetch(0, train_idx)[0])
     opt_state = svi_init(svi_init_rng, (sample_batch,), (sample_batch,), params)
 

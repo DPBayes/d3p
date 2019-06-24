@@ -84,7 +84,7 @@ def per_sample_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
 
 
 def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
-        optim_init, optim_update, get_params, **kwargs):
+        optim_init, optim_update, get_params, batch_size, **kwargs):
     """
     Stochastic Variational Inference given a per-sample loss objective and a
     loss combiner function.
@@ -107,6 +107,7 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
     :param optim_update: update function for the optimizer
     :param get_params: function to get current parameters values given the
         optimizer state.
+    :param batch_size: the batch size
     :param `**kwargs`: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     :return: tuple of `(init_fn, update_fn, evaluate)`.
@@ -158,8 +159,11 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
         model_init, guide_init = _seed(model, guide, rng)
         params = get_params(opt_state)
 
-        per_sample_loss, per_sample_grads = per_sample_value_and_grad(per_sample_loss_fn)(
-            params, model_init, guide_init, model_args, guide_args, kwargs
+        per_sample_loss, per_sample_grads = per_sample_value_and_grad(
+            per_sample_loss_fn
+        )(
+            params, batch_size,
+            model_init, guide_init, model_args, guide_args, kwargs
         )
         # per_sample_grads will be jax tree of jax np.arrays of shape
         #   [batch_size, (param_shape)] for each parameter
@@ -198,7 +202,8 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
         """
         model_init, guide_init = _seed(model, guide, rng)
         params = get_params(opt_state)
-        return loss_fn(params, model_init, guide_init, model_args, guide_args, kwargs)
+        return loss_fn(params, batch_size, model_init, guide_init, 
+                       model_args, guide_args, kwargs)
 
     # Make local functions visible from the global scope once
     # `svi` is called for sphinx doc generation.
@@ -209,8 +214,7 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
 
     return init_fn, update_fn, evaluate
 
-
-def per_sample_log_density(model, model_args, model_kwargs, params):
+def per_sample_log_density(model, model_args, model_kwargs, params, num_samples):
     """
     Evaluates the log_density of a model for each given sample.
 
@@ -218,12 +222,29 @@ def per_sample_log_density(model, model_args, model_kwargs, params):
     then the logarithmic probability of the outcomes given in `model_args` and
     `model_kwargs` are computed.
     However, all sampled variables are understood to align different samples
-    along the first axis (whether in model_args or params). Computing the
-    per-sample log_density requires observations of all variables, including
-    latent ones and the corresponding amount of samples (size of the first axis)
-    must be identical for all.
+    along the first axis (whether in model_args or params). If, for any
+    particular, variable, the first axis has size `num_samples`, it will be
+    understood as relating directly to that sample and the corresponding
+    probabilities will be treated separately per sample. If the variable has
+    less than `num_samples` on the first axis, its log probability is summed up
+    in total and then distributed over the samples.
+    
     The result is a vector of corresponding length giving the log probability
-    for each sample.
+    for each sample. Summing over the output vector gives the same result as
+    numpyro's `log_density` function.
+
+    !ATTENTION!: Due to the above, there is an edge case that will lead to
+    potentially erroneous behavior: If the model contains latent variables that
+    are not per-sample but appear to have the same number of samples (e.g., 
+    mixture models with n modes and only n data samples) the probability of the
+    each instance of the latent variable will be attributed to a per-sample
+    instance.
+    todo(lumip): fix this! requires a way to identify which variables are
+    per-sample and which are not, which appears to be complicated without
+    passing a corresponding dictionary as parameter.
+    todo(lumip, all): usage of "sample" is ambigous (refer to a sample from
+    a distribution and a data sample). find a better term for the later and be
+    clearer about it.
 
     :param model: The model for which to evaluate the 
     :param model_args: arguments for calling the model function
@@ -231,45 +252,34 @@ def per_sample_log_density(model, model_args, model_kwargs, params):
     :param params: fixed parameters for the model (the corresponding model
         variables will be fixed to these, i.e., the model is conditioned on
         params)
+    :param num_samples: Number of samples(/instances of the observed variables)
     """
-    # note(lumip): I assumed here that all sites with samples will have
-    #   two-dimensional shape of size (batch_size, site_dim), where batch_size
-    #   is common for all sites. is that an assumption that always holds?
-    #   the way sampling works and possible jitting by jax makes this somewhat 
-    #   hard to assert, so for now if that condition is not met, we will get
-    #   an unspecified shape error internally.
-    # todo(lumip): revisit this later and work out a nicer solution
 
     model = substitute(model, params)
     model_trace = trace(model).get_trace(*model_args, **model_kwargs)
-    
-    # note(lumip): the part below wasn't working because the second assertion
-    #   was not evaulated directly when this functions context was jit'ed by jax
-    #   and thus would not catch the shape errors it was intended to catch
 
-    # # ensure all samples have the same shape and len(shape) == 2
-    # sample_shapes = [site['value'].shape
-    #                  for site in model_trace.values()
-    #                  if site['type'] == 'sample']
-    # r_shape = sample_shapes[0]
+    def axis_aware_per_sample_sum(x):
+        if x.shape[0] == num_samples:
+            if len(x.shape) == 2:
+                return np.sum(x, axis=1)
+            elif len(x.shape) == 1:
+                return x
+        elif len(x.shape) <= 2:
+                return np.ones(num_samples)*(np.sum(x)/num_samples)
+        raise TypeError("invalid shape in sampled data in per_sample_log_density")
 
-    # assert(len(r_shape) == 2)
-    # assert(np.all([s_shape == r_shape for s_shape in sample_shapes]), 
-    #     "samples observed for variables differ in shape. most there were"
-    #     "different amounts of samples given for each variable")
+    per_site_sums = \
+        [axis_aware_per_sample_sum(site['fn'].log_prob(site['value']))
+         for site in model_trace.values()
+         if site['type'] == 'sample']
 
-    per_sample_log_joint = np.sum(
-        [np.sum(site['fn'].log_prob(site['value']), axis=1)
-            for site in model_trace.values()
-            if site['type'] == 'sample'
-        ],
-        axis=0
-    )
+    per_sample_log_joint = np.sum(per_site_sums, axis=0)
 
     return per_sample_log_joint, model_trace
 
 
-def per_sample_elbo(param_map, model, guide, model_args, guide_args, kwargs):
+def per_sample_elbo(
+    param_map, num_samples, model, guide, model_args, guide_args, kwargs):
     """
     Per-sample version of the most basic implementation of the Evidence
     Lower Bound, which is the fundamental objective in Variational Inference.
@@ -279,6 +289,7 @@ def per_sample_elbo(param_map, model, guide, model_args, guide_args, kwargs):
 
     :param dict param_map: dictionary of current parameter values keyed by site
         name.
+    :param num_samples: Number of samples(/instances of the observed variables)
     :param model: Python callable with Pyro primitives for the model.
     :param guide: Python callable with Pyro primitives for the guide
         (recognition network).
@@ -291,10 +302,10 @@ def per_sample_elbo(param_map, model, guide, model_args, guide_args, kwargs):
         minimized.
     """
     guide_log_density, guide_trace = per_sample_log_density(
-        guide, guide_args, kwargs, param_map
+        guide, guide_args, kwargs, param_map, num_samples
     )
     model_log_density, _ = per_sample_log_density(
-        replay(model, guide_trace), model_args, kwargs, param_map
+        replay(model, guide_trace), model_args, kwargs, param_map, num_samples
     )
     elbo = model_log_density - guide_log_density
     # Return (-elbo) since by convention we do gradient descent on a loss and
