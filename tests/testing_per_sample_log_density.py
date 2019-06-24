@@ -96,4 +96,30 @@ assert(np.allclose(per_sample_log_probs, d2))
 numpyro_d2, _ = log_density(model2, (d,), {}, {'z': z, 'x': x, 'mus': mus})
 assert(np.allclose(np.sum(d2), numpyro_d2))
 
+################################################################################
+# model for testing scalar
+def model3(N):
+    b = sample('b', dist.Normal(0., 1.))
+    x = sample('x', dist.Normal(np.ones((N,1))*b, 1.))
+    return x
+
+# generating toy data for model3
+N = 10
+b_true = 0.3
+x = onp.random.normal(b_true, 1., size=N).reshape(-1, 1)
+
+# computing expected per-sample log probability
+per_sample_log_prob_x = np.sum(dist.Normal(np.ones((N,1))*b_true, 1.).log_prob(x), axis=1)
+log_prob_b = dist.Normal(0., 1.).log_prob(b_true)
+per_sample_log_probs = per_sample_log_prob_x + (log_prob_b/N)
+
+# invoking per_sample_log_density and comparing to expected
+seed(model3, jax.random.PRNGKey(2))
+d3, _ = per_sample_log_density(model3, (N,), {}, {'b': b_true, 'x': x}, N)
+assert(np.allclose(per_sample_log_probs, d3))
+
+# summing per-sample results and compare to numpyro's log_density function
+numpyro_d3, _ = log_density(model3, (N,), {}, {'b': b_true, 'x': x})
+assert(np.allclose(np.sum(d3), numpyro_d3))
+
 print("success")

@@ -259,11 +259,10 @@ def per_sample_log_density(model, model_args, model_kwargs, params, num_samples)
     model_trace = trace(model).get_trace(*model_args, **model_kwargs)
 
     def axis_aware_per_sample_sum(x):
-        if x.shape[0] == num_samples:
-            if len(x.shape) == 2:
-                return np.sum(x, axis=1)
-            elif len(x.shape) == 1:
-                return x
+        if len(x.shape) <= 0:
+            x = x.reshape(-1, 1)
+        if len(x.shape) == 2 and x.shape[0] == num_samples:
+            return np.sum(x, axis=1)
         elif len(x.shape) <= 2:
                 return np.ones(num_samples)*(np.sum(x)/num_samples)
         raise TypeError("invalid shape in sampled data in per_sample_log_density")
