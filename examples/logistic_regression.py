@@ -13,6 +13,7 @@ import argparse
 import time
 
 import matplotlib.pyplot as plt
+import numpy as onp
 
 import jax.numpy as np
 from jax import jit, lax, random
@@ -34,7 +35,7 @@ def model(batch_X, batch_y, **kwargs):
     The model is conditioned on the observed data
     :param batch_X: a batch of predictors
     :param batch_y: a batch of observations
-    :param other keyword arguments' are accepted but ignored
+    :param other keyword arguments: are accepted but ignored
     """
     z_dim = batch_X.shape[1]
     z_w = sample('w', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior is N(0,I)
@@ -43,21 +44,20 @@ def model(batch_X, batch_y, **kwargs):
     return sample('obs', dist.Bernoulli(logits=logits), obs=batch_y)
 
 def guide(batch_X, batch_y, z_dim):
-    """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|q)
+    """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
     """
     # note(lumip): we are interested in the posterior of w and intercept
     #   so.. like this then?
     z_w_loc = param("w_loc", np.zeros((z_dim,)))
-    z_w_std = param("w_std", np.ones((z_dim,)))
+    z_w_std = np.exp(param("w_std_log", np.zeros((z_dim,))))
     z_w = sample('w', dist.Normal(z_w_loc, z_w_std))
     z_intercept_loc = param("intercept_loc", 0.)
-    z_interpet_std = param("intercept_std", 1.)
+    z_interpet_std = np.exp(param("intercept_std_log", 0.))
     z_intercept = sample('intercept', dist.Normal(z_intercept_loc, z_interpet_std))
     return (z_w, z_intercept)
 
 def create_toy_data(N, d):
     ## Create some toy data
-    import numpy as onp
     onp.random.seed(123)
 
     w_true = onp.random.randn(d)
@@ -123,32 +123,33 @@ def main(args):
     opt_state = svi_init(svi_init_rng, (batch_X, batch_Y), (batch_X, batch_Y))
 
     @jit
-    def epoch_train(opt_state, rng):
+    def epoch_train(opt_state, rng, data_idx, num_batch):
         def body_fn(i, val):
             loss_sum, opt_state, rng = val
             rng, update_rng = random.split(rng, 2)
-            batch = train_fetch(i, train_idx)
+            batch = train_fetch(i, data_idx)
             loss, opt_state, rng = svi_update(
                 i, opt_state, update_rng, batch, batch,
             )
-            loss_sum += loss
+            loss_sum += loss / len(batch[0])
             return loss_sum, opt_state, rng
 
-        return lax.fori_loop(0, num_train, body_fn, (0., opt_state, rng))
+        loss, opt_state, rng = lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
+        loss /= num_batch
+        return loss, opt_state, rng
 
     
     @jit
-    def eval_test(opt_state, rng):
-        # computing loss over training data (for now?)
+    def eval_test(opt_state, rng, data_idx, num_batch):
         def body_fn(i, val):
             loss_sum, rng = val
-            batch = train_fetch(i, train_idx)
-            loss = svi_eval(opt_state, rng, batch, batch) / len(batch)
+            batch = train_fetch(i, data_idx)
+            loss = svi_eval(opt_state, rng, batch, batch) / len(batch[0])
             loss_sum += loss
             return loss_sum, rng
 
-        loss, _ = lax.fori_loop(0, num_train, body_fn, (0., rng))
-        loss = loss / num_train
+        loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
+        loss = loss / num_batch
         return loss
 
 	## Train model
@@ -157,25 +158,35 @@ def main(args):
         rng, data_fetch_rng, test_rng = random.split(rng, 3)
 
         num_train, train_idx = train_init(rng=data_fetch_rng)
-        _, opt_state, rng = epoch_train(opt_state, rng)
+        _, opt_state, rng = epoch_train(
+            opt_state, rng, train_idx, num_train
+        )
 
-        num_train, train_idx = train_init(rng=data_fetch_rng)
-        test_loss = eval_test(opt_state, test_rng)
+        # computing loss over training data (for now?)
+        test_loss = eval_test(
+            opt_state, test_rng, train_idx, num_train
+        )
 
-        print("Epoch {}: loss = {} ({:.2f} s.)".format(
-            i, test_loss, time.time() - t_start
-        ))
-        params = get_params(opt_state)
-        print(params['w_loc'])
+        if (i % 100) == 0:
+            print("Epoch {}: loss = {} ({:.2f} s.)".format(
+                i, test_loss, time.time() - t_start
+            ))
+            params = get_params(opt_state)
+            print("w_loc: {}".format(params['w_loc']))
+            print("w_std: {}".format(np.exp(params['w_std_log'])))
 
-    print(w_true)
+    params = get_params(opt_state)
+    print("\tw_loc: {}\n\texpected: {}\n\terror: {}".format(params['w_loc'], w_true, np.linalg.norm(params['w_loc']-w_true)))
+    print("\tw_std: {}".format(np.exp(params['w_std_log'])))
+    print("\tintercept_loc: {}\n\texpected: {}\n\terror: {}".format(params['intercept_loc'], intercept_true, np.abs(params['intercept_loc']-intercept_true)))
+    print("\tintercept_std: {}".format(np.exp(params['intercept_std_log'])))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', default=100, type=int, help='number of training epochs')
+    parser.add_argument('-n', '--num-epochs', default=1000, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
     parser.add_argument('-batch-size', default=128, type=int, help='batch size')
     parser.add_argument('-d', '--dimensions', default=10, type=int, help='data dimension')
-    parser.add_argument('-N', '--num-samples', default=1000, type=int, help='data samples count')
+    parser.add_argument('-N', '--num-samples', default=10000, type=int, help='data samples count')
     args = parser.parse_args()
     main(args)
