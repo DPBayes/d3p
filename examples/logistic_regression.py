@@ -24,10 +24,7 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample
 
-# note(lumip): unfortunately per_sample_elbo does not work for this case atm
-# from dppp.svi import per_sample_elbo, svi
-from numpyro.svi import svi, elbo
-
+from dppp.svi import per_example_elbo, svi
 
 def model(batch_X, batch_y, **kwargs):
     """Defines the generative probabilistic model: p(x|z)p(z)
@@ -96,23 +93,13 @@ def main(args):
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
-    # note(lumip): unfortunately the per_sample_elbo (or rather the interally 
-    #   used per_sample_log_density) method is currently unable to deal with the
-    #   case where multiple samples influence the same instance of a latent
-    #   variable, which is the case here. for now, falling back to the original
-    #   numpyro svi procedures to get things running
-
-    # per_sample_loss = per_sample_elbo
-    # combined_loss = np.sum
-    # svi_init, svi_update, svi_eval = svi(
-    #     model, guide, per_sample_loss, combined_loss, opt_init, opt_update, 
-    #     get_params, z_dim=args.dimensions
-    # )
-
+    per_example_loss = per_example_elbo
+    combined_loss = np.sum
     svi_init, svi_update, svi_eval = svi(
-        model, guide, elbo, opt_init, opt_update, 
-        get_params, z_dim=args.dimensions
+        model, guide, per_example_loss, combined_loss, opt_init, opt_update, 
+        get_params, per_example_variables={'obs'}, z_dim=args.dimensions
     )
+
     svi_update = jit(svi_update)
 
     rng = PRNGKey(123)
