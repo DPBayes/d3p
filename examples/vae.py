@@ -23,7 +23,7 @@ from jax.random import PRNGKey
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample
 
-from dppp.svi import per_sample_elbo, svi
+from dppp.svi import per_example_elbo, svi
 
 from datasets import MNIST, load_dataset
 
@@ -158,11 +158,11 @@ def main(args):
     decoder_init, decode = decoder(args.hidden_dim, out_dim)
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
-    per_sample_loss = per_sample_elbo
+    per_example_loss = per_example_elbo
     combined_loss = np.sum
     svi_init, svi_update, svi_eval = svi(
-        model, guide, per_sample_loss, combined_loss, opt_init, opt_update, 
-        get_params, per_sample_variables={'obs', 'z'}, encode=encode,
+        model, guide, per_example_loss, combined_loss, opt_init, opt_update, 
+        get_params, per_example_variables={'obs', 'z'}, encode=encode,
         decode=decode, z_dim=args.z_dim
     )
     svi_update = jit(svi_update)
