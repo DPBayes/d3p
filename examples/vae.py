@@ -162,8 +162,8 @@ def main(args):
     combined_loss = np.sum
     svi_init, svi_update, svi_eval = svi(
         model, guide, per_sample_loss, combined_loss, opt_init, opt_update, 
-        get_params, args.batch_size, encode=encode, decode=decode,
-        z_dim=args.z_dim
+        get_params, per_sample_variables={'obs', 'z'}, encode=encode,
+        decode=decode, z_dim=args.z_dim
     )
     svi_update = jit(svi_update)
 

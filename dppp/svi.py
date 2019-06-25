@@ -84,7 +84,7 @@ def per_sample_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
 
 
 def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
-        optim_init, optim_update, get_params, batch_size, **kwargs):
+        optim_init, optim_update, get_params, per_sample_variables, **kwargs):
     """
     Stochastic Variational Inference given a per-sample loss objective and a
     loss combiner function.
@@ -107,7 +107,8 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
     :param optim_update: update function for the optimizer
     :param get_params: function to get current parameters values given the
         optimizer state.
-    :param batch_size: the batch size
+    :param per_sample_variables: Names of the variables that have per-sample
+        contribution to the (log) probabilities.
     :param `**kwargs`: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     :return: tuple of `(init_fn, update_fn, evaluate)`.
@@ -162,7 +163,7 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
         per_sample_loss, per_sample_grads = per_sample_value_and_grad(
             per_sample_loss_fn
         )(
-            params, batch_size,
+            params, per_sample_variables,
             model_init, guide_init, model_args, guide_args, kwargs
         )
         # per_sample_grads will be jax tree of jax np.arrays of shape
@@ -202,7 +203,7 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
         """
         model_init, guide_init = _seed(model, guide, rng)
         params = get_params(opt_state)
-        return loss_fn(params, batch_size, model_init, guide_init, 
+        return loss_fn(params, per_sample_variables, model_init, guide_init, 
                        model_args, guide_args, kwargs)
 
     # Make local functions visible from the global scope once
