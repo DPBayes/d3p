@@ -69,36 +69,42 @@ for z, psv in zip(zs, psvs):
 
 ################################################################################
 # a simple mixture model
-def model2(d):
+def model2(N, d):
     mus = sample('mus', dist.Normal(np.zeros((2, d)), 1))
-    z = sample('z', dist.Bernoulli(0.5))
+    z = sample('z', dist.Bernoulli(np.ones((N))*0.5))*1
+    # z = sample('z', dist.Bernoulli(0.5))
     x = sample('x', dist.Normal(mus[z], 0.5))
     return x
 
 # generating toy data for model2
 d = 4
 N = 10
-z = (1*(onp.random.rand(N)>0.5))
-mus = onp.random.randn(2*d).reshape(2, -1)
-x0 = onp.random.multivariate_normal(mus[0], onp.eye(d)*0.5, size=(N-onp.sum(z)))
-x1 = onp.random.multivariate_normal(mus[1], onp.eye(d)*0.5, size=onp.sum(z))
-x = onp.zeros((N, d))
-x[z==0,:] = x0
-x[z==1,:] = x1
+# z = (1*(onp.random.rand(N)>0.5))
+# mus = onp.random.randn(2*d).reshape(2, -1)
+# x0 = onp.random.multivariate_normal(mus[0], onp.eye(d)*0.5, size=(N-onp.sum(z)))
+# x1 = onp.random.multivariate_normal(mus[1], onp.eye(d)*0.5, size=onp.sum(z))
+# x = onp.zeros((N, d))
+# x[z==0,:] = x0
+# x[z==1,:] = x1
+## using the model to generate some data instead of specifying it manually:
+tr = trace(seed(model2, jax.random.PRNGKey(6))).get_trace(N, d)
+mus = tr['mus']['value']
+z = tr['z']['value']*1
+x = tr['x']['value']
 
 # computing expected per-sample log probability
-per_sample_log_prob_x = np.sum(dist.Normal(mus[z,:], 0.5).log_prob(x), axis=1)
+per_sample_log_prob_x = np.sum(dist.Normal(mus[z], 0.5).log_prob(x), axis=1)
 per_sample_log_prob_z = dist.Bernoulli(0.5).log_prob(z)
 log_prob_mus = np.sum(dist.Normal(np.zeros((2,d)),1).log_prob(mus))
 per_sample_log_probs = per_sample_log_prob_x + per_sample_log_prob_z + (log_prob_mus / N)
 
 # invoking per_sample_log_density and comparing to expected
 model2 = seed(model2, jax.random.PRNGKey(1))
-d2, _ = per_sample_log_density(model2, (d,), {}, {'z': z, 'x': x, 'mus': mus}, {'x'})
+d2, _ = per_sample_log_density(model2, (N, d), {}, {'z': z, 'x': x, 'mus': mus}, {'x'})
 assert(np.allclose(per_sample_log_probs, d2))
 
 # summing per-sample results and compare to numpyro's log_density function
-numpyro_d2, _ = log_density(model2, (d,), {}, {'z': z, 'x': x, 'mus': mus})
+numpyro_d2, _ = log_density(model2, (N, d), {}, {'z': z, 'x': x, 'mus': mus})
 assert(np.allclose(np.sum(d2), numpyro_d2))
 
 ################################################################################
@@ -110,8 +116,9 @@ def model3(N):
 
 # generating toy data for model3
 N = 10
-b_true = 0.3
-x = onp.random.normal(b_true, 1., size=N).reshape(-1, 1)
+tr = trace(seed(model3, jax.random.PRNGKey(5))).get_trace(N)
+x = tr['x']['value']
+b_true = tr['b']['value']
 
 # computing expected per-sample log probability
 per_sample_log_prob_x = np.sum(dist.Normal(np.ones((N,1))*b_true, 1.).log_prob(x), axis=1)
