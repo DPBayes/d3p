@@ -17,6 +17,7 @@ import numpy as np
 
 from jax import device_put, lax
 from jax.interpreters.xla import DeviceArray
+import jax.numpy as jnp
 import jax.random
 
 if 'CI' in os.environ:
@@ -192,6 +193,11 @@ def load_dataset(dset, batch_size=None, split='train'):
         get_batch() returns the next batch_size amount of items from the data set as specified in dataset_sample_indices
     """
     arrays = _load(dset)[split]
+    if not batch_size:
+        batch_size = len(arrays[0])
+    return batchify_data(arrays, batch_size)
+
+def batchify_data(arrays, batch_size):
     num_records = len(arrays[0])
     idxs = np.arange(num_records)
     if not batch_size:
@@ -203,6 +209,6 @@ def load_dataset(dset, batch_size=None, split='train'):
     def get_batch(i=0, idxs=idxs):
         ret_idx = lax.dynamic_slice_in_dim(idxs, i * batch_size, batch_size)
         return tuple(lax.index_take(a, (ret_idx,), axes=(0,)) if isinstance(a, DeviceArray)
-                     else np.take(a, ret_idx, axis=0) for a in arrays)
+                     else jnp.take(a, ret_idx, axis=0) for a in arrays)
 
     return init, get_batch

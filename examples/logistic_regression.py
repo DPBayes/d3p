@@ -26,6 +26,8 @@ from numpyro.handlers import param, sample
 
 from dppp.svi import per_example_elbo, svi
 
+from datasets import batchify_data
+
 def model(batch_X, batch_y, **kwargs):
     """Defines the generative probabilistic model: p(x|z)p(z)
 
@@ -67,28 +69,9 @@ def create_toy_data(N, d):
     y = 1.*(sigmoid(logits_true)>onp.random.rand(N))
     return X, y, w_true, intercept_true
 
-def batchify(X, y, batch_size):
-    # note(lumip): almost identical to the load_dataset routine in datasets
-    # todo(lumip): put common ground in some nice method
-    arrays = (X, y)
-    num_records = len(arrays[0])
-    idxs = np.arange(num_records)
-    if not batch_size:
-        batch_size = num_records
-
-    def init(rng=None):
-        return num_records // batch_size, jax.random.shuffle(rng, idxs) if rng is not None else idxs
-
-    def get_batch(i=0, idxs=idxs):
-        ret_idx = lax.dynamic_slice_in_dim(idxs, i * batch_size, batch_size)
-        return tuple(lax.index_take(a, (ret_idx,), axes=(0,)) if isinstance(a, jax.interpreters.xla.DeviceArray)
-                     else np.take(a, ret_idx, axis=0) for a in arrays)
-
-    return init, get_batch
-
 def main(args):
     X, y, w_true, intercept_true = create_toy_data(args.num_samples, args.dimensions)
-    train_init, train_fetch = batchify(X, y, args.batch_size)
+    train_init, train_fetch = batchify_data((X, y), args.batch_size)
 
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
