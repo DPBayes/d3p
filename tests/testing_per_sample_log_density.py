@@ -119,12 +119,21 @@ log_prob_b = dist.Normal(0., 1.).log_prob(b_true)
 per_sample_log_probs = per_sample_log_prob_x + (log_prob_b/N)
 
 # invoking per_sample_log_density and comparing to expected
-seed(model3, jax.random.PRNGKey(2))
+model3 = seed(model3, jax.random.PRNGKey(2))
 d3, _ = per_sample_log_density(model3, (N,), {}, {'b': b_true, 'x': x}, {'x'})
 assert(np.allclose(per_sample_log_probs, d3))
 
 # summing per-sample results and compare to numpyro's log_density function
 numpyro_d3, _ = log_density(model3, (N,), {}, {'b': b_true, 'x': x})
 assert(np.allclose(np.sum(d3), numpyro_d3))
+
+################################################################################
+# testing scalar output
+per_sample_variables_sweep = [{}, None, {'someUnseenVar'}]
+for psv in per_sample_variables_sweep:
+    d4, _ = per_sample_log_density(model3, (N,), {}, {'b': b_true, 'x': x}, psv)
+    assert(d4.shape==(1,))
+    numpyro_d4, _ = log_density(model3, (N,), {}, {'b': b_true, 'x': x})
+    assert(np.allclose(d4, numpyro_d4))
 
 print("success")

@@ -178,7 +178,6 @@ def main(args):
     _, decoder_params = decoder_init(rng_dec, (args.batch_size, args.z_dim))
     params = {'encoder': encoder_params, 'decoder': decoder_params}
 
-    # note(lumip): why these?
     rng, rng_binarize, svi_init_rng = random.split(rng, 3)
     rng_shuffle_train, rng_train_init = random.split(rng_shuffle_train, 2)
     _, train_idx = train_init(rng=rng_train_init)

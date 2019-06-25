@@ -84,7 +84,8 @@ def per_sample_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
 
 
 def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
-        optim_init, optim_update, get_params, per_sample_variables, **kwargs):
+        optim_init, optim_update, get_params, per_sample_variables=None,
+        **kwargs):
     """
     Stochastic Variational Inference given a per-sample loss objective and a
     loss combiner function.
@@ -129,6 +130,11 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
             useful forx
         :return: initial optimizer state.
         """
+        # note(lumip): the below is unchanged from numpyro's `svi` but seems
+        #   like a very inefficient/complicated way to obtain the parameters,
+        #   especially since it means manual work by the user to obtain a
+        #   throw-away sample just for initialization...
+        # todo(lumip): is there a way to improve?
         assert isinstance(model_args, tuple)
         assert isinstance(guide_args, tuple)
         model_init, guide_init = _seed(model, guide, rng)
@@ -163,8 +169,8 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
         per_sample_loss, per_sample_grads = per_sample_value_and_grad(
             per_sample_loss_fn
         )(
-            params, per_sample_variables,
-            model_init, guide_init, model_args, guide_args, kwargs
+            params, model_init, guide_init, model_args, guide_args, kwargs,
+            per_sample_variables=per_sample_variables
         )
         # per_sample_grads will be jax tree of jax np.arrays of shape
         #   [batch_size, (param_shape)] for each parameter
@@ -203,8 +209,8 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
         """
         model_init, guide_init = _seed(model, guide, rng)
         params = get_params(opt_state)
-        return loss_fn(params, per_sample_variables, model_init, guide_init, 
-                       model_args, guide_args, kwargs)
+        return loss_fn(params, model_init, guide_init, 
+                       model_args, guide_args, kwargs, per_sample_variables)
 
     # Make local functions visible from the global scope once
     # `svi` is called for sphinx doc generation.
@@ -216,24 +222,27 @@ def svi(model, guide, per_sample_loss_fn, loss_combiner_fn,
     return init_fn, update_fn, evaluate
 
 def per_sample_log_density(
-    model, model_args, model_kwargs, params, per_sample_variables):
+    model, model_args, model_kwargs, params, per_sample_variables=None):
     """
     Evaluates the log_density of a model for each given sample.
 
     Similar to numpyro's `log_density`, the model is conditioned on `params` and
     then the logarithmic probability of the outcomes given in `model_args` and
-    `model_kwargs` are computed.
-    However, all sampled variables are understood to align different samples
-    along the first axis (whether in model_args or params). If, for any
-    particular, variable, the first axis has size `num_samples`, it will be
-    understood as relating directly to that sample and the corresponding
-    probabilities will be treated separately per sample. If the variable has
-    less than `num_samples` on the first axis, its log probability is summed up
-    in total and then distributed over the samples.
-    
-    The result is a vector of corresponding length giving the log probability
-    for each sample. Summing over the output vector gives the same result as
-    numpyro's `log_density` function.
+    `model_kwargs` are computed. The result is a vector giving the log
+    probability for each sample. Summing over the output vector gives the same
+    result as numpyro's `log_density` function.
+
+    Random variables specified by name in `per_sample_variables` are
+    understood to align different samples along the first axis, each of which
+    will contribute only to the loss term of the corresponding item in the
+    output.
+
+    All other random variables are interepreted as 'global' and their
+    probability contribution will be divivded evenly over the output cells.
+
+    If `per_sample_variables` is empty or none of the random variables of the
+    model is contained in it, the output will be a scalar giving the total loss
+    and thus identical to that of numpyro's `log_density`.    
 
     :param model: The model for which to evaluate the 
     :param model_args: arguments for calling the model function
@@ -249,12 +258,13 @@ def per_sample_log_density(
     model_trace = trace(model).get_trace(*model_args, **model_kwargs)
 
     # determine num_samples from first encountered sample variable
-    num_samples = None
-    for site in model_trace.values():
-        if site['name'] in per_sample_variables:
-            assert(len(site['value'].shape)>0)
-            num_samples = site['value'].shape[0]
-            break
+    num_samples = 1 # 1 is default in case no site is in per_sample_variables
+    if per_sample_variables is not None:
+        for site in model_trace.values():
+            if site['name'] in per_sample_variables:
+                assert(len(site['value'].shape)>0)
+                num_samples = site['value'].shape[0]
+                break
 
     # helper function to sum per sample and not crash when the axes do not align
     def axis_aware_per_sample_sum(x, name):
@@ -263,7 +273,7 @@ def per_sample_log_density(
                 "per_sample_log_density. too many axes: {}".format(x.shape))
         if len(x.shape) < 2:
             x = x.reshape(-1, 1)
-        if name in per_sample_variables:
+        if per_sample_variables is not None and name in per_sample_variables:
             assert(x.shape[0] == num_samples)
             return np.sum(x, axis=1)
         else:
@@ -282,14 +292,17 @@ def per_sample_log_density(
 
 
 def per_sample_elbo(
-    param_map, per_sample_variables, model, guide,
-    model_args, guide_args, kwargs):
+    param_map, model, guide, model_args, guide_args, kwargs, 
+    per_sample_variables=None):
     """
     Per-sample version of the most basic implementation of the Evidence
     Lower Bound, which is the fundamental objective in Variational Inference.
 
     Returns a vector of per-sample loss contributions instead of a total loss
-    scalar. Otherwise identical to numpyro's `elbo`.
+    scalar. Otherwise identical to numpyro's `elbo`. If the
+    `per_sample_variables` parameter is None or none of the random variables
+    occuring in model or guide are contained in it, the output will be a scalar
+    holding the total elbo loss and thus identical to the output of `elbo`.
 
     :param dict param_map: dictionary of current parameter values keyed by site
         name.
@@ -306,6 +319,7 @@ def per_sample_elbo(
     :return: negative of the Evidence Lower Bound (ELBo) per sample to be
         minimized.
     """
+
     guide_log_density, guide_trace = per_sample_log_density(
         guide, guide_args, kwargs, param_map, per_sample_variables
     )
@@ -313,6 +327,19 @@ def per_sample_elbo(
         replay(model, guide_trace), model_args, kwargs, param_map, 
         per_sample_variables
     )
+
+    # note(lumip): If the guide only contains global random variables
+    #   that do not directly contribute to per-sample probability (i.e. are not
+    #   contained in per_sample_variables),
+    #   guide_log_density will be a scalar holding the total loss contribution
+    #   of the guide instead of a vector holding per-sample contributions.
+    #   In this case we have to divide it by the number of samples to get the
+    #   correct per-sample elbo
+    assert(len(model_log_density.shape)==1)
+    assert(len(guide_log_density.shape)==1)
+    if guide_log_density.shape[0] == 1:
+        guide_log_density /= model_log_density.shape[0]
+
     elbo = model_log_density - guide_log_density
     # Return (-elbo) since by convention we do gradient descent on a loss and
     # the ELBO is a lower bound that needs to be maximized.
