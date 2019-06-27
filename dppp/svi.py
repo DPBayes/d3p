@@ -263,8 +263,7 @@ def per_example_log_density(
     if per_example_variables is not None:
         for site in model_trace.values():
             if site['name'] in per_example_variables:
-                assert(len(site['value'].shape)>0)
-                num_examples = site['value'].shape[0]
+                num_examples = np.atleast_1d(site['value']).shape[0]
                 break
 
     # helper function to sum a random variable according to whether it has
