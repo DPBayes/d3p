@@ -187,6 +187,9 @@ def iter_dataset(dset, batch_size=None, split='train', rng=None):
 def load_dataset(dset, batch_size=None, split='train'):
     """Loads a given dataset and essentially provides a batch iterator function.
 
+    The batches are guaranteed to always be of size batch_size. If the number of
+    items in the data set is not evenly divisible by batch_size, some elements
+    are left out of the batchification.
     
     :return: tuple (init_fn: () -> (num_batches, dataset_sample_indices), get_batch: (i, dataset_sample_indices) -> batch
         init_fn() computes the number of batches and a list of (shuffled) indices of the data set
@@ -198,6 +201,19 @@ def load_dataset(dset, batch_size=None, split='train'):
     return batchify_data(arrays, batch_size)
 
 def batchify_data(arrays, batch_size):
+    """Returns functions to fetch (randomized) batches of a given dataset
+
+    The batches are guaranteed to always be of size batch_size. If the number of
+    items in the data set is not evenly divisible by batch_size, some elements
+    are left out of the batchification.
+
+    :param arrays: Tuple of arrays to be batchified. All arrays must have the
+        same length on the first axis.
+    :param batch_size: Size of the batches
+    :return: tuple (init_fn: () -> (num_batches, dataset_sample_indices), get_batch: (i, dataset_sample_indices) -> batch
+        init_fn() computes the number of batches and a list of (shuffled) indices of the data set
+        get_batch() returns the next batch_size amount of items from the data set as specified in dataset_sample_indices
+    """
     num_records = len(arrays[0])
     idxs = np.arange(num_records)
     if not batch_size:
