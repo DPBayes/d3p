@@ -1,5 +1,4 @@
-"""Logistic regression example from numpyro.
-
+"""Logistic regression example.
 """
 
 import os
@@ -22,52 +21,106 @@ from jax.random import PRNGKey
 import jax
 
 import numpyro.distributions as dist
-from numpyro.handlers import param, sample
+from numpyro.handlers import param, sample, seed, substitute
 
 from dppp.svi import per_example_elbo, svi
 
 from datasets import batchify_data
 
-def model(batch_X, batch_y, **kwargs):
-    """Defines the generative probabilistic model: p(x|z)p(z)
+
+def model(batch_X, batch_y=None):
+    """Defines the generative probabilistic model: p(y|z,X)p(z)
 
     The model is conditioned on the observed data
     :param batch_X: a batch of predictors
     :param batch_y: a batch of observations
-    :param other keyword arguments: are accepted but ignored
     """
-    z_dim = batch_X.shape[1]
+    z_dim = np.atleast_2d(batch_X).shape[1]
     z_w = sample('w', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior is N(0,I)
     z_intercept = sample('intercept', dist.Normal(0,1)) # prior is N(0,1)
     logits = batch_X.dot(z_w)+z_intercept
     return sample('obs', dist.Bernoulli(logits=logits), obs=batch_y)
 
-def guide(batch_X, batch_y, z_dim):
+
+def guide(batch_X, batch_y=None):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
     """
     # note(lumip): we are interested in the posterior of w and intercept
     #   so.. like this then?
+    z_dim = np.atleast_2d(batch_X).shape[1]
+
     z_w_loc = param("w_loc", np.zeros((z_dim,)))
     z_w_std = np.exp(param("w_std_log", np.zeros((z_dim,))))
     z_w = sample('w', dist.Normal(z_w_loc, z_w_std))
+
     z_intercept_loc = param("intercept_loc", 0.)
     z_interpet_std = np.exp(param("intercept_std_log", 0.))
     z_intercept = sample('intercept', dist.Normal(z_intercept_loc, z_interpet_std))
+
     return (z_w, z_intercept)
+
 
 def create_toy_data(N, d):
     ## Create some toy data
     onp.random.seed(123)
 
-    w_true = onp.random.randn(d)
-    intercept_true = onp.random.randn()
+    w_true = np.array(onp.random.randn(d))
+    intercept_true = np.array(onp.random.randn())
 
     X = np.array(onp.random.randn(N, d))
 
     logits_true = X.dot(w_true)+intercept_true
     sigmoid = lambda x : 1./(1.+onp.exp(-x)) # todo(lumip): also defined in other example. move it to utils?
     y = 1.*(sigmoid(logits_true)>onp.random.rand(N))
+
+    # note(lumip): workaround! np.array( ) of jax 0.1.35 (required by
+    #   numpyro 0.1.0) does not transform incoming numpy arrays into its
+    #   internal representation, which can lead to an exception being thrown
+    #   if any of the affected arrays find their way into a jit'ed function.
+    #   This is fixed in the current master branch of jax but due to numpyro
+    #   we cannot currently benefit from that.
+    # todo: remove device_put once sufficiently high version number of jax is
+    #   present
+    device_put = jit(lambda x: x)
+    X = device_put(X)
+    y = device_put(y)
+    w_true = device_put(w_true)
+    intercept_true = device_put(intercept_true)
+
     return X, y, w_true, intercept_true
+
+
+def estimate_accuracy_fixed_params(X, y, w, intercept, rng, num_iterations=1):
+    rngs = jax.random.split(rng, num_iterations)
+    fixed_model = substitute(model, {'w': w, 'intercept': intercept})
+
+    def body_fn(rng):
+        y_test = seed(fixed_model, rng)(X)
+        hits = (y_test == y)
+        accuracy = np.average(hits)
+        return accuracy
+
+    accuracies = jax.vmap(body_fn)(rngs)
+    return np.average(accuracies)
+
+
+def estimate_accuracy(X, y, params, rng, num_iterations=1):
+
+    rngs = jax.random.split(rng, num_iterations)
+
+    def body_fn(rng):
+        w_rng, b_rng, acc_rng = jax.random.split(rng, 3)
+
+        w = dist.Normal(params['w_loc'], np.exp(params['w_std_log'])).sample(w_rng)
+        b = dist.Normal(params['intercept_loc'], np.exp(params['intercept_std_log'])).sample(b_rng)
+        y_test = substitute(seed(model, acc_rng), {'w': w, 'intercept': b})(X)
+        hits = (y_test == y)
+        accuracy = np.average(hits)
+        return accuracy
+
+    accuracies = jax.vmap(body_fn)(rngs)
+    return np.average(accuracies)
+
 
 def main(args):
     X, y, w_true, intercept_true = create_toy_data(args.num_samples, args.dimensions)
@@ -80,7 +133,7 @@ def main(args):
     combined_loss = np.sum
     svi_init, svi_update, svi_eval = svi(
         model, guide, per_example_loss, combined_loss, opt_init, opt_update, 
-        get_params, per_example_variables={'obs'}, z_dim=args.dimensions
+        get_params, per_example_variables={'obs'}
     )
 
     svi_update = jit(svi_update)
@@ -108,19 +161,29 @@ def main(args):
         loss /= num_batch
         return loss, opt_state, rng
 
-    
     @jit
     def eval_test(opt_state, rng, data_idx, num_batch):
-        def body_fn(i, val):
-            loss_sum, rng = val
-            batch = train_fetch(i, data_idx)
-            loss = svi_eval(opt_state, rng, batch, batch) / len(batch[0])
-            loss_sum += loss
-            return loss_sum, rng
+        params = get_params(opt_state)
 
-        loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
+        def body_fn(i, val):
+            loss_sum, acc_sum, rng = val
+
+            batch = train_fetch(i, data_idx)
+            batch_X, batch_Y = batch
+            rng, eval_rng, acc_rng = jax.random.split(rng, 3)
+
+            loss = svi_eval(opt_state, eval_rng, batch, batch) / len(batch_X)
+            loss_sum += loss
+
+            acc = estimate_accuracy(batch_X, batch_Y, params, acc_rng, 10)
+            acc_sum += acc
+
+            return loss_sum, acc_sum, rng
+
+        loss, acc, _ = lax.fori_loop(0, num_batch, body_fn, (0., 0., rng))
         loss = loss / num_batch
-        return loss
+        acc = acc / num_batch
+        return loss, acc
 
 	## Train model
     for i in range(args.num_epochs):
@@ -132,31 +195,36 @@ def main(args):
             opt_state, rng, train_idx, num_train
         )
 
-        # computing loss over training data (for now?)
-        test_loss = eval_test(
-            opt_state, test_rng, train_idx, num_train
-        )
-
-        if (i % 100) == 0:
-            print("Epoch {}: loss = {} ({:.2f} s.)".format(
-                i, test_loss, time.time() - t_start
+        if (i % (args.num_epochs//10)) == 0:
+            # computing loss over training data (for now?)
+            test_loss, test_acc = eval_test(
+                opt_state, test_rng, train_idx, num_train
+            )
+            print("Epoch {}: loss = {}, acc = {} ({:.2f} s.)".format(
+                i, test_loss, test_acc, time.time() - t_start
             ))
-            params = get_params(opt_state)
-            print("w_loc: {}".format(params['w_loc']))
-            print("w_std: {}".format(np.exp(params['w_std_log'])))
 
     params = get_params(opt_state)
-    print("\tw_loc: {}\n\texpected: {}\n\terror: {}".format(params['w_loc'], w_true, np.linalg.norm(params['w_loc']-w_true)))
-    print("\tw_std: {}".format(np.exp(params['w_std_log'])))
-    print("\tintercept_loc: {}\n\texpected: {}\n\terror: {}".format(params['intercept_loc'], intercept_true, np.abs(params['intercept_loc']-intercept_true)))
-    print("\tintercept_std: {}".format(np.exp(params['intercept_std_log'])))
+    print("w_loc: {}\nexpected: {}\nerror: {}".format(params['w_loc'], w_true, np.linalg.norm(params['w_loc']-w_true)))
+    print("w_std: {}".format(np.exp(params['w_std_log'])))
+    print("")
+    print("intercept_loc: {}\nexpected: {}\nerror: {}".format(params['intercept_loc'], intercept_true, np.abs(params['intercept_loc']-intercept_true)))
+    print("intercept_std: {}".format(np.exp(params['intercept_std_log'])))
+    print("")
+
+    rng, rng_acc_true, rng_acc_post = jax.random.split(rng, 3)
+    acc_true = estimate_accuracy_fixed_params(X, y, w_true, intercept_true, rng_acc_true, 100)
+    acc_post = estimate_accuracy(X, y, params, rng_acc_post, 100)
+
+    print("avg accuracy:  with true parameters: {} ; with found posterior: {}\n".format(acc_true, acc_post))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', default=1000, type=int, help='number of training epochs')
+    parser.add_argument('-n', '--num-epochs', default=600, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
-    parser.add_argument('-batch-size', default=128, type=int, help='batch size')
-    parser.add_argument('-d', '--dimensions', default=10, type=int, help='data dimension')
+    parser.add_argument('-batch-size', default=200, type=int, help='batch size')
+    parser.add_argument('-d', '--dimensions', default=4, type=int, help='data dimension')
     parser.add_argument('-N', '--num-samples', default=10000, type=int, help='data samples count')
     args = parser.parse_args()
     main(args)
