@@ -57,10 +57,9 @@ def model(k, d, N, obs, _ks):
     # sigs = sample('sigmas', dist.Gamma(a0, b0))
     sigs = np.ones((k, d))
 
-    # note(lumip): even simpler: ignore thats ks are distributed in any way but just take them as given
-    # ks = sample('ks', dist.Categorical(np.broadcast_to(pis, (N,k))), obs=_ks).flatten()
-    ks = _ks.flatten()
-    assert(ks is not None)
+    if _ks is not None:
+        _ks = np.ravel(_ks) # must ensure that _ks and ks are 1d or the log-likelihood/elbo computation is incorrect
+    ks = sample('ks', dist.Categorical(np.broadcast_to(pis, (N,k))), obs=_ks).flatten()
     return sample('obs', dist.Normal(mus[ks], sigs[ks]), obs=obs)
 
 def guide(k, d, N, obs, _ks):
@@ -82,47 +81,63 @@ def guide(k, d, N, obs, _ks):
     # a0, b0 = param('a0', np.ones((k, d))*2.), param('b0', np.ones((k, d))*2.)
     # alpha = param('alpha', np.ones(k)*5)
     mus_loc = param('mus_loc', np.zeros((k, d)))
-    #mus_var = np.exp(param('mus_var_log', np.log(10*np.ones((k, d)))))
+    # mus_var = np.exp(param('mus_var_log', np.zeros((k, d))))
 
     mus = sample('mus', dist.Normal(mus_loc, 1.))
     # sigs = sample('sigmas', dist.Gamma(a0, b0))
     sigs = np.ones((k, d))
 
-    # note(lumip): ignoring sampling the ks for now.
-    # # pis = np.broadcast_to(sample('pis', dist.Dirichlet(alpha)), (N,k))
-    # pis = np.ones(k) / k
-    # pis_post = pis
+    # pis = np.broadcast_to(sample('pis', dist.Dirichlet(alpha)), (N,k))
+    pis = np.ones(k) / k
 
-    # # compute posterior probabilities for pis after seeing the data
-    # pis_post = [0.] * k
-    # for j in range(k):
-    #     log_prob_x_zj = dist.Normal(mus[j], sigs[j]).log_prob(obs)
-    #     log_prob_zj = dist.Categorical(pis).log_prob(j)
-    #     log_prob = log_prob_x_zj + log_prob_zj
-    #     pis_post[j] = log_prob
-    # assert(k == 2) # for now
-    # log_r = pis_post[0] - pis_post[1]
-    # r = np.clip(np.exp(log_r), 1e-5, 1e5)
-    # pis_post[0] = r/(1+r)
-    # pis_post[1] = 1/(1+r)
+    # compute posterior probabilities for pis after seeing the data
+    pis_post = [0.] * k
+    for j in range(k):
+        log_prob_x_zj = dist.Normal(mus[j], sigs[j]).log_prob(obs)
+        log_prob_zj = dist.Categorical(pis).log_prob(j)
+        log_prob = log_prob_x_zj + log_prob_zj
+        pis_post[j] = log_prob
+    assert(k == 2) # for now
+    # note(lumip): need to get to probabilities from logs but cannot
+    #   exponentiate due to numerial inaccuracy. workaround:
+    log_r = pis_post[0] - pis_post[1]
+    r = np.clip(np.exp(log_r), 1e-5, 1e5)
+    pis_post[0] = r/(1+r)
+    pis_post[1] = 1/(1+r)
 
-    # pis_post = np.concatenate(pis_post, axis=1)
+    pis_post = np.concatenate(pis_post, axis=1)
 
-    # ks = sample('ks', dist.Categorical(np.broadcast_to(pis_post, (N,k))), obs=_ks.flatten()).reshape(-1,)
-    ks = _ks.flatten()
-    assert(ks is not None)
-    return ks, mus, sigs
+    if _ks is not None:
+        _ks = np.ravel(_ks) # must ensure that _ks and ks are 1d or the log-likelihood/elbo computation is incorrect
+    ks = sample('ks', dist.Categorical(np.broadcast_to(pis_post, (N,k))), obs=_ks).flatten()
+    return pis, ks, mus, sigs
 
 def create_toy_data(N, k, d):
     ## Create some toy data
     onp.random.seed(122)
 
     # note(lumip): embarrasingly simple toy data
-    ks = onp.random.randint(0, 2, N)
-    X = (20.*ks-10.).reshape(-1, 1)
-    # ks = onp.random.randint(0, 2, N)
-    # X_0 = onp.random.randn((N//2, d))
-    # X_1 = onp.random.randn()
+    ks = onp.random.randint(0, k, N)
+    X = onp.zeros((N, d))
+
+    assert(k == 2)
+    mus = [-10. * onp.ones(d), 10. * onp.ones(d)]
+    sigs = [onp.sqrt(0.1), 1.]
+    for i in range(k):
+        N_i = onp.sum(ks == i)
+        X_i = mus[i] + sigs[i] * onp.random.randn(N_i, d)
+        X[ks == i] = X_i
+
+    # note(lumip): workaround! np.array( ) of jax 0.1.35 (required by
+    #   numpyro 0.1.0) does not transform incoming numpy arrays into its
+    #   internal representation, which can lead to an exception being thrown
+    #   if any of the affected arrays find their way into a jit'ed function.
+    #   This is fixed in the current master branch of jax but due to numpyro
+    #   we cannot currently benefit from that.
+    # todo: remove device_put once sufficiently high version number of jax is
+    #   present
+    device_put = jit(lambda x: x)
+    X = device_put(X)
 
     # we simply use our defined model to sample some random toy data
     # trace is used to also obtain values of the latent variables
@@ -156,7 +171,7 @@ def main(args):
     # note(lumip): fix the parameters in the models
     def fix_params(model_fn, N, k, d):
         def fixed_params_fn(obs, ks):
-            return model_fn(k, d, N, obs, ks) # note(lumip): replace ks with None in this line to try inferring the ks (latent component assignment per example)
+            return model_fn(k, d, N, obs, None) # note(lumip): replace ks with None in this line to try inferring the ks (latent component assignment per example)
         return fixed_params_fn
 
     model_fixed = fix_params(model, args.batch_size, k, d)
@@ -246,11 +261,11 @@ def main(args):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', default=10000, type=int, help='number of training epochs')
+    parser.add_argument('-n', '--num-epochs', default=20000, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
-    parser.add_argument('-batch-size', default=100, type=int, help='batch size')
+    parser.add_argument('-batch-size', default=128, type=int, help='batch size')
     parser.add_argument('-d', '--dimensions', default=1, type=int, help='data dimension')
-    parser.add_argument('-N', '--num-samples', default=1000, type=int, help='data samples count')
+    parser.add_argument('-N', '--num-samples', default=1024, type=int, help='data samples count')
     parser.add_argument('-k', '--num-components', default=2, type=int, help='number of components in the mixture model')
     args = parser.parse_args()
     main(args)
