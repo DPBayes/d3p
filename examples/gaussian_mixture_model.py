@@ -48,11 +48,10 @@ def model(k, d, N, obs, _ks):
     assert(obs is not None)
     assert(N == np.atleast_1d(obs).shape[0])
 
-    # alpha = np.ones(k)*5.
+    alpha = np.ones(k)*5.
     # a0, b0 = np.ones((k,d))*2., np.ones((k,d))*2.
 
-    # pis = np.broadcast_to(sample('pis', dist.Dirichlet(alpha)), (N,k))
-    pis = np.ones(k) / k
+    pis = np.broadcast_to(sample('pis', dist.Dirichlet(alpha)), (N,k))
     mus = sample('mus', dist.Normal(np.zeros((k, d)), 1.))
     # sigs = sample('sigmas', dist.Gamma(a0, b0))
     sigs = np.ones((k, d))
@@ -79,7 +78,7 @@ def guide(k, d, N, obs, _ks):
     assert(N == np.atleast_1d(obs).shape[0])
 
     # a0, b0 = param('a0', np.ones((k, d))*2.), param('b0', np.ones((k, d))*2.)
-    # alpha = param('alpha', np.ones(k)*5)
+    alpha = param('alpha', np.ones(k)*5)
     mus_loc = param('mus_loc', np.zeros((k, d)))
     # mus_var = np.exp(param('mus_var_log', np.zeros((k, d))))
 
@@ -87,8 +86,7 @@ def guide(k, d, N, obs, _ks):
     # sigs = sample('sigmas', dist.Gamma(a0, b0))
     sigs = np.ones((k, d))
 
-    # pis = np.broadcast_to(sample('pis', dist.Dirichlet(alpha)), (N,k))
-    pis = np.ones(k) / k
+    pis = sample('pis', dist.Dirichlet(alpha))
 
     # compute posterior probabilities for pis after seeing the data
     pis_post = [0.] * k
@@ -263,7 +261,7 @@ def main(args):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', default=20000, type=int, help='number of training epochs')
+    parser.add_argument('-n', '--num-epochs', default=100000, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
     parser.add_argument('-batch-size', default=128, type=int, help='batch size')
     parser.add_argument('-d', '--dimensions', default=1, type=int, help='data dimension')
