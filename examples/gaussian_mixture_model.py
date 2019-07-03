@@ -116,8 +116,10 @@ def create_toy_data(N, k, d):
     ## Create some toy data
     onp.random.seed(122)
 
-    # note(lumip): embarrasingly simple toy data
-    ks = onp.random.randint(0, k, N)
+    # note(lumip): toy data is imbalanced. the last component will have
+    #   more samples (in case of k==2 the split is roughly 1/3 to 2/3)
+    ks = onp.random.randint(0, k+1, N)
+    ks[ks == k] = k - 1
     X = onp.zeros((N, d))
 
     assert(k == 2)
