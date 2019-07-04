@@ -69,20 +69,15 @@ def guide(k, d, N, obs, _ks):
     :param N: number of samples (default: 1) (ignored and set to obs.shape[0] if obs is given)
     :param obs: observed samples to condition the model with (default: None)
     """
-    # todo(lumip): guide is too simple! model does not converge! fix
-    # note(lumip): various sources claim that SVI through discrete random
-    #   variables such as the choice of category (ks) is very unstable. Pyro
-    #   suggests using either conditional independence or baselines.. does
-    #   numpyro support that as well?
     assert(obs is not None)
     assert(N == np.atleast_1d(obs).shape[0])
 
     # a0, b0 = param('a0', np.ones((k, d))*2.), param('b0', np.ones((k, d))*2.)
     alpha = param('alpha', np.ones(k)*5)
     mus_loc = param('mus_loc', np.zeros((k, d)))
-    # mus_var = np.exp(param('mus_var_log', np.zeros((k, d))))
+    mus_std = np.exp(param('mus_std_log', np.zeros((k, d))))
 
-    mus = sample('mus', dist.Normal(mus_loc, 1.))
+    mus = sample('mus', dist.Normal(mus_loc, mus_std))
     # sigs = sample('sigmas', dist.Gamma(a0, b0))
     sigs = np.ones((k, d))
 
@@ -229,6 +224,10 @@ def main(args):
         loss = loss / num_batch
         return loss
 
+    with onp.errstate(divide='ignore', invalid='ignore'): # expected divide by zero warning
+        smoothed_loss_window = 1./onp.zeros(5)
+    window_idx = 0
+
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
@@ -244,9 +243,12 @@ def main(args):
             test_loss = eval_test(
                 opt_state, test_rng, train_idx, num_train
             )
+            smoothed_loss_window[window_idx] = test_loss
+            smoothed_loss = onp.nanmean(smoothed_loss_window)
+            window_idx = (window_idx + 1) % 5
 
-            print("Epoch {}: loss = {} ({:.2f} s.)".format(
-                    i, test_loss, time.time() - t_start
+            print("Epoch {}: loss = {}, smoothed loss = {} ({:.2f} s.)".format(
+                    i, test_loss, smoothed_loss, time.time() - t_start
                 ))
 
             params = get_params(opt_state)
@@ -254,6 +256,8 @@ def main(args):
 
     params = get_params(opt_state)
     print(params)
+    print("MAP estimate of mixture weights: {}".format(dist.Dirichlet(params['alpha']).mean))
+    print("MAP estimate of mixture modes  : {} (variance: {})".format(params['mus_loc'], np.exp(params['mus_std_log'])))
     # trained_model = substitute(model, params)
     # tr = trace(seed(trained_model, jax.random.PRNGKey(0))).get_trace(k, d)
     # print(dist.Dirichlet(params['alpha']).mean)
@@ -261,9 +265,9 @@ def main(args):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', default=100000, type=int, help='number of training epochs')
+    parser.add_argument('-n', '--num-epochs', default=50000, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
-    parser.add_argument('-batch-size', default=128, type=int, help='batch size')
+    parser.add_argument('-batch-size', default=32, type=int, help='batch size')
     parser.add_argument('-d', '--dimensions', default=1, type=int, help='data dimension')
     parser.add_argument('-N', '--num-samples', default=1024, type=int, help='data samples count')
     parser.add_argument('-k', '--num-components', default=2, type=int, help='number of components in the mixture model')
