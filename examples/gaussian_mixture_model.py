@@ -29,7 +29,7 @@ from numpyro.svi import elbo, svi
 
 from datasets import batchify_data
 
-def model(k, d, N, obs, _ks):
+def model(k, obs_or_shape):
     """Defines the generative probabilistic model: p(x|z)p(z)
 
     :param k: number of components in the mixture
@@ -42,35 +42,40 @@ def model(k, d, N, obs, _ks):
     # 	* mu_k ~ Normal(0, 1)
     # * sigma_k ~ Gamma(a0, b0), where a0,b0 > 0
 
-    # note(lumip): for now we use a simpler model and fix the sigmas and pis
-    #   i.e., only the means and latent selection variable need to be learned
+    # note(lumip): for now we use a simpler model and fix the sigmas
 
-    assert(obs is not None)
-    assert(N == np.atleast_1d(obs).shape[0])
+    if isinstance(obs_or_shape, tuple):
+        assert(len(obs_or_shape) == 2)
+        N, d = obs_or_shape
+        obs = None
+    else:
+        obs = obs_or_shape
+        assert(obs is not None)
+        assert(len(obs.shape) <= 2)
+        N, d = np.atleast_2d(obs).shape
 
     alpha = np.ones(k)*5.
     # a0, b0 = np.ones((k,d))*2., np.ones((k,d))*2.
 
     pis = np.broadcast_to(sample('pis', dist.Dirichlet(alpha)), (N,k))
+    assert(pis.shape == (N, k))
     mus = sample('mus', dist.Normal(np.zeros((k, d)), 1.))
     # sigs = sample('sigmas', dist.Gamma(a0, b0))
     sigs = np.ones((k, d))
 
-    if _ks is not None:
-        _ks = np.ravel(_ks) # must ensure that _ks and ks are 1d or the log-likelihood/elbo computation is incorrect
-    ks = sample('ks', dist.Categorical(np.broadcast_to(pis, (N,k))), obs=_ks).flatten()
-    return sample('obs', dist.Normal(mus[ks], sigs[ks]), obs=obs)
+    ks = sample('ks', dist.Categorical(pis)).flatten()
+    X = sample('obs', dist.Normal(mus[ks], sigs[ks]), obs=obs)
+    return X
 
-def guide(k, d, N, obs, _ks):
+def guide(k, obs):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
 
     :param k: number of components in the mixture
-    :param d: number of dimensions per data item
-    :param N: number of samples (default: 1) (ignored and set to obs.shape[0] if obs is given)
-    :param obs: observed samples to condition the model with (default: None)
+    :param obs: observed samples to condition the model with
     """
     assert(obs is not None)
-    assert(N == np.atleast_1d(obs).shape[0])
+    assert(len(obs.shape) <= 2)
+    N, d = np.atleast_2d(obs).shape
 
     # a0, b0 = param('a0', np.ones((k, d))*2.), param('b0', np.ones((k, d))*2.)
     alpha = param('alpha', np.ones(k)*5)
@@ -81,13 +86,14 @@ def guide(k, d, N, obs, _ks):
     # sigs = sample('sigmas', dist.Gamma(a0, b0))
     sigs = np.ones((k, d))
 
-    pis = sample('pis', dist.Dirichlet(alpha))
+    pis_prior = sample('pis', dist.Dirichlet(alpha))
 
-    # compute posterior probabilities for pis after seeing the data
+    # compute posterior probabilities of ks after seeing the data
     pis_post = [0.] * k
     for j in range(k):
-        log_prob_x_zj = dist.Normal(mus[j], sigs[j]).log_prob(obs)
-        log_prob_zj = dist.Categorical(pis).log_prob(j)
+        log_prob_x_zj = np.sum(dist.Normal(mus[j], sigs[j]).log_prob(obs), axis=1).flatten()
+        assert(log_prob_x_zj.shape == (N,))
+        log_prob_zj = dist.Categorical(pis_prior).log_prob(j)
         log_prob = log_prob_x_zj + log_prob_zj
         pis_post[j] = log_prob
     assert(k == 2) # for now
@@ -98,12 +104,12 @@ def guide(k, d, N, obs, _ks):
     pis_post[0] = r/(1+r)
     pis_post[1] = 1/(1+r)
 
-    pis_post = np.concatenate(pis_post, axis=1)
+    pis_post = np.stack(pis_post, axis=1)
+    # we require to choose a ks for each example. ensure that 
+    assert(pis_post.shape == (N, k))
 
-    if _ks is not None:
-        _ks = np.ravel(_ks) # must ensure that _ks and ks are 1d or the log-likelihood/elbo computation is incorrect
-    ks = sample('ks', dist.Categorical(np.broadcast_to(pis_post, (N,k))), obs=_ks).flatten()
-    return pis, ks, mus, sigs
+    ks = sample('ks', dist.Categorical(pis_post)).flatten()
+    return pis_post, ks, mus, sigs
 
 def create_toy_data(N, k, d):
     ## Create some toy data
@@ -134,20 +140,6 @@ def create_toy_data(N, k, d):
     device_put = jit(lambda x: x)
     X = device_put(X)
 
-    # we simply use our defined model to sample some random toy data
-    # trace is used to also obtain values of the latent variables
-    # m = seed(model, rng)
-    # tr = trace(m).get_trace(k, d, N)
-    # pis_true = tr['pis']['value']
-    # mus_true = tr['mus']['value']
-    # sigs_true = tr['sigmas']['value']
-    # ks_true = tr['ks']['value']
-    # X = tr['obs']['value']
-
-    # latent_vals = (pis_true, ks_true, mus_true, sigs_true)
-    # print(pis_true)
-    # print(ks_true[10])
-    # print("")
     latent_vals = (ks,)
     return X, latent_vals
 
@@ -158,19 +150,19 @@ def main(args):
 
     X, latent_vals = create_toy_data(N, k, d)
     ks = latent_vals[0]
-    train_init, train_fetch = batchify_data((X, ks), args.batch_size)
+    train_init, train_fetch = batchify_data((X,), args.batch_size)
 
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
     # note(lumip): fix the parameters in the models
-    def fix_params(model_fn, N, k, d):
-        def fixed_params_fn(obs, ks):
-            return model_fn(k, d, N, obs, None) # note(lumip): replace ks with None in this line to try inferring the ks (latent component assignment per example)
+    def fix_params(model_fn, k):
+        def fixed_params_fn(obs):
+            return model_fn(k, obs)
         return fixed_params_fn
 
-    model_fixed = fix_params(model, args.batch_size, k, d)
-    guide_fixed = fix_params(guide, args.batch_size, k, d)
+    model_fixed = fix_params(model, k)
+    guide_fixed = fix_params(guide, k)
 
     # per_example_loss = per_example_elbo
     # combined_loss = np.sum
@@ -258,17 +250,13 @@ def main(args):
     print(params)
     print("MAP estimate of mixture weights: {}".format(dist.Dirichlet(params['alpha']).mean))
     print("MAP estimate of mixture modes  : {} (variance: {})".format(params['mus_loc'], np.exp(params['mus_std_log'])))
-    # trained_model = substitute(model, params)
-    # tr = trace(seed(trained_model, jax.random.PRNGKey(0))).get_trace(k, d)
-    # print(dist.Dirichlet(params['alpha']).mean)
-    # print(tr['pis']['value'])
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
     parser.add_argument('-n', '--num-epochs', default=50000, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
     parser.add_argument('-batch-size', default=32, type=int, help='batch size')
-    parser.add_argument('-d', '--dimensions', default=1, type=int, help='data dimension')
+    parser.add_argument('-d', '--dimensions', default=2, type=int, help='data dimension')
     parser.add_argument('-N', '--num-samples', default=1024, type=int, help='data samples count')
     parser.add_argument('-k', '--num-components', default=2, type=int, help='number of components in the mixture model')
     args = parser.parse_args()
