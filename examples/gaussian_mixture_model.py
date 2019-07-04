@@ -275,6 +275,31 @@ def main(args):
     print("MAP estimate of mixture weights: {}".format(dist.Dirichlet(params['alpha']).mean))
     print("MAP estimate of mixture modes  : {} (variance: {})".format(params['mus_loc'], np.exp(params['mus_std_log'])))
 
+    # getting accuracy score for attributing data to the mixture components
+    # based on the learned model
+    original_assignment = latent_vals[0]
+    original_modes = latent_vals[1]
+    # we first map our true modes to the ones learned in the model using the
+    # log posterior for ks
+    mode_assignment_posterior = compute_assignment_log_posterior(k, original_modes, params['mus_loc'], np.ones((k, d)), dist.Dirichlet(params['alpha']).mean)
+    mode_map = np.argmax(mode_assignment_posterior, axis=0)._value
+    # a potential problem could be that mode_map might not be bijective, skewing
+    # the results of the mapping. we build the inverse map and use identity
+    # mapping as a base to counter that
+    inv_mode_map = {j:j for j in range(k)}
+    inv_mode_map.update({mode_map[j]:j for j in range(k)})
+    
+    # we next obtain the assignments for the data according to the model and
+    # pass them through the inverse map we just build
+    post_data_assignment = compute_assignment_log_posterior(k, X, params['mus_loc'], np.ones((k, d)), dist.Dirichlet(params['alpha']).mean)
+    post_data_assignment = np.argmax(post_data_assignment, axis=0)
+    remapped_data_assignment = np.array([inv_mode_map[j] for j in post_data_assignment._value])
+
+    # finally, we can compare the results with the original assigments and compute
+    # the accuracy
+    acc = np.sum(original_assignment == remapped_data_assignment)/X.shape[0]
+    print("assignment accuracy: {}".format(acc))
+    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
     parser.add_argument('-n', '--num-epochs', default=10000, type=int, help='number of training epochs')
