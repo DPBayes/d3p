@@ -54,7 +54,7 @@ def model(k, obs_or_shape):
         assert(len(obs.shape) <= 2)
         N, d = np.atleast_2d(obs).shape
 
-    alpha = np.ones(k)*5.
+    alpha = np.ones(k)*0.3
     # a0, b0 = np.ones((k,d))*2., np.ones((k,d))*2.
 
     pis = np.broadcast_to(sample('pis', dist.Dirichlet(alpha)), (N,k))
@@ -67,6 +67,42 @@ def model(k, obs_or_shape):
     X = sample('obs', dist.Normal(mus[ks], sigs[ks]), obs=obs)
     return X
 
+def compute_assignment_log_posterior(k, obs, mus, sigs, pis_prior):
+    N = np.atleast_1d(obs).shape[0]
+
+    ks_log_post = [None] * k
+    for j in range(k):
+        log_prob_x_zj = np.sum(dist.Normal(mus[j], sigs[j]).log_prob(obs), axis=1).flatten()
+        assert(log_prob_x_zj.shape == (N,))
+        log_prob_zj = dist.Categorical(pis_prior).log_prob(j)
+        log_prob = log_prob_x_zj + log_prob_zj
+        ks_log_post[j] = log_prob
+
+    ks_log_post = np.stack(ks_log_post, axis=0)
+    return ks_log_post
+
+def estimate_pis(assignment_log_posterior):
+    # essentially pis = |E[p(ks)] so we set pis = p(ks)
+    # note(lumip): need to get to probabilities from logs probabilities but we
+    #   cannot exponentiate directly due to numerical inaccuracy. workaround:
+    # pis_post = [None] * k
+    # for j in range(k):
+    #     log_r = ks_log_post - ks_log_post[j]
+    #     r = np.clip(np.exp(log_r), 1e-5, 1e5)
+    #     pis_post[j] = 1./np.sum(r, axis=0)
+    ks_log_post = assignment_log_posterior
+    k = assignment_log_posterior.shape[0]
+
+    pis_post = [None] * k
+    for j in range(k):
+        log_r = ks_log_post - ks_log_post[j]
+        r = np.clip(np.exp(log_r), 1e-5, 1e5)
+        pis_post[j] = 1./np.sum(r, axis=0)
+
+    pis_post = np.stack(pis_post, axis=1)
+    return pis_post
+
+
 def guide(k, obs):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
 
@@ -78,7 +114,7 @@ def guide(k, obs):
     N, d = np.atleast_2d(obs).shape
 
     # a0, b0 = param('a0', np.ones((k, d))*2.), param('b0', np.ones((k, d))*2.)
-    alpha = param('alpha', np.ones(k)*5)
+    alpha = param('alpha', np.ones(k)*0.3)
     mus_loc = param('mus_loc', np.zeros((k, d)))
     mus_std = np.exp(param('mus_std_log', np.zeros((k, d))))
 
@@ -89,23 +125,11 @@ def guide(k, obs):
     pis_prior = sample('pis', dist.Dirichlet(alpha))
 
     # compute posterior probabilities of ks after seeing the data
-    pis_post = [0.] * k
-    for j in range(k):
-        log_prob_x_zj = np.sum(dist.Normal(mus[j], sigs[j]).log_prob(obs), axis=1).flatten()
-        assert(log_prob_x_zj.shape == (N,))
-        log_prob_zj = dist.Categorical(pis_prior).log_prob(j)
-        log_prob = log_prob_x_zj + log_prob_zj
-        pis_post[j] = log_prob
-    assert(k == 2) # for now
-    # note(lumip): need to get to probabilities from logs but cannot
-    #   exponentiate due to numerial inaccuracy. workaround:
-    log_r = pis_post[0] - pis_post[1]
-    r = np.clip(np.exp(log_r), 1e-5, 1e5)
-    pis_post[0] = r/(1+r)
-    pis_post[1] = 1/(1+r)
+    ks_log_post = compute_assignment_log_posterior(k, obs, mus, sigs, pis_prior)
 
-    pis_post = np.stack(pis_post, axis=1)
-    # we require to choose a ks for each example. ensure that 
+    # from ks posterior probabilities to pis
+    pis_post = estimate_pis(ks_log_post)
+    # we require a ks for each example. ensure that pis is of correct shape
     assert(pis_post.shape == (N, k))
 
     ks = sample('ks', dist.Categorical(pis_post)).flatten()
@@ -115,15 +139,14 @@ def create_toy_data(N, k, d):
     ## Create some toy data
     onp.random.seed(122)
 
-    # note(lumip): toy data is imbalanced. the last component will have
-    #   more samples (in case of k==2 the split is roughly 1/3 to 2/3)
+    # note(lumip): toy data is imbalanced. the last component has
+    #   twice as many samples as the others
     ks = onp.random.randint(0, k+1, N)
     ks[ks == k] = k - 1
     X = onp.zeros((N, d))
 
-    assert(k == 2)
-    mus = [-10. * onp.ones(d), 10. * onp.ones(d)]
-    sigs = [onp.sqrt(0.1), 1.]
+    mus = [-10. * onp.ones(d), 10. * onp.ones(d), -2. * onp.ones(d)]
+    sigs = [onp.sqrt(0.1), 1., onp.sqrt(0.1)]
     for i in range(k):
         N_i = onp.sum(ks == i)
         X_i = mus[i] + sigs[i] * onp.random.randn(N_i, d)
@@ -139,8 +162,10 @@ def create_toy_data(N, k, d):
     #   present
     device_put = jit(lambda x: x)
     X = device_put(X)
+    mus = np.array(mus)
+    sigs = np.array(sigs)
 
-    latent_vals = (ks,)
+    latent_vals = (ks, mus, sigs)
     return X, latent_vals
 
 def main(args):
@@ -149,7 +174,6 @@ def main(args):
     d = args.dimensions
 
     X, latent_vals = create_toy_data(N, k, d)
-    ks = latent_vals[0]
     train_init, train_fetch = batchify_data((X,), args.batch_size)
 
     ## Init optimizer and training algorithms
@@ -250,14 +274,14 @@ def main(args):
     print(params)
     print("MAP estimate of mixture weights: {}".format(dist.Dirichlet(params['alpha']).mean))
     print("MAP estimate of mixture modes  : {} (variance: {})".format(params['mus_loc'], np.exp(params['mus_std_log'])))
-    
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', default=50000, type=int, help='number of training epochs')
+    parser.add_argument('-n', '--num-epochs', default=10000, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
     parser.add_argument('-batch-size', default=32, type=int, help='batch size')
     parser.add_argument('-d', '--dimensions', default=2, type=int, help='data dimension')
     parser.add_argument('-N', '--num-samples', default=1024, type=int, help='data samples count')
-    parser.add_argument('-k', '--num-components', default=2, type=int, help='number of components in the mixture model')
+    parser.add_argument('-k', '--num-components', default=3, type=int, help='number of components in the mixture model')
     args = parser.parse_args()
     main(args)
