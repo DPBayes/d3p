@@ -1,5 +1,4 @@
-"""Logistic regression example from numpyro.
-
+"""Gaussian mixture model example.
 """
 
 import os
@@ -34,9 +33,8 @@ def model(k, obs_or_shape):
     """Defines the generative probabilistic model: p(x|z)p(z)
 
     :param k: number of components in the mixture
-    :param d: number of dimensions per data item
-    :param N: number of samples (default: 1) (ignored and set to obs.shape[0] if obs is given)
-    :param obs: observed samples to condition the model with (default: None)
+    :param obs_or_shape: Either a jax.numpy array giving observed samples
+        or a 2-tuple giving the shape of the data the sample.
     """
     # f(x) = sum_k pi_k * phi(x; mu_k, sigma_k^2), where phi denotes Gaussian pdf
     #   * pi_k ~ Dirichlet(alpha), where alpha = (0.3, 0.3, ..., 0.3) \in R_+^k
@@ -186,9 +184,10 @@ def create_toy_data(N, k, d):
 def main(args):
     N = args.num_samples
     k = args.num_components
+    k_gen = args.num_components_generated
     d = args.dimensions
 
-    X, latent_vals = create_toy_data(N, k, d)
+    X, latent_vals = create_toy_data(N, k_gen, d)
     train_init, train_fetch = batchify_data((X,), args.batch_size)
 
     ## Init optimizer and training algorithms
@@ -321,5 +320,6 @@ if __name__ == "__main__":
     parser.add_argument('-d', '--dimensions', default=2, type=int, help='data dimension')
     parser.add_argument('-N', '--num-samples', default=2048, type=int, help='data samples count')
     parser.add_argument('-k', '--num-components', default=3, type=int, help='number of components in the mixture model')
+    parser.add_argument('-K', '--num-components-generated', default=3, type=int, help='number of components in generated data')
     args = parser.parse_args()
     main(args)
