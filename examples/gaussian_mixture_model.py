@@ -38,11 +38,9 @@ def model(k, obs_or_shape):
     :param obs: observed samples to condition the model with (default: None)
     """
     # f(x) = sum_k pi_k * phi(x; mu_k, sigma_k^2), where phi denotes Gaussian pdf
-    # 	* pi_k ~ Dirichlet(alpha), where alpha \in R_+^k
-    # 	* mu_k ~ Normal(0, 1)
-    # * sigma_k ~ Gamma(a0, b0), where a0,b0 > 0
-
-    # note(lumip): for now we use a simpler model and fix the sigmas
+    #   * pi_k ~ Dirichlet(alpha), where alpha = (0.3, 0.3, ..., 0.3) \in R_+^k
+    #   * mu_k ~ Normal(0, (10*I)^2)
+    #   * sigma_k ~ Gamma(a0, b0), where a0 = b0 = 0.5 > 0
 
     if isinstance(obs_or_shape, tuple):
         assert(len(obs_or_shape) == 2)
@@ -55,13 +53,13 @@ def model(k, obs_or_shape):
         N, d = np.atleast_2d(obs).shape
 
     alpha = np.ones(k)*0.3
-    # a0, b0 = np.ones((k,d))*2., np.ones((k,d))*2.
+    a0, b0 = np.ones((k,1))*.5, np.ones((k,1))*.5
+
+    mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
+    sigs = sample('sigmas', dist.Gamma(a0, b0))
 
     pis = np.broadcast_to(sample('pis', dist.Dirichlet(alpha)), (N,k))
     assert(pis.shape == (N, k))
-    mus = sample('mus', dist.Normal(np.zeros((k, d)), 1.))
-    # sigs = sample('sigmas', dist.Gamma(a0, b0))
-    sigs = np.ones((k, d))
 
     ks = sample('ks', dist.Categorical(pis)).flatten()
     X = sample('obs', dist.Normal(mus[ks], sigs[ks]), obs=obs)
@@ -113,14 +111,13 @@ def guide(k, obs):
     assert(len(obs.shape) <= 2)
     N, d = np.atleast_2d(obs).shape
 
-    # a0, b0 = param('a0', np.ones((k, d))*2.), param('b0', np.ones((k, d))*2.)
+    a0, b0 = param('a0', np.ones((k, 1))*.5), param('b0', np.ones((k, 1))*.5)
     alpha = param('alpha', np.ones(k)*0.3)
     mus_loc = param('mus_loc', np.zeros((k, d)))
     mus_std = np.exp(param('mus_std_log', np.zeros((k, d))))
 
     mus = sample('mus', dist.Normal(mus_loc, mus_std))
-    # sigs = sample('sigmas', dist.Gamma(a0, b0))
-    sigs = np.ones((k, d))
+    sigs = sample('sigmas', dist.Gamma(a0, b0))
 
     pis_prior = sample('pis', dist.Dirichlet(alpha))
 
@@ -273,7 +270,8 @@ def main(args):
     params = get_params(opt_state)
     print(params)
     print("MAP estimate of mixture weights: {}".format(dist.Dirichlet(params['alpha']).mean))
-    print("MAP estimate of mixture modes  : {} (variance: {})".format(params['mus_loc'], np.exp(params['mus_std_log'])))
+    print("MAP estimate of mixture modes  : {} (stdev: {})".format(params['mus_loc'], np.exp(params['mus_std_log'])))
+    print("MAP estimate of mixture std    : {}".format(dist.Gamma(params['a0'], params['b0']).mean))
 
     # getting accuracy score for attributing data to the mixture components
     # based on the learned model
@@ -306,7 +304,7 @@ if __name__ == "__main__":
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
     parser.add_argument('-batch-size', default=32, type=int, help='batch size')
     parser.add_argument('-d', '--dimensions', default=2, type=int, help='data dimension')
-    parser.add_argument('-N', '--num-samples', default=1024, type=int, help='data samples count')
+    parser.add_argument('-N', '--num-samples', default=2048, type=int, help='data samples count')
     parser.add_argument('-k', '--num-components', default=3, type=int, help='number of components in the mixture model')
     args = parser.parse_args()
     main(args)
