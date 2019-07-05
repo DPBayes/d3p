@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(sys.path[0]))
 
 import argparse
 import time
+from functools import partial
 
 import matplotlib.pyplot as plt
 import numpy as onp
@@ -55,49 +56,64 @@ def model(k, obs_or_shape):
     alpha = np.ones(k)*0.3
     a0, b0 = np.ones((k,1))*.5, np.ones((k,1))*.5
 
+    pis = np.broadcast_to(sample('pis', dist.Dirichlet(alpha)), (N,k))
     mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
     sigs = sample('sigmas', dist.Gamma(a0, b0))
 
-    pis = np.broadcast_to(sample('pis', dist.Dirichlet(alpha)), (N,k))
     assert(pis.shape == (N, k))
+    assert(np.atleast_2d(mus).shape == (k, d))
+    assert(np.atleast_1d(sigs).shape[0] == k)
 
-    ks = sample('ks', dist.Categorical(pis)).flatten()
-    X = sample('obs', dist.Normal(mus[ks], sigs[ks]), obs=obs)
+    z = sample('z', dist.Categorical(pis)).flatten()
+    assert(z.shape == (N,))
+    X = sample('obs', dist.Normal(mus[z], sigs[z]), obs=obs)
+    assert(np.atleast_2d(X).shape == (N, d))
+
     return X
 
+@partial(jit, static_argnums=(0,))
 def compute_assignment_log_posterior(k, obs, mus, sigs, pis_prior):
+    # computes the unnormalized log-posterior for each value of assignment z
+    #   for each data point
     N = np.atleast_1d(obs).shape[0]
 
-    ks_log_post = [None] * k
-    for j in range(k):
+    def per_component_fun(j):
         log_prob_x_zj = np.sum(dist.Normal(mus[j], sigs[j]).log_prob(obs), axis=1).flatten()
-        assert(log_prob_x_zj.shape == (N,))
+        assert(np.atleast_1d(log_prob_x_zj).shape == (N,))
         log_prob_zj = dist.Categorical(pis_prior).log_prob(j)
         log_prob = log_prob_x_zj + log_prob_zj
-        ks_log_post[j] = log_prob
+        assert(np.atleast_1d(log_prob).shape == (N,))
+        return log_prob
 
-    ks_log_post = np.stack(ks_log_post, axis=0)
-    return ks_log_post
+    z_log_post = jax.vmap(per_component_fun)(np.arange(k))
+    return z_log_post.T
 
+@jit
 def estimate_pis(assignment_log_posterior):
-    # essentially pis = |E[p(ks)] so we set pis = p(ks)
-    # note(lumip): need to get to probabilities from logs probabilities but we
-    #   cannot exponentiate directly due to numerical inaccuracy. workaround:
-    # pis_post = [None] * k
-    # for j in range(k):
-    #     log_r = ks_log_post - ks_log_post[j]
-    #     r = np.clip(np.exp(log_r), 1e-5, 1e5)
-    #     pis_post[j] = 1./np.sum(r, axis=0)
-    ks_log_post = assignment_log_posterior
-    k = assignment_log_posterior.shape[0]
+    # essentially: pis = |E[p(z)], so we set pis = p(z)
 
-    pis_post = [None] * k
-    for j in range(k):
-        log_r = ks_log_post - ks_log_post[j]
+    # We need to get to probabilities from log-probabilities but we
+    #   cannot exponentiate directly due to numerical inaccuracy.
+    # We exploit that log p(z_i) - log p(z_j) = log (p(z_i)/p(z_j))
+    #   ~= log (pi_i/pi_j) and sum(pis) = 1 to solve for the pis.
+    # Dealing with the ratios also solves the problem that the incoming
+    #   posterior probabilities are unnormalized.
+    # Note that we exponentiate the log-ratios, which could still lead to
+    #   numerical inaccuracies. However, we can safely clip the ratio here
+    #   without losing information (which wouldn't work for the posteriors).
+
+    N, k = np.atleast_2d(assignment_log_posterior).shape
+    z_log_post = assignment_log_posterior.T
+
+    def per_component_fun(j):
+        log_r = z_log_post - z_log_post[j]
+        assert(np.atleast_2d(log_r).shape == (k, N))
         r = np.clip(np.exp(log_r), 1e-5, 1e5)
-        pis_post[j] = 1./np.sum(r, axis=0)
+        pis_post_j = 1./np.sum(r, axis=0)
+        return pis_post_j
 
-    pis_post = np.stack(pis_post, axis=1)
+    pis_post = jax.vmap(per_component_fun, out_axes=1)(np.arange(k))
+
     return pis_post
 
 
@@ -121,33 +137,35 @@ def guide(k, obs):
 
     pis_prior = sample('pis', dist.Dirichlet(alpha))
 
-    # compute posterior probabilities of ks after seeing the data
-    ks_log_post = compute_assignment_log_posterior(k, obs, mus, sigs, pis_prior)
+    # compute posterior probabilities of latent mixture assignment z
+    #   after seeing the data
+    z_log_post = compute_assignment_log_posterior(k, obs, mus, sigs, pis_prior)
 
-    # from ks posterior probabilities to pis
-    pis_post = estimate_pis(ks_log_post)
-    # we require a ks for each example. ensure that pis is of correct shape
-    assert(pis_post.shape == (N, k))
+    # from z posterior probabilities to pis
+    pis_post = estimate_pis(z_log_post)
+    # we require a z for each example. ensure that pis is of correct shape
+    assert(np.atleast_2d(pis_post).shape == (N, k))
 
-    ks = sample('ks', dist.Categorical(pis_post)).flatten()
-    return pis_post, ks, mus, sigs
+    z = sample('z', dist.Categorical(pis_post)).flatten()
+    return pis_post, z, mus, sigs
 
 def create_toy_data(N, k, d):
     ## Create some toy data
     onp.random.seed(122)
 
-    # note(lumip): toy data is imbalanced. the last component has
-    #   twice as many samples as the others
-    ks = onp.random.randint(0, k+1, N)
-    ks[ks == k] = k - 1
+    # We create some toy data. To spice things up, it is imbalanced:
+    #   The last component has twice as many samples as the others.
+    z = onp.random.randint(0, k+1, N)
+    z[z == k] = k - 1
     X = onp.zeros((N, d))
 
+    assert(k < 4)
     mus = [-10. * onp.ones(d), 10. * onp.ones(d), -2. * onp.ones(d)]
     sigs = [onp.sqrt(0.1), 1., onp.sqrt(0.1)]
     for i in range(k):
-        N_i = onp.sum(ks == i)
+        N_i = onp.sum(z == i)
         X_i = mus[i] + sigs[i] * onp.random.randn(N_i, d)
-        X[ks == i] = X_i
+        X[z == i] = X_i
 
     # note(lumip): workaround! np.array( ) of jax 0.1.35 (required by
     #   numpyro 0.1.0) does not transform incoming numpy arrays into its
@@ -162,7 +180,7 @@ def create_toy_data(N, k, d):
     mus = np.array(mus)
     sigs = np.array(sigs)
 
-    latent_vals = (ks, mus, sigs)
+    latent_vals = (z, mus, sigs)
     return X, latent_vals
 
 def main(args):
@@ -189,7 +207,7 @@ def main(args):
     # combined_loss = np.sum
     # svi_init, svi_update, svi_eval = svi(
     #     model_fixed, guide_fixed, per_example_loss, combined_loss, opt_init,
-    #     opt_update, get_params, per_example_variables={'obs', 'ks'}
+    #     opt_update, get_params, per_example_variables={'obs', 'z'}
     # )
 
     # note(lumip): use default numpyro svi and elbo for now to get the model
@@ -237,8 +255,8 @@ def main(args):
         loss = loss / num_batch
         return loss
 
-    with onp.errstate(divide='ignore', invalid='ignore'): # expected divide by zero warning
-        smoothed_loss_window = 1./onp.zeros(5)
+    smoothed_loss_window = onp.empty(5)
+    smoothed_loss_window.fill(onp.nan)
     window_idx = 0
 
 	## Train model
@@ -264,9 +282,6 @@ def main(args):
                     i, test_loss, smoothed_loss, time.time() - t_start
                 ))
 
-            params = get_params(opt_state)
-            print(params)
-
     params = get_params(opt_state)
     print(params)
     print("MAP estimate of mixture weights: {}".format(dist.Dirichlet(params['alpha']).mean))
@@ -278,9 +293,9 @@ def main(args):
     original_assignment = latent_vals[0]
     original_modes = latent_vals[1]
     # we first map our true modes to the ones learned in the model using the
-    # log posterior for ks
+    # log posterior for z
     mode_assignment_posterior = compute_assignment_log_posterior(k, original_modes, params['mus_loc'], np.ones((k, d)), dist.Dirichlet(params['alpha']).mean)
-    mode_map = np.argmax(mode_assignment_posterior, axis=0)._value
+    mode_map = np.argmax(mode_assignment_posterior, axis=1)._value
     # a potential problem could be that mode_map might not be bijective, skewing
     # the results of the mapping. we build the inverse map and use identity
     # mapping as a base to counter that
@@ -290,7 +305,7 @@ def main(args):
     # we next obtain the assignments for the data according to the model and
     # pass them through the inverse map we just build
     post_data_assignment = compute_assignment_log_posterior(k, X, params['mus_loc'], np.ones((k, d)), dist.Dirichlet(params['alpha']).mean)
-    post_data_assignment = np.argmax(post_data_assignment, axis=0)
+    post_data_assignment = np.argmax(post_data_assignment, axis=1)
     remapped_data_assignment = np.array([inv_mode_map[j] for j in post_data_assignment._value])
 
     # finally, we can compare the results with the original assigments and compute
