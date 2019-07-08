@@ -26,6 +26,7 @@ from numpyro.handlers import param, sample, seed, substitute
 from dppp.svi import per_example_elbo, svi
 
 from datasets import batchify_data
+from util import sigmoid
 
 
 def model(batch_X, batch_y=None):
@@ -45,8 +46,9 @@ def model(batch_X, batch_y=None):
 def guide(batch_X, batch_y=None):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
     """
-    # note(lumip): we are interested in the posterior of w and intercept
-    #   so.. like this then?
+    # we are interested in the posterior of w and intercept
+    # since this is a fairly simple model, we just initialize them according
+    # to our prior believe and let the optimization handle the rest
     z_dim = np.atleast_2d(batch_X).shape[1]
 
     z_w_loc = param("w_loc", np.zeros((z_dim,)))
@@ -70,7 +72,6 @@ def create_toy_data(N, d):
     X = np.array(onp.random.randn(N, d))
 
     logits_true = X.dot(w_true)+intercept_true
-    sigmoid = lambda x : 1./(1.+onp.exp(-x)) # todo(lumip): also defined in other example. move it to utils?
     y = 1.*(sigmoid(logits_true)>onp.random.rand(N))
 
     # note(lumip): workaround! np.array( ) of jax 0.1.35 (required by
@@ -83,7 +84,6 @@ def create_toy_data(N, d):
     #   present
     device_put = jit(lambda x: x)
     X = device_put(X)
-    y = device_put(y)
     w_true = device_put(w_true)
     intercept_true = device_put(intercept_true)
 

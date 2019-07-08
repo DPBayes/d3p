@@ -24,8 +24,7 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, trace, substitute
 
-#from dppp.svi import per_example_elbo, svi
-from numpyro.svi import elbo, svi
+from dppp.svi import per_example_elbo, svi
 
 from datasets import batchify_data
 
@@ -165,16 +164,6 @@ def create_toy_data(N, k, d):
         X_i = mus[i] + sigs[i] * onp.random.randn(N_i, d)
         X[z == i] = X_i
 
-    # note(lumip): workaround! np.array( ) of jax 0.1.35 (required by
-    #   numpyro 0.1.0) does not transform incoming numpy arrays into its
-    #   internal representation, which can lead to an exception being thrown
-    #   if any of the affected arrays find their way into a jit'ed function.
-    #   This is fixed in the current master branch of jax but due to numpyro
-    #   we cannot currently benefit from that.
-    # todo: remove device_put once sufficiently high version number of jax is
-    #   present
-    device_put = jit(lambda x: x)
-    X = device_put(X)
     mus = np.array(mus)
     sigs = np.array(sigs)
 
@@ -202,18 +191,11 @@ def main(args):
     model_fixed = fix_params(model, k)
     guide_fixed = fix_params(guide, k)
 
-    # per_example_loss = per_example_elbo
-    # combined_loss = np.sum
-    # svi_init, svi_update, svi_eval = svi(
-    #     model_fixed, guide_fixed, per_example_loss, combined_loss, opt_init,
-    #     opt_update, get_params, per_example_variables={'obs', 'z'}
-    # )
-
-    # note(lumip): use default numpyro svi and elbo for now to get the model
-    #   to work
+    per_example_loss = per_example_elbo
+    combined_loss = np.sum
     svi_init, svi_update, svi_eval = svi(
-        model_fixed, guide_fixed, elbo, opt_init,
-        opt_update, get_params
+        model_fixed, guide_fixed, per_example_loss, combined_loss, opt_init,
+        opt_update, get_params, per_example_variables={'obs', 'z'}
     )
 
     svi_update = jit(svi_update)

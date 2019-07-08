@@ -26,13 +26,8 @@ from numpyro.handlers import param, sample
 from dppp.svi import per_example_elbo, svi
 
 from datasets import MNIST, load_dataset
+from util import sigmoid
 
-
-def sigmoid(x):
-    return 1 / (1 + np.exp(x))
-
-
-# TODO: move to JAX
 def _elemwise_no_params(fun, **kwargs):
     def init_fun(rng, input_shape):
         return input_shape, ()

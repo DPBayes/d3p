@@ -31,8 +31,7 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, trace, substitute
 
-#from dppp.svi import per_example_elbo, svi
-from numpyro.svi import elbo, svi
+from dppp.svi import per_example_elbo, svi
 
 from datasets import batchify_data
 from jax.scipy.special import logsumexp
@@ -48,6 +47,8 @@ from numpyro.distributions.util import (
     vec_to_tril_matrix
 )
 
+from util import softmax
+
 class MixGaus(Distribution):
     arg_constraints = {'locs': constraints.real, 'scales': constraints.positive, 'pis' : constraints.simplex}
     support = constraints.real
@@ -62,16 +63,11 @@ class MixGaus(Distribution):
             self._validate_sample(value)
         log_pis = np.log(self.pis)
         log_phis = np.array([dist.Normal(loc, scale).log_prob(value).sum(-1) for loc, scale in zip(self.locs, self.scales)]).T
-        return logsumexp(log_pis + log_phis, axis=-1).sum()
+        return logsumexp(log_pis + log_phis, axis=-1)
 
     def sample(self, *args):
         # ignoring this for now as we only care to compute the log_probability
         return 1
-
-def softmax(x):
-    y = np.max(x)
-    x_ = x-y
-    return np.exp(x_)/np.sum(np.exp(x_))
 
 def model(k, obs, _ks):
     assert(obs is not None)
@@ -109,16 +105,6 @@ def create_toy_data(N, k, d):
         X_i = mus[i] + sigs[i] * onp.random.randn(N_i, d)
         X[z == i] = X_i
 
-    # note(lumip): workaround! np.array( ) of jax 0.1.35 (required by
-    #   numpyro 0.1.0) does not transform incoming numpy arrays into its
-    #   internal representation, which can lead to an exception being thrown
-    #   if any of the affected arrays find their way into a jit'ed function.
-    #   This is fixed in the current master branch of jax but due to numpyro
-    #   we cannot currently benefit from that.
-    # todo: remove device_put once sufficiently high version number of jax is
-    #   present
-    device_put = jit(lambda x: x)
-    X = device_put(X)
     mus = np.array(mus)
     sigs = np.array(sigs)
 
@@ -147,11 +133,11 @@ def main(args):
     model_fixed = fix_params(model, k, latent_vals[0])
     guide_fixed = fix_params(guide, k, latent_vals[0])
 
-    # note(lumip): use default numpyro svi and elbo for now to get the model
-    #   to work
+    per_example_loss = per_example_elbo
+    combined_loss = np.sum
     svi_init, svi_update, svi_eval = svi(
-        model_fixed, guide_fixed, elbo, opt_init,
-        opt_update, get_params
+        model_fixed, guide_fixed, per_example_loss, combined_loss, opt_init,
+        opt_update, get_params, per_example_variables={'obs'}
     )
 
     svi_update = jit(svi_update)

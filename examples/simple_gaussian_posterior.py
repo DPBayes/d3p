@@ -72,9 +72,6 @@ def ml_estimate(obs):
 
 def create_toy_data(N, d):
     ## Create some toy data
-    # tr = trace(seed(model, jax.random.PRNGKey(int(time.time())))).get_trace(d=d, N=N)
-    # mu_true = tr['mu']['value']
-    # X = tr['obs']['value']
     mu_true = np.ones(d)
     X = substitute(seed(model, jax.random.PRNGKey(54795)), {'mu': mu_true})(d=d, N=N)
 
