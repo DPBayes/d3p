@@ -83,9 +83,9 @@ def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False)
     return value_and_grad_f
 
 
-def svi(model, guide, per_example_loss_fn, loss_combiner_fn,
+def svi(model, guide, per_example_loss_fn,
         optim_init, optim_update, get_params, per_example_variables=None,
-        **kwargs):
+        loss_combiner_fn = np.sum, **kwargs):
     """
     Stochastic Variational Inference given a per-example loss objective and a
     loss combiner function.
@@ -101,8 +101,6 @@ def svi(model, guide, per_example_loss_fn, loss_combiner_fn,
         (recognition network).
     :param per_example_loss_fn: ELBo loss, i.e. negative Evidence Lower Bound,
         to minimize, per example.
-    :param loss_combiner_fn: Function to combine the per-example loss values.
-        For ELBo this is np.sum.
     :param optim_init: initialization function returned by a JAX optimizer.
         see: :mod:`jax.experimental.optimizers`.
     :param optim_update: update function for the optimizer
@@ -110,6 +108,8 @@ def svi(model, guide, per_example_loss_fn, loss_combiner_fn,
         optimizer state.
     :param per_example_variables: Names of the variables that have per-example
         contribution to the (log) probabilities.
+    :param loss_combiner_fn: Function to combine the per-example loss values.
+        Defaults to np.sum.
     :param `**kwargs`: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     :return: tuple of `(init_fn, update_fn, evaluate)`.

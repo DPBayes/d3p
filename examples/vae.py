@@ -154,9 +154,8 @@ def main(args):
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
     per_example_loss = per_example_elbo
-    combined_loss = np.sum
     svi_init, svi_update, svi_eval = svi(
-        model, guide, per_example_loss, combined_loss, opt_init, opt_update, 
+        model, guide, per_example_loss, opt_init, opt_update, 
         get_params, per_example_variables={'obs', 'z'}, encode=encode,
         decode=decode, z_dim=args.z_dim
     )

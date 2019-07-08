@@ -88,9 +88,8 @@ def main(args):
     fixed_guide = lambda obs: guide(d=args.dimensions, N=args.batch_size, obs=obs)
 
     per_example_loss = per_example_elbo
-    combined_loss = np.sum
     svi_init, svi_update, svi_eval = svi(
-        fixed_model, fixed_guide, per_example_loss, combined_loss, opt_init, opt_update, 
+        fixed_model, fixed_guide, per_example_loss, opt_init, opt_update, 
         get_params, per_example_variables={'obs'}
     )
 

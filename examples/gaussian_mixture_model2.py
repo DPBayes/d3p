@@ -134,9 +134,8 @@ def main(args):
     guide_fixed = fix_params(guide, k, latent_vals[0])
 
     per_example_loss = per_example_elbo
-    combined_loss = np.sum
     svi_init, svi_update, svi_eval = svi(
-        model_fixed, guide_fixed, per_example_loss, combined_loss, opt_init,
+        model_fixed, guide_fixed, per_example_loss, opt_init,
         opt_update, get_params, per_example_variables={'obs'}
     )
 
