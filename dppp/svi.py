@@ -177,35 +177,35 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         # per_example_grads will be jax tree of jax np.arrays of shape
         #   [batch_size, (param_shape)] for each parameter
 
-        # flatten it out
-        flat_px_grads_tree, px_grads_tree_def = jax.tree_flatten(
-            per_example_grads
-        )
+        # if per-sample gradient manipulation is present, we apply it to
+        #   each gradient site in the tree
+        if per_example_grad_manipulation_fn:
 
-        # apply per-sample gradient manipulation, if present
-        if per_example_grad_manipulation_fn is not None:
+            # flatten it out
+            flat_px_grads_tree, px_grads_tree_def = jax.tree_flatten(
+                per_example_grads
+            )
+
+            # apply per-sample gradient manipulation, if present
             flat_px_grads_tree = jax.vmap(
                 per_example_grad_manipulation_fn, in_axes=0
             )(
                 flat_px_grads_tree
             )
-        # todo(lumip, all): by flattening the tree before passing it into
-        #   gradient manipulation, we lose all information on which value
-        #   belongs to which parameter. on the other hand, we have plain and
-        #   straightforward access to the values, which might be all we need.
-        #   think about whether that is okay or whether ps_grad_manipulation_fn
-        #   should just get the whole tree per sample to get all available
-        #   information
+            # todo(lumip, all): by flattening the tree before passing it into
+            #   gradient manipulation, we lose all information on which value
+            #   belongs to which parameter. on the other hand, we have plain and
+            #   straightforward access to the values, which might be all we need.
+            #   think about whether that is okay or whether ps_grad_manipulation_fn
+            #   should just get the whole tree per sample to get all available
+            #   information
 
-        per_example_grads = jax.tree_unflatten(
-            px_grads_tree_def, flat_px_grads_tree
-        )
+            # todo(lumip): can maybe apply gradient combination here instead of
+            #   mapping over the reconstructed tree? think about that!
 
-        # todo(lumip): can maybe apply gradient combination here instead of
-        #   mapping over the reconstructed tree? think about that!
-        
-        # if ps_grad_manipulation_fn is not None:
-        #     ps_grad_manipulation_fn()
+            per_example_grads = jax.tree_unflatten(
+                px_grads_tree_def, flat_px_grads_tree
+            )
 
         # get total loss and loss combiner jvp (forward differentiation) func
         loss_val, loss_jvp = jax.linearize(loss_combiner_fn, per_example_loss)
