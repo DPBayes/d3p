@@ -23,7 +23,7 @@ from jax.random import PRNGKey
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample
 
-from dppp.svi import per_example_elbo, svi
+from dppp.svi import per_example_elbo, svi, get_gradients_clipping_function
 
 from datasets import MNIST, load_dataset
 from example_util import sigmoid
@@ -155,30 +155,15 @@ def main(args):
 
     per_example_loss = per_example_elbo
 
-    def full_gradient_norm(list_of_gradients, ord=2):
-        ravelled = [g.ravel() for g in list_of_gradients]
-        gradients = np.concatenate(ravelled)
-        assert(len(gradients.shape) == 1)
-        norm = np.linalg.norm(gradients, ord=ord)
-        return norm
-
-    def clip_gradients(list_of_gradients, c):
-        norm = full_gradient_norm(list_of_gradients)
-        normalization_constant = 1./np.maximum(1., norm/c)
-        clipped_grads = [g*normalization_constant for g in list_of_gradients]
-        # assert(np.all(full_gradient_norm(clipped_grads)<c)) # jax doesn't like this
-        return clipped_grads
-
-    def gradient_manipulation(list_of_gradients):
-        return clip_gradients(list_of_gradients, c=300.)
-        # note(lumip): choice of c is arbitrary at the moment
-        #   in early iterations gradient norm values are typically
-        #   between 100 and 200 but in epoch 20 usually at 280 to 290
+    gradient_clipping_fn = get_gradients_clipping_function(c=300.)
+    # note(lumip): choice of c is somewhat arbitrary at the moment.
+    #   in early iterations gradient norm values are typically
+    #   between 100 and 200 but in epoch 20 usually at 280 to 290
 
     svi_init, svi_update, svi_eval = svi(
         model, guide, per_example_loss, opt_init, opt_update, 
         get_params, per_example_variables={'obs', 'z'},
-        per_example_grad_manipulation_fn=gradient_manipulation,
+        per_example_grad_manipulation_fn=gradient_clipping_fn,
         encode=encode, decode=decode, z_dim=args.z_dim
     )
 

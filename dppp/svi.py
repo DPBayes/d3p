@@ -7,6 +7,8 @@ Based on numpyro's `svi`:
 
 import os
 
+import functools
+
 import jax
 from jax import random, vjp
 import jax.numpy as np
@@ -45,6 +47,7 @@ def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False)
     each of the corresponding arguments.
   """
 
+    @functools.wraps(fun)
     def value_and_grad_f(*args, **kwargs):
         f = jax.linear_util.wrap_init(fun, kwargs)
         f_partial, dyn_args = jax.api._argnums_partial(f, argnums, args)
@@ -182,15 +185,15 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         if per_example_grad_manipulation_fn:
 
             # flatten it out
-            flat_px_grads_tree, px_grads_tree_def = jax.tree_flatten(
+            px_grads_list, px_grads_tree_def = jax.tree_flatten(
                 per_example_grads
             )
 
             # apply per-sample gradient manipulation, if present
-            flat_px_grads_tree = jax.vmap(
+            px_grads_list = jax.vmap(
                 per_example_grad_manipulation_fn, in_axes=0
             )(
-                flat_px_grads_tree
+                px_grads_list
             )
             # todo(lumip, all): by flattening the tree before passing it into
             #   gradient manipulation, we lose all information on which value
@@ -204,7 +207,7 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
             #   mapping over the reconstructed tree? think about that!
 
             per_example_grads = jax.tree_unflatten(
-                px_grads_tree_def, flat_px_grads_tree
+                px_grads_tree_def, px_grads_list
             )
 
         # get total loss and loss combiner jvp (forward differentiation) func
@@ -374,3 +377,51 @@ def per_example_elbo(
     # Return (-elbo) since by convention we do gradient descent on a loss and
     # the ELBO is a lower bound that needs to be maximized.
     return -elbo
+
+def full_norm(list_of_parts, ord=2):
+    """Computes the total norm over a list of values (of any shape) by treating
+    them as a single large vector.
+
+    :param list_of_parts: The list of values that make up the vector to compute
+        the norm over.
+    :param ord: Order of the norm. May take any value possible for
+    `numpy.linalg.norm`.
+    :return: The indicated norm over the full vector.
+    """
+    ravelled = [g.ravel() for g in list_of_parts]
+    gradients = np.concatenate(ravelled)
+    assert(len(gradients.shape) == 1)
+    norm = np.linalg.norm(gradients, ord=ord)
+    return norm
+
+def clip_gradient(list_of_gradient_parts, c):
+    """Clips the total norm of a gradient by a given value C.
+
+    The norm is computed by interpreting the given list of parts as a single
+    vector (see `full_norm`). Each entry is then scaled by the factor
+    (1/max(1, norm/C)) which effectively clips the norm to C.
+
+    :param list_of_gradient_parts: A list of values (of any shape) that make up
+        the overall gradient vector.
+    :param c: The clipping threshold C.
+    :return: Clipped gradients given in the same format/layout/shape as
+        list_of_gradient_parts.
+    """
+    norm = full_norm(list_of_gradient_parts)
+    normalization_constant = 1./np.maximum(1., norm/c)
+    clipped_grads = [g*normalization_constant for g in list_of_gradient_parts]
+    # assert(np.all(full_gradient_norm(clipped_grads)<c)) # jax doesn't like this
+    return clipped_grads
+
+def get_gradients_clipping_function(c):
+    """Factory function to obtain a gradient clipping function for a fixed
+    clipping threshold C.
+
+    :param c: The clipping threshold C.
+    :return: `clip_gradient` function with fixed threshold C. Only takes a
+        list_of_gradient_parts as argument.
+    """
+    @functools.wraps(clip_gradient)
+    def gradient_clipping_fn_inner(list_of_gradient_parts):
+        return clip_gradient(list_of_gradient_parts, c)
+    return gradient_clipping_fn_inner

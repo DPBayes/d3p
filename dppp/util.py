@@ -35,6 +35,7 @@ def map_over_secondary_dims(f):
     ]
     """
     def map_over_secondary_dims_f(T):
+        assert(len(T.shape) >= 1)
         T_ = T.reshape((T.shape[0], -1))
         Z_ = jax.vmap(f, in_axes=1)(T_)
         return Z_.reshape(T.shape[1:])
