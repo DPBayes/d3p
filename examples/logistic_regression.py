@@ -26,7 +26,7 @@ from numpyro.handlers import param, sample, seed, substitute
 from dppp.svi import per_example_elbo, svi
 
 from datasets import batchify_data
-from util import sigmoid
+from example_util import sigmoid
 
 
 def model(batch_X, batch_y=None):

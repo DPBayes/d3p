@@ -33,7 +33,6 @@ from numpyro.handlers import param, sample, seed, trace, substitute
 
 from dppp.svi import per_example_elbo, svi
 
-from datasets import batchify_data
 from jax.scipy.special import logsumexp
 from numpyro.distributions.distribution import Distribution, TransformedDistribution
 from numpyro.distributions import constraints
@@ -47,7 +46,8 @@ from numpyro.distributions.util import (
     vec_to_tril_matrix
 )
 
-from util import softmax
+from datasets import batchify_data
+from example_util import softmax
 
 class MixGaus(Distribution):
     arg_constraints = {'locs': constraints.real, 'scales': constraints.positive, 'pis' : constraints.simplex}
@@ -71,7 +71,7 @@ class MixGaus(Distribution):
 
 def model(k, obs, _ks):
     assert(obs is not None)
-    N, d = np.atleast_2d(obs).shape
+    _, d = np.atleast_2d(obs).shape
     pis = sample('pis', dist.Dirichlet(np.ones(k)))
     mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
     sigs = np.ones((k, d))
@@ -79,7 +79,7 @@ def model(k, obs, _ks):
 
 def guide(k, obs, _ks):
     assert(obs is not None)
-    N, d = np.atleast_2d(obs).shape
+    _, d = np.atleast_2d(obs).shape
     mus_loc = param('mus_loc', np.zeros((k, d)))
     mus = sample('mus', dist.Normal(mus_loc, 1.))
     sigs = np.ones((k, d))

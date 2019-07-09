@@ -26,7 +26,7 @@ from numpyro.handlers import param, sample
 from dppp.svi import per_example_elbo, svi
 
 from datasets import MNIST, load_dataset
-from util import sigmoid
+from example_util import sigmoid
 
 def _elemwise_no_params(fun, **kwargs):
     def init_fun(rng, input_shape):
@@ -187,23 +187,33 @@ def main(args):
     # preparing random number generators and loading data
     rng = PRNGKey(0)
     rng, rng_enc, rng_dec, rng_shuffle_train = random.split(rng, 4)
-    train_init, train_fetch = load_dataset(MNIST, batch_size=args.batch_size, split='train')
-    test_init, test_fetch = load_dataset(MNIST, batch_size=args.batch_size, split='test')
+    train_init, train_fetch_plain = load_dataset(MNIST, batch_size=args.batch_size, split='train')
+    test_init, test_fetch_plain = load_dataset(MNIST, batch_size=args.batch_size, split='test')
+
+    def binarize_fetch(fetch_fn, rng):
+        def train_fetch_binarized(batch_nr, idxs):
+            batch = fetch_fn(batch_nr, idxs)
+            return binarize(rng, batch[0]), batch[1]
+        return train_fetch_binarized
+
+    rng, rng_binarize_train, rng_binarize_test = random.split(rng, 3)
+    train_fetch = binarize_fetch(train_fetch_plain, rng_binarize_train)
+    test_fetch = binarize_fetch(test_fetch_plain, rng_binarize_test)
 
     # initializing model and training algorithms
     _, encoder_params = encoder_init(rng_enc, (args.batch_size, out_dim))
     _, decoder_params = decoder_init(rng_dec, (args.batch_size, args.z_dim))
     params = {'encoder': encoder_params, 'decoder': decoder_params}
 
-    rng, rng_binarize, svi_init_rng = random.split(rng, 3)
+    rng, svi_init_rng = random.split(rng, 2)
     rng_shuffle_train, rng_train_init = random.split(rng_shuffle_train, 2)
-    _, train_idx = train_init(rng=rng_train_init)
-    sample_batch = binarize(rng_binarize, train_fetch(0, train_idx)[0])
+    _, train_idx = train_init()
+    sample_batch = train_fetch(0, train_idx)[0]
     opt_state = svi_init(svi_init_rng, (sample_batch,), (sample_batch,), params)
 
     # functions for training tasks
     @jit
-    def epoch_train(opt_state, rng):
+    def epoch_train(opt_state, rng, train_idx, num_batch):
         """Trains one epoch
 
         :param opt_state: current state of the optimizer
@@ -213,18 +223,18 @@ def main(args):
         """
         def body_fn(i, val):
             loss_sum, opt_state, rng = val
-            rng, rng_binarize, update_rng = random.split(rng, 3)
-            batch = binarize(rng_binarize, train_fetch(i, train_idx)[0])
+            rng, update_rng = random.split(rng, 2)
+            batch = train_fetch(i, train_idx)[0]
             loss, opt_state, rng = svi_update(
                 i, opt_state, update_rng, (batch,), (batch,),
             )
             loss_sum += loss
             return loss_sum, opt_state, rng
 
-        return lax.fori_loop(0, num_train, body_fn, (0., opt_state, rng))
+        return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
 
     @jit
-    def eval_test(opt_state, rng):
+    def eval_test(opt_state, rng, test_idx, num_batch):
         """Evaluates current model state on test data.
 
         :param opt_state: current state of the optimizer
@@ -234,14 +244,14 @@ def main(args):
         """
         def body_fn(i, val):
             loss_sum, rng = val
-            rng, rng_binarize, eval_rng = random.split(rng, 3)
-            batch = binarize(rng_binarize, test_fetch(i, test_idx)[0])
+            rng, eval_rng = random.split(rng, 2)
+            batch = test_fetch(i, test_idx)[0]
             loss = svi_eval(opt_state, eval_rng, (batch,), (batch,)) / len(batch)
             loss_sum += loss
             return loss_sum, rng
 
-        loss, _ = lax.fori_loop(0, num_test, body_fn, (0., rng))
-        loss = loss / num_test
+        loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
+        loss = loss / num_batch
         return loss
 
     def reconstruct_img(epoch, num_epochs, opt_state, rng):
@@ -286,11 +296,11 @@ def main(args):
             rng_shuffle_train, 3
         )
         num_train, train_idx = train_init(rng=rng_train_init)
-        _, opt_state, rng = epoch_train(opt_state, rng)
+        _, opt_state, rng = epoch_train(opt_state, rng, train_idx, num_train)
 
         rng, rng_test, rng_recons = random.split(rng, 3)
         num_test, test_idx = test_init(rng=rng_test_init)
-        test_loss = eval_test(opt_state, rng_test)
+        test_loss = eval_test(opt_state, rng_test, test_idx, num_test)
 
         reconstruct_img(i, args.num_epochs, opt_state, rng_recons)
         print("Epoch {}: loss = {} ({:.2f} s.)".format(
