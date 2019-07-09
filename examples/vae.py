@@ -153,17 +153,35 @@ def main(args):
     decoder_init, decode = decoder(args.hidden_dim, out_dim)
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
-    per_sample_loss = per_example_elbo
+    per_example_loss = per_example_elbo
 
-    def gradient_manipulation(T): # stupidity for now. this does serve no purpose except for demonstrating that per-sample gradients can be manipulated
-        return [t/np.linalg.norm(t) for t in T]
+    def full_gradient_norm(list_of_gradients, ord=2):
+        ravelled = [g.ravel() for g in list_of_gradients]
+        gradients = np.concatenate(ravelled)
+        assert(len(gradients.shape) == 1)
+        norm = np.linalg.norm(gradients, ord=ord)
+        return norm
+
+    def clip_gradients(list_of_gradients, c):
+        norm = full_gradient_norm(list_of_gradients)
+        normalization_constant = 1./np.maximum(1., norm/c)
+        clipped_grads = [g*normalization_constant for g in list_of_gradients]
+        # assert(np.all(full_gradient_norm(clipped_grads)<c)) # jax doesn't like this
+        return clipped_grads
+
+    def gradient_manipulation(list_of_gradients):
+        return clip_gradients(list_of_gradients, c=300.)
+        # note(lumip): choice of c is arbitrary at the moment
+        #   in early iterations gradient norm values are typically
+        #   between 100 and 200 but in epoch 20 usually at 280 to 290
 
     svi_init, svi_update, svi_eval = svi(
-        model, guide, per_sample_loss, opt_init, opt_update, 
+        model, guide, per_example_loss, opt_init, opt_update, 
         get_params, per_example_variables={'obs', 'z'},
         per_example_grad_manipulation_fn=gradient_manipulation,
         encode=encode, decode=decode, z_dim=args.z_dim
     )
+
     svi_update = jit(svi_update)
 
     # preparing random number generators and loading data
