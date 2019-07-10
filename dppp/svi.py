@@ -87,8 +87,8 @@ def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False)
 
 
 def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
-    per_example_variables=None, per_example_grad_manipulation_fn = None,
-    loss_combiner_fn = np.sum, **kwargs):
+    per_example_variables=None, per_example_grad_manipulation_fn=None,
+    loss_combiner_fn=np.sum, **kwargs):
     """
     Stochastic Variational Inference given a per-example loss objective and a
     loss combiner function.
@@ -425,3 +425,41 @@ def get_gradients_clipping_function(c):
     def gradient_clipping_fn_inner(list_of_gradient_parts):
         return clip_gradient(list_of_gradient_parts, c)
     return gradient_clipping_fn_inner
+
+
+def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
+    get_params, clipping_threshold, per_example_variables=None, **kwargs):
+    """
+    Differentially-Private Stochastic Variational Inference given a per-example
+    loss objective and a gradient clipping threshold.
+
+    This is identical to numpyro's `svi` but adds differential privacy by
+    clipping the gradients (and currently nothing more).
+
+    :param model: Python callable with Pyro primitives for the model.
+    :param guide: Python callable with Pyro primitives for the guide
+        (recognition network).
+    :param per_example_loss_fn: ELBo loss function, i.e. negative Evidence Lower
+        Bound, to minimize, per example.
+    :param optim_init: initialization function returned by a JAX optimizer.
+        see: :mod:`jax.experimental.optimizers`.
+    :param optim_update: update function for the optimizer
+    :param get_params: function to get current parameters values given the
+        optimizer state.
+    :param clipping_threshold: The clipping threshold C to which the norm
+        of each per-example gradient is clipped.
+    :param per_example_variables: Names of the variables that have per-example
+        contribution to the (log) probabilities.
+    :param `**kwargs`: static arguments for the model / guide, i.e. arguments
+        that remain constant during fitting.
+    :return: tuple of `(init_fn, update_fn, evaluate)`.
+    """
+
+    gradients_clipping_fn = get_gradients_clipping_function(
+        clipping_threshold
+    )
+
+    return svi(model, guide, per_example_loss_fn, optim_init, optim_update,
+        get_params, per_example_variables=per_example_variables,
+        per_example_grad_manipulation_fn=gradients_clipping_fn, **kwargs
+    )

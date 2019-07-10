@@ -23,7 +23,7 @@ from jax.random import PRNGKey
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample
 
-from dppp.svi import per_example_elbo, svi, get_gradients_clipping_function
+from dppp.svi import per_example_elbo, dpsvi
 
 from datasets import MNIST, load_dataset
 from example_util import sigmoid
@@ -153,17 +153,13 @@ def main(args):
     decoder_init, decode = decoder(args.hidden_dim, out_dim)
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
-    per_example_loss = per_example_elbo
-
-    gradient_clipping_fn = get_gradients_clipping_function(c=300.)
     # note(lumip): choice of c is somewhat arbitrary at the moment.
     #   in early iterations gradient norm values are typically
     #   between 100 and 200 but in epoch 20 usually at 280 to 290
-
-    svi_init, svi_update, svi_eval = svi(
-        model, guide, per_example_loss, opt_init, opt_update, 
-        get_params, per_example_variables={'obs', 'z'},
-        per_example_grad_manipulation_fn=gradient_clipping_fn,
+    svi_init, svi_update, svi_eval = dpsvi(
+        model, guide, per_example_elbo, opt_init, opt_update, 
+        get_params, clipping_threshold=300.,
+        per_example_variables={'obs', 'z'},
         encode=encode, decode=decode, z_dim=args.z_dim
     )
 

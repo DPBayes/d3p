@@ -31,7 +31,7 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, trace, substitute
 
-from dppp.svi import per_example_elbo, svi, get_gradients_clipping_function
+from dppp.svi import per_example_elbo, dpsvi
 
 from jax.scipy.special import logsumexp
 from numpyro.distributions.distribution import Distribution, TransformedDistribution
@@ -133,14 +133,11 @@ def main(args):
     model_fixed = fix_params(model, k, latent_vals[0])
     guide_fixed = fix_params(guide, k, latent_vals[0])
 
-    per_example_loss = per_example_elbo
-    gradients_clipping_fn = get_gradients_clipping_function(c=20.)
     # note(lumip): value for c currently completely made up
-
-    svi_init, svi_update, svi_eval = svi(
-        model_fixed, guide_fixed, per_example_loss, opt_init,
-        opt_update, get_params, per_example_variables={'obs'},
-        per_example_grad_manipulation_fn=gradients_clipping_fn
+    svi_init, svi_update, svi_eval = dpsvi(
+        model_fixed, guide_fixed, per_example_elbo, opt_init,
+        opt_update, get_params, clipping_threshold=20.,
+        per_example_variables={'obs'}
     )
 
     svi_update = jit(svi_update)
