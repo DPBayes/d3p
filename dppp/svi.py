@@ -168,7 +168,8 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         :param tuple guide_args: dynamic arguments to the guide.
         :return: tuple of `(loss_val, opt_state, rng)`.
         """
-        model_init, guide_init = _seed(model, guide, rng)
+        rng, model_guide_rng = random.split(rng, 2)
+        model_init, guide_init = _seed(model, guide, model_guide_rng)
         params = get_params(opt_state)
 
         per_example_loss, per_example_grads = per_example_value_and_grad(
@@ -180,15 +181,17 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         # per_example_grads will be jax tree of jax np.arrays of shape
         #   [batch_size, (param_shape)] for each parameter
 
+        # get total loss and loss combiner jvp (forward differentiation) func
+        loss_val, loss_jvp = jax.linearize(loss_combiner_fn, per_example_loss)
+
+        # flatten it out
+        px_grads_list, px_grads_tree_def = jax.tree_flatten(
+            per_example_grads
+        )
+
         # if per-sample gradient manipulation is present, we apply it to
         #   each gradient site in the tree
         if per_example_grad_manipulation_fn:
-
-            # flatten it out
-            px_grads_list, px_grads_tree_def = jax.tree_flatten(
-                per_example_grads
-            )
-
             # apply per-sample gradient manipulation, if present
             px_grads_list = jax.vmap(
                 per_example_grad_manipulation_fn, in_axes=0
@@ -203,27 +206,19 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
             #   should just get the whole tree per sample to get all available
             #   information
 
-            # todo(lumip): can maybe apply gradient combination here instead of
-            #   mapping over the reconstructed tree? think about that!
-
-            per_example_grads = jax.tree_unflatten(
-                px_grads_tree_def, px_grads_list
-            )
-
-        # get total loss and loss combiner jvp (forward differentiation) func
-        loss_val, loss_jvp = jax.linearize(loss_combiner_fn, per_example_loss)
-
         # mapping loss combination jvp func over all secondary dimensions
-        #   of gradient collections/matrices
+        #   of gradient collections/matrices.
         loss_jvp = map_over_secondary_dims(loss_jvp)
-
         # combine gradients for all parameters in the gradient jax tree
         #   according to the loss combination jvp func
-        grads = jax.tree_util.tree_map(loss_jvp, per_example_grads)
+        grads_list = [loss_jvp(px_g) for px_g in px_grads_list]
+
+        grads = jax.tree_unflatten(
+            px_grads_tree_def, grads_list
+        )
 
         # take a step in the optimizer using the gradients
         opt_state = optim_update(i, grads, opt_state)
-        rng, = random.split(rng, 1)
         return loss_val, opt_state, rng
 
     def evaluate(opt_state, rng, model_args=(), guide_args=()):

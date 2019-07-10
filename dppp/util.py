@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as np
+import functools
 
 __all__ = ["map_over_secondary_dims"]
 
@@ -34,6 +35,7 @@ def map_over_secondary_dims(f):
         [f(a_3, b_3, c_3), f(a_4, b_4, c_4)]
     ]
     """
+    @functools.wraps(f)
     def map_over_secondary_dims_f(T):
         assert(len(T.shape) >= 1)
         T_ = T.reshape((T.shape[0], -1))
