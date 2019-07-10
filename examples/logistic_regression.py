@@ -23,7 +23,7 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, substitute
 
-from dppp.svi import per_example_elbo, svi
+from dppp.svi import per_example_elbo, svi, get_gradients_clipping_function
 
 from datasets import batchify_data
 from example_util import sigmoid
@@ -130,9 +130,13 @@ def main(args):
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
     per_example_loss = per_example_elbo
+    gradients_clipping_fn = get_gradients_clipping_function(c=20.)
+    # note(lumip): value for c currently completely made up
+
     svi_init, svi_update, svi_eval = svi(
         model, guide, per_example_loss, opt_init, opt_update, 
-        get_params, per_example_variables={'obs'}
+        get_params, per_example_variables={'obs'},
+        per_example_grad_manipulation_fn=gradients_clipping_fn
     )
 
     svi_update = jit(svi_update)

@@ -24,7 +24,7 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, substitute, trace
 
-from dppp.svi import per_example_elbo, svi
+from dppp.svi import per_example_elbo, svi, get_gradients_clipping_function
 
 from datasets import batchify_data
 
@@ -88,9 +88,13 @@ def main(args):
     fixed_guide = lambda obs: guide(d=args.dimensions, N=args.batch_size, obs=obs)
 
     per_example_loss = per_example_elbo
+    gradients_clipping_fn = get_gradients_clipping_function(c=20.)
+    # note(lumip): value for c currently completely made up
+
     svi_init, svi_update, svi_eval = svi(
         fixed_model, fixed_guide, per_example_loss, opt_init, opt_update, 
-        get_params, per_example_variables={'obs'}
+        get_params, per_example_variables={'obs'},
+        per_example_grad_manipulation_fn=gradients_clipping_fn
     )
 
     svi_update = jit(svi_update)
