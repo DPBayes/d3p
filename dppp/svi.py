@@ -399,7 +399,7 @@ def clip_gradient(list_of_gradient_parts, c):
 
     The norm is computed by interpreting the given list of parts as a single
     vector (see `full_norm`). Each entry is then scaled by the factor
-    (1/max(1, norm/C)) which effectively clips the norm to C.
+    (C/max(C, norm)) which effectively clips the norm to C.
 
     :param list_of_gradient_parts: A list of values (of any shape) that make up
         the overall gradient vector.
@@ -408,7 +408,7 @@ def clip_gradient(list_of_gradient_parts, c):
         list_of_gradient_parts.
     """
     norm = full_norm(list_of_gradient_parts)
-    normalization_constant = 1./np.maximum(1., norm/c)
+    normalization_constant = c/np.maximum(norm, c)
     clipped_grads = [g*normalization_constant for g in list_of_gradient_parts]
     # assert(np.all(full_gradient_norm(clipped_grads)<c)) # jax doesn't like this
     return clipped_grads
