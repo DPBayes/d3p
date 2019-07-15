@@ -13,8 +13,9 @@ import jax
 from jax import random, vjp
 import jax.numpy as np
 
-from numpyro.handlers import replay, substitute, trace
+from numpyro.handlers import replay, substitute, trace, seed
 from numpyro.svi import _seed
+import numpyro.distributions as dist
 
 from dppp.util import map_over_secondary_dims
 
@@ -87,8 +88,8 @@ def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False)
 
 
 def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
-    per_example_variables=None, per_example_grad_manipulation_fn=None,
-    loss_combiner_fn=np.sum, **kwargs):
+    per_example_variables=None, per_example_grad_modifier=None,
+    total_grad_modifier=None, loss_combiner_fn=np.sum, **kwargs):
     """
     Stochastic Variational Inference given a per-example loss objective and a
     loss combiner function.
@@ -111,8 +112,11 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         optimizer state.
     :param per_example_variables: Names of the variables that have per-example
         contribution to the (log) probabilities.
-    :param per_example_grad_manipulation_fn: optional function that allows to
-        manipulate the gradient for each sample.
+    :param per_example_grad_modifier: An optional function that allows to
+        modify the gradient for each observed data point.
+    :param total_grad_modifier: An optional function that allows to modify
+        the total gradient. This gets called after applying the
+        per_example_grad_modifier and loss_combiner_fn.
     :param loss_combiner_fn: Function to combine the per-example loss values.
         Defaults to np.sum.
     :param `**kwargs`: static arguments for the model / guide, i.e. arguments
@@ -191,10 +195,10 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
 
         # if per-sample gradient manipulation is present, we apply it to
         #   each gradient site in the tree
-        if per_example_grad_manipulation_fn:
+        if per_example_grad_modifier:
             # apply per-sample gradient manipulation, if present
             px_grads_list = jax.vmap(
-                per_example_grad_manipulation_fn, in_axes=0
+                per_example_grad_modifier, in_axes=0
             )(
                 px_grads_list
             )
@@ -210,8 +214,11 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         #   of gradient collections/matrices.
         loss_jvp = map_over_secondary_dims(loss_jvp)
         # combine gradients for all parameters in the gradient jax tree
-        #   according to the loss combination jvp func
+        #   according to the loss combination jvp func    
         grads_list = [loss_jvp(px_g) for px_g in px_grads_list]
+
+        if total_grad_modifier:
+            grads_list = total_grad_modifier(grads_list)
 
         grads = jax.tree_unflatten(
             px_grads_tree_def, grads_list
@@ -423,7 +430,7 @@ def get_gradients_clipping_function(c):
 
 
 def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
-    get_params, clipping_threshold, per_example_variables=None, **kwargs):
+    get_params, clipping_threshold, rng, dp_scale, per_example_variables=None, **kwargs):
     """
     Differentially-Private Stochastic Variational Inference given a per-example
     loss objective and a gradient clipping threshold.
@@ -454,7 +461,21 @@ def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
         clipping_threshold
     )
 
+    _, perturbation_rng = jax.random.split(rng, 2)
+    
+    @jax.jit
+    def grad_perturbation_fn(list_of_grads):
+        def perturb_one(grad):
+            noise = dist.Normal(0, dp_scale).sample(
+                perturbation_rng, sample_shape=grad.shape
+            )
+            return grad + noise
+
+        list_of_grads = [perturb_one(grad) for grad in list_of_grads]
+        return list_of_grads
+
     return svi(model, guide, per_example_loss_fn, optim_init, optim_update,
         get_params, per_example_variables=per_example_variables,
-        per_example_grad_manipulation_fn=gradients_clipping_fn, **kwargs
+        per_example_grad_modifier=gradients_clipping_fn,
+        total_grad_modifier=grad_perturbation_fn, **kwargs
     )
