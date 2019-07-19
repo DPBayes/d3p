@@ -23,10 +23,10 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, substitute
 
-from dppp.svi import per_example_elbo, svi
+from dppp.svi import dpsvi, per_example_elbo
 
 from datasets import batchify_data
-from util import sigmoid
+from example_util import sigmoid
 
 
 def model(batch_X, batch_y=None):
@@ -129,10 +129,9 @@ def main(args):
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
-    per_example_loss = per_example_elbo
-    svi_init, svi_update, svi_eval = svi(
-        model, guide, per_example_loss, opt_init, opt_update, 
-        get_params, per_example_variables={'obs'}
+    svi_init, svi_update, svi_eval = dpsvi(
+        model, guide, per_example_elbo, opt_init, opt_update, 
+        get_params, clipping_threshold=20., per_example_variables={'obs'}
     )
 
     svi_update = jit(svi_update)
