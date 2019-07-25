@@ -31,9 +31,8 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, trace, substitute
 
-from dppp.svi import per_example_elbo, svi
+from dppp.svi import per_example_elbo, dpsvi
 
-from datasets import batchify_data
 from jax.scipy.special import logsumexp
 from numpyro.distributions.distribution import Distribution, TransformedDistribution
 from numpyro.distributions import constraints
@@ -47,7 +46,8 @@ from numpyro.distributions.util import (
     vec_to_tril_matrix
 )
 
-from util import softmax
+from datasets import batchify_data
+from example_util import softmax
 
 class MixGaus(Distribution):
     arg_constraints = {'locs': constraints.real, 'scales': constraints.positive, 'pis' : constraints.simplex}
@@ -71,7 +71,7 @@ class MixGaus(Distribution):
 
 def model(k, obs, _ks):
     assert(obs is not None)
-    N, d = np.atleast_2d(obs).shape
+    _, d = np.atleast_2d(obs).shape
     pis = sample('pis', dist.Dirichlet(np.ones(k)))
     mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
     sigs = np.ones((k, d))
@@ -79,7 +79,7 @@ def model(k, obs, _ks):
 
 def guide(k, obs, _ks):
     assert(obs is not None)
-    N, d = np.atleast_2d(obs).shape
+    _, d = np.atleast_2d(obs).shape
     mus_loc = param('mus_loc', np.zeros((k, d)))
     mus = sample('mus', dist.Normal(mus_loc, 1.))
     sigs = np.ones((k, d))
@@ -133,10 +133,11 @@ def main(args):
     model_fixed = fix_params(model, k, latent_vals[0])
     guide_fixed = fix_params(guide, k, latent_vals[0])
 
-    per_example_loss = per_example_elbo
-    svi_init, svi_update, svi_eval = svi(
-        model_fixed, guide_fixed, per_example_loss, opt_init,
-        opt_update, get_params, per_example_variables={'obs'}
+    # note(lumip): value for c currently completely made up
+    svi_init, svi_update, svi_eval = dpsvi(
+        model_fixed, guide_fixed, per_example_elbo, opt_init,
+        opt_update, get_params, clipping_threshold=20.,
+        per_example_variables={'obs'}
     )
 
     svi_update = jit(svi_update)

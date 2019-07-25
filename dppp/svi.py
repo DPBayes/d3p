@@ -7,6 +7,8 @@ Based on numpyro's `svi`:
 
 import os
 
+import functools
+
 import jax
 from jax import random, vjp
 import jax.numpy as np
@@ -45,6 +47,7 @@ def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False)
     each of the corresponding arguments.
   """
 
+    @functools.wraps(fun)
     def value_and_grad_f(*args, **kwargs):
         f = jax.linear_util.wrap_init(fun, kwargs)
         f_partial, dyn_args = jax.api._argnums_partial(f, argnums, args)
@@ -83,9 +86,9 @@ def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False)
     return value_and_grad_f
 
 
-def svi(model, guide, per_example_loss_fn,
-        optim_init, optim_update, get_params, per_example_variables=None,
-        loss_combiner_fn = np.sum, **kwargs):
+def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
+    per_example_variables=None, per_example_grad_manipulation_fn=None,
+    loss_combiner_fn=np.sum, **kwargs):
     """
     Stochastic Variational Inference given a per-example loss objective and a
     loss combiner function.
@@ -108,6 +111,8 @@ def svi(model, guide, per_example_loss_fn,
         optimizer state.
     :param per_example_variables: Names of the variables that have per-example
         contribution to the (log) probabilities.
+    :param per_example_grad_manipulation_fn: optional function that allows to
+        manipulate the gradient for each sample.
     :param loss_combiner_fn: Function to combine the per-example loss values.
         Defaults to np.sum.
     :param `**kwargs`: static arguments for the model / guide, i.e. arguments
@@ -175,8 +180,35 @@ def svi(model, guide, per_example_loss_fn,
         # per_example_grads will be jax tree of jax np.arrays of shape
         #   [batch_size, (param_shape)] for each parameter
 
-        # todo(lumip): this is the place to perform per-example gradient
-        #   manipulation, e.g., clipping
+        # if per-sample gradient manipulation is present, we apply it to
+        #   each gradient site in the tree
+        if per_example_grad_manipulation_fn:
+
+            # flatten it out
+            px_grads_list, px_grads_tree_def = jax.tree_flatten(
+                per_example_grads
+            )
+
+            # apply per-sample gradient manipulation, if present
+            px_grads_list = jax.vmap(
+                per_example_grad_manipulation_fn, in_axes=0
+            )(
+                px_grads_list
+            )
+            # todo(lumip, all): by flattening the tree before passing it into
+            #   gradient manipulation, we lose all information on which value
+            #   belongs to which parameter. on the other hand, we have plain and
+            #   straightforward access to the values, which might be all we need.
+            #   think about whether that is okay or whether ps_grad_manipulation_fn
+            #   should just get the whole tree per sample to get all available
+            #   information
+
+            # todo(lumip): can maybe apply gradient combination here instead of
+            #   mapping over the reconstructed tree? think about that!
+
+            per_example_grads = jax.tree_unflatten(
+                px_grads_tree_def, px_grads_list
+            )
 
         # get total loss and loss combiner vjp func
         loss_val, loss_combine_vjp = jax.vjp(loss_combiner_fn, per_example_loss)
@@ -355,3 +387,89 @@ def per_example_elbo(
     # Return (-elbo) since by convention we do gradient descent on a loss and
     # the ELBO is a lower bound that needs to be maximized.
     return -elbo
+
+def full_norm(list_of_parts, ord=2):
+    """Computes the total norm over a list of values (of any shape) by treating
+    them as a single large vector.
+
+    :param list_of_parts: The list of values that make up the vector to compute
+        the norm over.
+    :param ord: Order of the norm. May take any value possible for
+    `numpy.linalg.norm`.
+    :return: The indicated norm over the full vector.
+    """
+    ravelled = [g.ravel() for g in list_of_parts]
+    gradients = np.concatenate(ravelled)
+    assert(len(gradients.shape) == 1)
+    norm = np.linalg.norm(gradients, ord=ord)
+    return norm
+
+def clip_gradient(list_of_gradient_parts, c):
+    """Clips the total norm of a gradient by a given value C.
+
+    The norm is computed by interpreting the given list of parts as a single
+    vector (see `full_norm`). Each entry is then scaled by the factor
+    (C/max(C, norm)) which effectively clips the norm to C.
+
+    :param list_of_gradient_parts: A list of values (of any shape) that make up
+        the overall gradient vector.
+    :param c: The clipping threshold C.
+    :return: Clipped gradients given in the same format/layout/shape as
+        list_of_gradient_parts.
+    """
+    norm = full_norm(list_of_gradient_parts)
+    normalization_constant = c/np.maximum(norm, c)
+    clipped_grads = [g*normalization_constant for g in list_of_gradient_parts]
+    # assert(np.all(full_gradient_norm(clipped_grads)<c)) # jax doesn't like this
+    return clipped_grads
+
+def get_gradients_clipping_function(c):
+    """Factory function to obtain a gradient clipping function for a fixed
+    clipping threshold C.
+
+    :param c: The clipping threshold C.
+    :return: `clip_gradient` function with fixed threshold C. Only takes a
+        list_of_gradient_parts as argument.
+    """
+    @functools.wraps(clip_gradient)
+    def gradient_clipping_fn_inner(list_of_gradient_parts):
+        return clip_gradient(list_of_gradient_parts, c)
+    return gradient_clipping_fn_inner
+
+
+def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
+    get_params, clipping_threshold, per_example_variables=None, **kwargs):
+    """
+    Differentially-Private Stochastic Variational Inference given a per-example
+    loss objective and a gradient clipping threshold.
+
+    This is identical to numpyro's `svi` but adds differential privacy by
+    clipping the gradients (and currently nothing more).
+
+    :param model: Python callable with Pyro primitives for the model.
+    :param guide: Python callable with Pyro primitives for the guide
+        (recognition network).
+    :param per_example_loss_fn: ELBo loss function, i.e. negative Evidence Lower
+        Bound, to minimize, per example.
+    :param optim_init: initialization function returned by a JAX optimizer.
+        see: :mod:`jax.experimental.optimizers`.
+    :param optim_update: update function for the optimizer
+    :param get_params: function to get current parameters values given the
+        optimizer state.
+    :param clipping_threshold: The clipping threshold C to which the norm
+        of each per-example gradient is clipped.
+    :param per_example_variables: Names of the variables that have per-example
+        contribution to the (log) probabilities.
+    :param `**kwargs`: static arguments for the model / guide, i.e. arguments
+        that remain constant during fitting.
+    :return: tuple of `(init_fn, update_fn, evaluate)`.
+    """
+
+    gradients_clipping_fn = get_gradients_clipping_function(
+        clipping_threshold
+    )
+
+    return svi(model, guide, per_example_loss_fn, optim_init, optim_update,
+        get_params, per_example_variables=per_example_variables,
+        per_example_grad_manipulation_fn=gradients_clipping_fn, **kwargs
+    )
