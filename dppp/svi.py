@@ -178,16 +178,26 @@ def svi(model, guide, per_example_loss_fn,
         # todo(lumip): this is the place to perform per-example gradient
         #   manipulation, e.g., clipping
 
-        # get total loss and loss combiner jvp (forward differentiation) func
-        loss_val, loss_jvp = jax.linearize(loss_combiner_fn, per_example_loss)
+        # get total loss and loss combiner vjp func
+        loss_val, loss_combine_vjp = jax.vjp(loss_combiner_fn, per_example_loss)
 
-        # mapping loss combination jvp func over all secondary dimensions
-        #   of gradient collections/matrices
-        loss_jvp = map_over_secondary_dims(loss_jvp)
+        # loss_combine_vjp gives us the backward differentiation function
+        #   from combined loss to per-example losses. we use it to get the
+        #   (1xbatch_size) Jacobian and construct a function that takes
+        #   per-example gradients and left-multiplies them with that jacobian
+        #   to get the final combined gradient
+        loss_jacobian = np.reshape(loss_combine_vjp(np.array(1))[0], (1, -1))
+        loss_vjp = lambda px_grads: np.matmul(loss_jacobian, px_grads)
+
+        # we map the loss combination vjp func over all secondary dimensions
+        #   of gradient sites. This is necessary since some gradient
+        #   sites might be matrices in itself (e.g., for NN layers), so a stack
+        #   of those would be 3-dimensional and not admittable to np.matmul
+        loss_vjp = map_over_secondary_dims(loss_vjp)
 
         # combine gradients for all parameters in the gradient jax tree
-        #   according to the loss combination jvp func
-        grads = jax.tree_util.tree_map(loss_jvp, per_example_grads)
+        #   according to the loss combination vjp func
+        grads = jax.tree_util.tree_map(loss_vjp, per_example_grads)
 
         # take a step in the optimizer using the gradients
         opt_state = optim_update(i, grads, opt_state)
