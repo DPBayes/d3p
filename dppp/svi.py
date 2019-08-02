@@ -15,6 +15,8 @@ import jax.numpy as np
 
 from numpyro.handlers import replay, substitute, trace
 from numpyro.svi import _seed
+from numpyro.distributions import constraints
+from numpyro.distributions.constraints import biject_to
 
 from dppp.util import map_over_secondary_dims
 
@@ -120,6 +122,8 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
     :return: tuple of `(init_fn, update_fn, evaluate)`.
     """
 
+    constrain_fn = None
+
     def loss_fn(*args, **kwargs):
         return loss_combiner_fn(per_example_loss_fn(*args, **kwargs))
 
@@ -132,8 +136,11 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         :param tuple guide_args: arguments to the guide (these can possibly vary during
             the course of fitting).
         :param dict params: initial parameter values to condition on. This can be
-            useful forx
-        :return: initial optimizer state.
+            useful for initializing neural networks using more specialized methods
+            rather than sampling from the prior.
+        :return: tuple containing initial optimizer state, and `constrain_fn`, a callable
+            that transforms unconstrained parameter values from the optimizer to the
+            specified constrained domain
         """
         # note(lumip): the below is unchanged from numpyro's `svi` but seems
         #   like a very inefficient/complicated way to obtain the parameters,
@@ -150,12 +157,22 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
             guide_init = substitute(guide_init, params)
         guide_trace = trace(guide_init).get_trace(*guide_args, **kwargs)
         model_trace = trace(model_init).get_trace(*model_args, **kwargs)
+        inv_transforms = {}
         for site in list(guide_trace.values()) + list(model_trace.values()):
             if site['type'] == 'param':
-                params[site['name']] = site['value']
-        return optim_init(params)
+                constraint = site['kwargs'].pop('constraint', constraints.real)
+                transform = biject_to(constraint)
+                inv_transforms[site['name']] = transform
+                params[site['name']] = transform.inv(site['value'])
 
-    def update_fn(i, opt_state, rng, model_args=(), guide_args=()):
+        def transform_constrained(inv_transforms, params):
+            return {k: inv_transforms[k](v) for k, v in params.items()}
+
+        nonlocal constrain_fn
+        constrain_fn = jax.partial(transform_constrained, inv_transforms)
+        return optim_init(params), constrain_fn
+
+    def update_fn(i, rng, opt_state, model_args=(), guide_args=()):
         """
         Take a single step of SVI (possibly on a batch / minibatch of data),
         using the optimizer.
@@ -175,6 +192,7 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
             per_example_loss_fn
         )(
             params, model_init, guide_init, model_args, guide_args, kwargs,
+            constrain_fn=constrain_fn,
             per_example_variables=per_example_variables
         )
         # per_example_grads will be jax tree of jax np.arrays of shape
@@ -236,7 +254,7 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         rng, = random.split(rng, 1)
         return loss_val, opt_state, rng
 
-    def evaluate(opt_state, rng, model_args=(), guide_args=()):
+    def evaluate(rng, opt_state, model_args=(), guide_args=()):
         """
         Take a single step of SVI (possibly on a batch / minibatch of data).
 
@@ -252,7 +270,9 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         model_init, guide_init = _seed(model, guide, rng)
         params = get_params(opt_state)
         return loss_fn(params, model_init, guide_init, 
-                       model_args, guide_args, kwargs, per_example_variables)
+                       model_args, guide_args, kwargs, 
+                       constrain_fn=constrain_fn,
+                       per_example_variables=per_example_variables)
 
     # Make local functions visible from the global scope once
     # `svi` is called for sphinx doc generation.
@@ -336,7 +356,7 @@ def per_example_log_density(
 
 def per_example_elbo(
     param_map, model, guide, model_args, guide_args, kwargs, 
-    per_example_variables=None):
+    constrain_fn, per_example_variables=None):
     """
     Per-example version of the most basic implementation of the Evidence
     Lower Bound, which is the fundamental objective in Variational Inference.
@@ -359,9 +379,13 @@ def per_example_elbo(
     :param tuple guide_args: arguments to the guide (these can possibly vary
         during the course of fitting).
     :param dict kwargs: static keyword arguments to the model / guide.
+    :param constrain_fn: a callable that transforms unconstrained parameter values
+        from the optimizer to the specified constrained domain.
     :return: negative of the Evidence Lower Bound (ELBo) per example to be
         minimized.
     """
+    
+    param_map = constrain_fn(param_map)
 
     guide_log_density, guide_trace = per_example_log_density(
         guide, guide_args, kwargs, param_map, per_example_variables

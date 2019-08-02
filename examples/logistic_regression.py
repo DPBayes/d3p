@@ -141,16 +141,16 @@ def main(args):
     rng, svi_init_rng, data_fetch_rng = random.split(rng, 3)
     _, train_idx = train_init(rng=data_fetch_rng)
     batch_X, batch_Y = train_fetch(0, train_idx)
-    opt_state = svi_init(svi_init_rng, (batch_X, batch_Y), (batch_X, batch_Y))
+    opt_state, _ = svi_init(svi_init_rng, (batch_X, batch_Y), (batch_X, batch_Y))
 
     @jit
-    def epoch_train(opt_state, rng, data_idx, num_batch):
+    def epoch_train(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
             loss_sum, opt_state, rng = val
             rng, update_rng = random.split(rng, 2)
             batch = train_fetch(i, data_idx)
             loss, opt_state, rng = svi_update(
-                i, opt_state, update_rng, batch, batch,
+                i, update_rng, opt_state, batch, batch,
             )
             loss_sum += loss / len(batch[0])
             return loss_sum, opt_state, rng
@@ -160,7 +160,7 @@ def main(args):
         return loss, opt_state, rng
 
     @jit
-    def eval_test(opt_state, rng, data_idx, num_batch):
+    def eval_test(rng, opt_state, data_idx, num_batch):
         params = get_params(opt_state)
 
         def body_fn(i, val):
@@ -170,7 +170,7 @@ def main(args):
             batch_X, batch_Y = batch
             rng, eval_rng, acc_rng = jax.random.split(rng, 3)
 
-            loss = svi_eval(opt_state, eval_rng, batch, batch) / len(batch_X)
+            loss = svi_eval(eval_rng, opt_state, batch, batch) / len(batch_X)
             loss_sum += loss
 
             acc = estimate_accuracy(batch_X, batch_Y, params, acc_rng, 10)
@@ -190,13 +190,13 @@ def main(args):
 
         num_train, train_idx = train_init(rng=data_fetch_rng)
         _, opt_state, rng = epoch_train(
-            opt_state, rng, train_idx, num_train
+            rng, opt_state, train_idx, num_train
         )
 
         if (i % (args.num_epochs//10)) == 0:
             # computing loss over training data (for now?)
             test_loss, test_acc = eval_test(
-                opt_state, test_rng, train_idx, num_train
+                test_rng, opt_state, train_idx, num_train
             )
             print("Epoch {}: loss = {}, acc = {} ({:.2f} s.)".format(
                 i, test_loss, test_acc, time.time() - t_start

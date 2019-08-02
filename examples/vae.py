@@ -190,11 +190,11 @@ def main(args):
     rng_shuffle_train, rng_train_init = random.split(rng_shuffle_train, 2)
     _, train_idx = train_init()
     sample_batch = train_fetch(0, train_idx)[0]
-    opt_state = svi_init(svi_init_rng, (sample_batch,), (sample_batch,), params)
+    opt_state, _ = svi_init(svi_init_rng, (sample_batch,), (sample_batch,), params)
 
     # functions for training tasks
     @jit
-    def epoch_train(opt_state, rng, train_idx, num_batch):
+    def epoch_train(rng, opt_state, train_idx, num_batch):
         """Trains one epoch
 
         :param opt_state: current state of the optimizer
@@ -207,7 +207,7 @@ def main(args):
             rng, update_rng = random.split(rng, 2)
             batch = train_fetch(i, train_idx)[0]
             loss, opt_state, rng = svi_update(
-                i, opt_state, update_rng, (batch,), (batch,),
+                i, update_rng, opt_state, (batch,), (batch,),
             )
             loss_sum += loss
             return loss_sum, opt_state, rng
@@ -215,7 +215,7 @@ def main(args):
         return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
 
     @jit
-    def eval_test(opt_state, rng, test_idx, num_batch):
+    def eval_test(rng, opt_state, test_idx, num_batch):
         """Evaluates current model state on test data.
 
         :param opt_state: current state of the optimizer
@@ -227,7 +227,7 @@ def main(args):
             loss_sum, rng = val
             rng, eval_rng = random.split(rng, 2)
             batch = test_fetch(i, test_idx)[0]
-            loss = svi_eval(opt_state, eval_rng, (batch,), (batch,)) / len(batch)
+            loss = svi_eval(eval_rng, opt_state, (batch,), (batch,)) / len(batch)
             loss_sum += loss
             return loss_sum, rng
 
@@ -277,11 +277,11 @@ def main(args):
             rng_shuffle_train, 3
         )
         num_train, train_idx = train_init(rng=rng_train_init)
-        _, opt_state, rng = epoch_train(opt_state, rng, train_idx, num_train)
+        _, opt_state, rng = epoch_train(rng, opt_state, train_idx, num_train)
 
         rng, rng_test, rng_recons = random.split(rng, 3)
         num_test, test_idx = test_init(rng=rng_test_init)
-        test_loss = eval_test(opt_state, rng_test, test_idx, num_test)
+        test_loss = eval_test(rng_test, opt_state, test_idx, num_test)
 
         reconstruct_img(i, args.num_epochs, opt_state, rng_recons)
         print("Epoch {}: loss = {} ({:.2f} s.)".format(

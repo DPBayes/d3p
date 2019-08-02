@@ -101,16 +101,16 @@ def main(args):
     rng, svi_init_rng = random.split(rng, 2)
     _, train_idx = train_init()
     batch = train_fetch(0, train_idx)
-    opt_state = svi_init(svi_init_rng, batch, batch)
+    opt_state, _ = svi_init(svi_init_rng, batch, batch)
 
     @jit
-    def epoch_train(opt_state, rng, data_idx, num_batch):
+    def epoch_train(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
             loss_sum, opt_state, rng = val
             rng, update_rng = random.split(rng, 2)
             batch = train_fetch(i, data_idx)
             loss, opt_state, rng = svi_update(
-                i, opt_state, update_rng, batch, batch,
+                i, update_rng, opt_state, batch, batch,
             )
             loss_sum += loss / len(batch[0])
             return loss_sum, opt_state, rng
@@ -121,12 +121,12 @@ def main(args):
 
     
     @jit
-    def eval_test(opt_state, rng, data_idx, num_batch):
+    def eval_test(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
             loss_sum, rng = val
             batch = train_fetch(i, data_idx)
             rng, eval_rng = jax.random.split(rng, 2)
-            loss = svi_eval(opt_state, eval_rng, batch, batch) / len(batch[0])
+            loss = svi_eval(eval_rng, opt_state, batch, batch) / len(batch[0])
             loss_sum += loss
 
             return loss_sum, rng
@@ -142,13 +142,13 @@ def main(args):
 
         num_train, train_idx = train_init(rng=data_fetch_rng)
         _, opt_state, rng = epoch_train(
-            opt_state, rng, train_idx, num_train
+            rng, opt_state, train_idx, num_train
         )
 
         if (i % (args.num_epochs // 10) == 0):
             # computing loss over training data (for now?)
             test_loss = eval_test(
-                opt_state, test_rng, train_idx, num_train
+                test_rng, opt_state, train_idx, num_train
             )
 
             print("Epoch {}: loss = {} ({:.2f} s.)".format(
