@@ -23,7 +23,9 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, substitute
 
+from numpyro.svi import svi, elbo
 from dppp.svi import dpsvi, per_example_elbo
+import dppp.svi as mysvi
 
 from datasets import batchify_data
 from example_util import sigmoid
@@ -129,9 +131,17 @@ def main(args):
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
-    svi_init, svi_update, svi_eval = dpsvi(
-        model, guide, per_example_elbo, opt_init, opt_update, 
-        get_params, clipping_threshold=20., per_example_variables={'obs'}
+    # svi_init, svi_update, svi_eval = dpsvi(
+    #     model, guide, elbo, opt_init, opt_update, 
+    #     get_params, clipping_threshold=20000., per_example_variables={'obs'}
+    # )
+
+    # svi_init, svi_update, svi_eval = svi(
+    #     model, guide, elbo, opt_init, opt_update, get_params
+    # )
+
+    svi_init, svi_update, svi_eval = mysvi.svi(
+        model, guide, elbo, opt_init, opt_update, get_params
     )
 
     svi_update = jit(svi_update)
@@ -141,7 +151,7 @@ def main(args):
     rng, svi_init_rng, data_fetch_rng = random.split(rng, 3)
     _, train_idx = train_init(rng=data_fetch_rng)
     batch_X, batch_Y = train_fetch(0, train_idx)
-    opt_state = svi_init(svi_init_rng, (batch_X, batch_Y), (batch_X, batch_Y))
+    opt_state, _ = svi_init(svi_init_rng, (batch_X, batch_Y), (batch_X, batch_Y))
 
     @jit
     def epoch_train(opt_state, rng, data_idx, num_batch):
@@ -150,7 +160,7 @@ def main(args):
             rng, update_rng = random.split(rng, 2)
             batch = train_fetch(i, data_idx)
             loss, opt_state, rng = svi_update(
-                i, opt_state, update_rng, batch, batch,
+                i, update_rng, opt_state, batch, batch,
             )
             loss_sum += loss / len(batch[0])
             return loss_sum, opt_state, rng
@@ -170,7 +180,7 @@ def main(args):
             batch_X, batch_Y = batch
             rng, eval_rng, acc_rng = jax.random.split(rng, 3)
 
-            loss = svi_eval(opt_state, eval_rng, batch, batch) / len(batch_X)
+            loss = svi_eval(eval_rng, opt_state, batch, batch) / len(batch_X)
             loss_sum += loss
 
             acc = estimate_accuracy(batch_X, batch_Y, params, acc_rng, 10)

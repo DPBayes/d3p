@@ -15,75 +15,80 @@ import jax.numpy as np
 
 from numpyro.handlers import replay, substitute, trace
 from numpyro.svi import _seed
+from numpyro.distributions import constraints
+from numpyro.distributions.constraints import biject_to
 
 from dppp.util import map_over_secondary_dims
 
-
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
-    """Creates a function which evaluates both `fun` and the gradient of `fun`
-    per example (i.e., per observed data instance).
+    value_and_grad_fun = jax.jit(jax.value_and_grad(fun, argnums, has_aux, holomorphic))
+    return jax.jit(jax.vmap(value_and_grad_fun, in_axes=(None, 0, 0)))
 
-    :param fun: Per-example function to be differentiated. Its arguments at
-        positions specified by `argnums` should be arrays, scalars, or standard
-        Python containers. The first axis in the arguments indicates different
-        examples. `fun` should be vectorized in the sense that it returns
-        a vector where each element is the result of applying the function to
-        a single input example.
-    argnums: Optional, integer or tuple of integers. Specifies which positional
-      argument(s) to differentiate with respect to (default 0).
-    has_aux: Optional, bool. Indicates whether `fun` returns a pair where the
-     first element is considered the output of the mathematical function to be
-     differentiated and the second element is auxiliary data. Default False.
-    holomorphic: Optional, bool. Indicates whether `fun` is promised to be
-      holomorphic. Default False.
+# def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
+#     """Creates a function which evaluates both `fun` and the gradient of `fun`
+#     per example (i.e., per observed data instance).
 
-  Returns:
-    A function with the same arguments as `fun` that evaluates both `fun` and
-    the per-example gradients of `fun` and returns them as a pair
-    (a two-element tuple). If `argnums` is an integer then the per-example
-    gradients are an array where each entry has the same shape and type as the
-    positional argument indicated by that integer. If argnums is a tuple of
-    integers, the per-example gradients result is a tuple of such arrays for
-    each of the corresponding arguments.
-  """
+#     :param fun: Per-example function to be differentiated. Its arguments at
+#         positions specified by `argnums` should be arrays, scalars, or standard
+#         Python containers. The first axis in the arguments indicates different
+#         examples. `fun` should be vectorized in the sense that it returns
+#         a vector where each element is the result of applying the function to
+#         a single input example.
+#     argnums: Optional, integer or tuple of integers. Specifies which positional
+#       argument(s) to differentiate with respect to (default 0).
+#     has_aux: Optional, bool. Indicates whether `fun` returns a pair where the
+#      first element is considered the output of the mathematical function to be
+#      differentiated and the second element is auxiliary data. Default False.
+#     holomorphic: Optional, bool. Indicates whether `fun` is promised to be
+#       holomorphic. Default False.
 
-    @functools.wraps(fun)
-    def value_and_grad_f(*args, **kwargs):
-        f = jax.linear_util.wrap_init(fun, kwargs)
-        f_partial, dyn_args = jax.api._argnums_partial(f, argnums, args)
+#   Returns:
+#     A function with the same arguments as `fun` that evaluates both `fun` and
+#     the per-example gradients of `fun` and returns them as a pair
+#     (a two-element tuple). If `argnums` is an integer then the per-example
+#     gradients are an array where each entry has the same shape and type as the
+#     positional argument indicated by that integer. If argnums is a tuple of
+#     integers, the per-example gradients result is a tuple of such arrays for
+#     each of the corresponding arguments.
+#   """
 
-        # get the result of applying fun and the vjp (backward differentation)
-        # function vjp_py
-        if not has_aux:
-            ans, vjp_py = vjp(f_partial, *dyn_args)
-        else:
-            ans, vjp_py, aux = vjp(f_partial, *dyn_args, has_aux=True)
+#     @functools.wraps(fun)
+#     def value_and_grad_f(*args, **kwargs):
+#         f = jax.linear_util.wrap_init(fun, kwargs)
+#         f_partial, dyn_args = jax.api._argnums_partial(f, argnums, args)
 
-        dtype = np.result_type(ans)
-        if not (holomorphic or np.issubdtype(dtype, np.floating)):
-            msg = ("Gradient only defined for real-output functions (with dtype"
-                    "that is a subdtype of np.floating), but got dtype {}. For"
-                    "holomorphic differentiation, pass holomorphic=True.")
-            raise TypeError(msg.format(dtype))
+#         # get the result of applying fun and the vjp (backward differentation)
+#         # function vjp_py
+#         if not has_aux:
+#             ans, vjp_py = vjp(f_partial, *dyn_args)
+#         else:
+#             ans, vjp_py, aux = vjp(f_partial, *dyn_args, has_aux=True)
 
-        assert(len(ans.shape) == 1)
+#         dtype = np.result_type(ans)
+#         if not (holomorphic or np.issubdtype(dtype, np.floating)):
+#             msg = ("Gradient only defined for real-output functions (with dtype"
+#                     "that is a subdtype of np.floating), but got dtype {}. For"
+#                     "holomorphic differentiation, pass holomorphic=True.")
+#             raise TypeError(msg.format(dtype))
 
-        # examples are aligned along the first axis
-        batch_size = ans.shape[0]
+#         assert(len(ans.shape) == 1)
 
-        # filter the gradient contribution per example using all possible
-        # one-hot vectors as inputs to vjp_py
-        one_hot_vecs = np.eye(batch_size, dtype=dtype)
-        grads = jax.vmap(
-            lambda v: vjp_py(v)[0] if isinstance(argnums, int) else vjp_py(v)
-        )(one_hot_vecs)
+#         # examples are aligned along the first axis
+#         batch_size = ans.shape[0]
 
-        if not has_aux:
-            return ans, grads
-        else:
-            return (ans, aux), grads
+#         # filter the gradient contribution per example using all possible
+#         # one-hot vectors as inputs to vjp_py
+#         one_hot_vecs = np.eye(batch_size, dtype=dtype)
+#         grads = jax.vmap(
+#             lambda v: vjp_py(v)[0] if isinstance(argnums, int) else vjp_py(v)
+#         )(one_hot_vecs)
 
-    return value_and_grad_f
+#         if not has_aux:
+#             return ans, grads
+#         else:
+#             return (ans, aux), grads
+
+#     return value_and_grad_f
 
 
 def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
@@ -123,6 +128,8 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
     def loss_fn(*args, **kwargs):
         return loss_combiner_fn(per_example_loss_fn(*args, **kwargs))
 
+    constrain_fn = None
+
     def init_fn(rng, model_args=(), guide_args=(), params=None):
         """
 
@@ -132,8 +139,11 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         :param tuple guide_args: arguments to the guide (these can possibly vary during
             the course of fitting).
         :param dict params: initial parameter values to condition on. This can be
-            useful forx
-        :return: initial optimizer state.
+            useful for initializing neural networks using more specialized methods
+            rather than sampling from the prior.
+        :return: tuple containing initial optimizer state, and `constrain_fn`, a callable
+            that transforms unconstrained parameter values from the optimizer to the
+            specified constrained domain
         """
         # note(lumip): the below is unchanged from numpyro's `svi` but seems
         #   like a very inefficient/complicated way to obtain the parameters,
@@ -150,12 +160,22 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
             guide_init = substitute(guide_init, params)
         guide_trace = trace(guide_init).get_trace(*guide_args, **kwargs)
         model_trace = trace(model_init).get_trace(*model_args, **kwargs)
+        inv_transforms = {}
         for site in list(guide_trace.values()) + list(model_trace.values()):
             if site['type'] == 'param':
-                params[site['name']] = site['value']
-        return optim_init(params)
+                constraint = site['kwargs'].pop('constraint', constraints.real)
+                transform = biject_to(constraint)
+                inv_transforms[site['name']] = transform
+                params[site['name']] = transform.inv(site['value'])
 
-    def update_fn(i, opt_state, rng, model_args=(), guide_args=()):
+        def transform_constrained(inv_transforms, params):
+            return {k: inv_transforms[k](v) for k, v in params.items()}
+
+        nonlocal constrain_fn
+        constrain_fn = jax.partial(transform_constrained, inv_transforms)
+        return optim_init(params), constrain_fn
+
+    def update_fn(i, rng, opt_state, model_args=(), guide_args=()):
         """
         Take a single step of SVI (possibly on a batch / minibatch of data),
         using the optimizer.
@@ -169,74 +189,84 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         :return: tuple of `(loss_val, opt_state, rng)`.
         """
         model_init, guide_init = _seed(model, guide, rng)
+
         params = get_params(opt_state)
-
-        per_example_loss, per_example_grads = per_example_value_and_grad(
-            per_example_loss_fn
-        )(
-            params, model_init, guide_init, model_args, guide_args, kwargs,
-            per_example_variables=per_example_variables
-        )
-        # per_example_grads will be jax tree of jax np.arrays of shape
-        #   [batch_size, (param_shape)] for each parameter
-
-        # if per-sample gradient manipulation is present, we apply it to
-        #   each gradient site in the tree
-        if per_example_grad_manipulation_fn:
-
-            # flatten it out
-            px_grads_list, px_grads_tree_def = jax.tree_flatten(
-                per_example_grads
+        def wrapped_fn(p, model_args, guide_args):
+            return per_example_loss_fn(
+                p, model_init, guide_init, model_args, guide_args, kwargs,
+                constrain_fn=constrain_fn
+                # per_example_variables=per_example_variables
             )
 
-            # apply per-sample gradient manipulation, if present
-            px_grads_list = jax.vmap(
-                per_example_grad_manipulation_fn, in_axes=0
-            )(
-                px_grads_list
-            )
-            # todo(lumip, all): by flattening the tree before passing it into
-            #   gradient manipulation, we lose all information on which value
-            #   belongs to which parameter. on the other hand, we have plain and
-            #   straightforward access to the values, which might be all we need.
-            #   think about whether that is okay or whether ps_grad_manipulation_fn
-            #   should just get the whole tree per sample to get all available
-            #   information
+        loss_val, grads = jax.value_and_grad(wrapped_fn)(params, model_args, guide_args)
 
-            # todo(lumip): can maybe apply gradient combination here instead of
-            #   mapping over the reconstructed tree? think about that!
+        # per_example_loss, per_example_grads = per_example_value_and_grad(
+        #     wrapped_fn
+        # )(
+        #     params, model_args, guide_args
+        # )
+        # # per_example_grads will be jax tree of jax np.arrays of shape
+        # #   [batch_size, (param_shape)] for each parameter
 
-            per_example_grads = jax.tree_unflatten(
-                px_grads_tree_def, px_grads_list
-            )
+        # # if per-sample gradient manipulation is present, we apply it to
+        # #   each gradient site in the tree
+        # # if per_example_grad_manipulation_fn:
 
-        # get total loss and loss combiner vjp func
-        loss_val, loss_combine_vjp = jax.vjp(loss_combiner_fn, per_example_loss)
+        # #     # flatten it out
+        # #     px_grads_list, px_grads_tree_def = jax.tree_flatten(
+        # #         per_example_grads
+        # #     )
 
-        # loss_combine_vjp gives us the backward differentiation function
-        #   from combined loss to per-example losses. we use it to get the
-        #   (1xbatch_size) Jacobian and construct a function that takes
-        #   per-example gradients and left-multiplies them with that jacobian
-        #   to get the final combined gradient
-        loss_jacobian = np.reshape(loss_combine_vjp(np.array(1))[0], (1, -1))
-        loss_vjp = lambda px_grads: np.matmul(loss_jacobian, px_grads)
+        # #     # apply per-sample gradient manipulation, if present
+        # #     px_grads_list = jax.vmap(
+        # #         per_example_grad_manipulation_fn, in_axes=0
+        # #     )(
+        # #         px_grads_list
+        # #     )
+        # #     # todo(lumip, all): by flattening the tree before passing it into
+        # #     #   gradient manipulation, we lose all information on which value
+        # #     #   belongs to which parameter. on the other hand, we have plain and
+        # #     #   straightforward access to the values, which might be all we need.
+        # #     #   think about whether that is okay or whether ps_grad_manipulation_fn
+        # #     #   should just get the whole tree per sample to get all available
+        # #     #   information
 
-        # we map the loss combination vjp func over all secondary dimensions
-        #   of gradient sites. This is necessary since some gradient
-        #   sites might be matrices in itself (e.g., for NN layers), so a stack
-        #   of those would be 3-dimensional and not admittable to np.matmul
-        loss_vjp = map_over_secondary_dims(loss_vjp)
+        # #     # todo(lumip): can maybe apply gradient combination here instead of
+        # #     #   mapping over the reconstructed tree? think about that!
 
-        # combine gradients for all parameters in the gradient jax tree
-        #   according to the loss combination vjp func
-        grads = jax.tree_util.tree_map(loss_vjp, per_example_grads)
+        # #     per_example_grads = jax.tree_unflatten(
+        # #         px_grads_tree_def, px_grads_list
+        # #     )
+
+        # # get total loss and loss combiner vjp func
+        # loss_val, loss_combine_vjp = jax.vjp(loss_combiner_fn, per_example_loss)
+
+        # # loss_combine_vjp gives us the backward differentiation function
+        # #   from combined loss to per-example losses. we use it to get the
+        # #   (1xbatch_size) Jacobian and construct a function that takes
+        # #   per-example gradients and left-multiplies them with that jacobian
+        # #   to get the final combined gradient
+        # loss_jacobian = np.reshape(loss_combine_vjp(np.array(1))[0], (1, -1))
+        # loss_vjp = lambda px_grads: np.matmul(loss_jacobian, px_grads)
+
+        # # we map the loss combination vjp func over all secondary dimensions
+        # #   of gradient sites. This is necessary since some gradient
+        # #   sites might be matrices in itself (e.g., for NN layers), so a stack
+        # #   of those would be 3-dimensional and not admittable to np.matmul
+        # loss_vjp = map_over_secondary_dims(loss_vjp)
+
+        # # combine gradients for all parameters in the gradient jax tree
+        # #   according to the loss combination vjp func
+        # grads = jax.tree_util.tree_map(loss_vjp, per_example_grads)
+
+        # grads = loss_vjp(per_example_grads)
 
         # take a step in the optimizer using the gradients
         opt_state = optim_update(i, grads, opt_state)
         rng, = random.split(rng, 1)
         return loss_val, opt_state, rng
 
-    def evaluate(opt_state, rng, model_args=(), guide_args=()):
+    def evaluate(rng, opt_state, model_args=(), guide_args=()):
         """
         Take a single step of SVI (possibly on a batch / minibatch of data).
 
@@ -252,7 +282,10 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         model_init, guide_init = _seed(model, guide, rng)
         params = get_params(opt_state)
         return loss_fn(params, model_init, guide_init, 
-                       model_args, guide_args, kwargs, per_example_variables)
+                       model_args, guide_args, kwargs, 
+                       constrain_fn=constrain_fn
+                    #    per_example_variables
+        )
 
     # Make local functions visible from the global scope once
     # `svi` is called for sphinx doc generation.
