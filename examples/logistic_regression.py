@@ -74,18 +74,17 @@ def create_toy_data(N, d):
     logits_true = X.dot(w_true)+intercept_true
     y = 1.*(sigmoid(logits_true)>onp.random.rand(N))
 
-    # note(lumip): workaround! np.array( ) of jax 0.1.35 (required by
-    #   numpyro 0.1.0) does not transform incoming numpy arrays into its
+    # note(lumip): workaround! np.array( ) of jax 0.1.37 does not necessarily
+    #   transform incoming numpy arrays into its
     #   internal representation, which can lead to an exception being thrown
-    #   if any of the affected arrays find their way into a jit'ed function.
+    #   if any of these arrays find their way into a jit'ed function.
     #   This is fixed in the current master branch of jax but due to numpyro
     #   we cannot currently benefit from that.
     # todo: remove device_put once sufficiently high version number of jax is
     #   present
-    device_put = jit(lambda x: x)
-    X = device_put(X)
-    w_true = device_put(w_true)
-    intercept_true = device_put(intercept_true)
+    X = jax.device_put(X)
+    w_true = jax.device_put(w_true)
+    intercept_true = jax.device_put(intercept_true)
 
     return X, y, w_true, intercept_true
 
