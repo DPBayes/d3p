@@ -342,14 +342,20 @@ def per_example_log_density(
         else:
             return np.ones(num_examples) * (np.sum(x) / num_examples)
 
-    per_site_sums = \
-        [axis_aware_per_example_sum(
-            site['fn'].log_prob(site['value']), site['name']
+    per_example_log_joint = np.zeros(num_examples)
+    for site in model_trace.values():
+        if site['type'] == 'sample':
+            value = site['value']
+            intermediates = site['intermediates']
+            log_prob = (
+                site['fn'].log_prob(value, intermediates) if intermediates
+                else site['fn'].log_prob(value)
          )
-         for site in model_trace.values()
-         if site['type'] == 'sample']
+            log_prob = axis_aware_per_example_sum(log_prob, site['name'])
+            if 'scale' in site:
+                log_prob = site['scale'] * log_prob
 
-    per_example_log_joint = np.sum(per_site_sums, axis=0)
+            per_example_log_joint += log_prob
 
     return per_example_log_joint, model_trace
 
