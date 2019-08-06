@@ -57,7 +57,10 @@ def is_int_scalar(x):
     
     :param x: Anything that might be an integer scalar.
     """
-    return isinstance(x, int)
+    if isinstance(x, int): return True
+    elif isinstance(x, np.integer): return True
+    elif has_shape(x) and x.shape == () and isinstance(x.dtype, np.integer): return True
+    return False
 
 def has_shape(a):
     """Returns true if the input has the shape property (indicating that it is
