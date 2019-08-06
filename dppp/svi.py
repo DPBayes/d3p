@@ -13,12 +13,35 @@ import jax
 from jax import random, vjp
 import jax.numpy as np
 
-from numpyro.handlers import replay, substitute, trace
+from numpyro.handlers import replay, substitute, trace, scale
 from numpyro.svi import _seed
 from numpyro.distributions import constraints
 from numpyro.distributions.constraints import biject_to
 
-from dppp.util import map_over_secondary_dims
+from dppp.util import map_over_secondary_dims, example_count, is_int_scalar, has_shape
+
+def minibatch(batch_or_batchsize, num_obs_total=None):
+    """Returns a context within which all samples are treated as being a
+    minibatch of a larger data set.
+
+    In essence, this marks the (log)likelihood of the sampled examples to be
+    scaled to the total loss value over the whole data set.
+
+    :param batch_or_batchsize: An integer indicating the batch size or an array
+        indicating the shape of the batch where the length of the first axis
+        is interpreted as batch size.
+    :param num_obs_total: The total number of examples/observations in the
+        full data set. Optional, defaults to the given batch size.
+    """
+    if is_int_scalar(batch_or_batchsize):
+        batch_size = batch_or_batchsize
+    elif has_shape(batch_or_batchsize):
+        batch_size = example_count(batch_or_batchsize)
+    else:
+        raise ValueError("batch_or_batchsize must be an array or an integer")
+    if num_obs_total == None:
+        num_obs_total = batch_size
+    return scale(scale_factor = num_obs_total / batch_size)
 
 
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
@@ -283,6 +306,7 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
 
     return init_fn, update_fn, evaluate
 
+
 def per_example_log_density(
     model, model_args, model_kwargs, params, per_example_variables=None):
     """
@@ -350,7 +374,7 @@ def per_example_log_density(
             log_prob = (
                 site['fn'].log_prob(value, intermediates) if intermediates
                 else site['fn'].log_prob(value)
-         )
+            )
             log_prob = axis_aware_per_example_sum(log_prob, site['name'])
             if 'scale' in site:
                 log_prob = site['scale'] * log_prob

@@ -1,6 +1,8 @@
 import jax
 import jax.numpy as np
 
+from numpyro.handlers import scale
+
 __all__ = ["map_over_secondary_dims"]
 
 def map_over_secondary_dims(f):
@@ -40,3 +42,31 @@ def map_over_secondary_dims(f):
         Z_ = jax.vmap(f, in_axes=1)(T_)
         return Z_.reshape(T.shape[1:])
     return map_over_secondary_dims_f
+
+def example_count(a):
+    """Returns the amount of examples/observations in an array interpreted
+    as multi-example data set.
+
+    :param a: The data set from which to extract the example count.
+    """
+    return a.shape[0]
+
+
+def is_int_scalar(x):
+    """Returns true if the input can be interepreted as a scalar integer value.
+    
+    :param x: Anything that might be an integer scalar.
+    """
+    return isinstance(x, int)
+
+def has_shape(a):
+    """Returns true if the input has the shape property (indicating that it is
+    some array type).
+
+    :param a: Anything that might have the shape property.
+    """
+    try:
+        a.shape
+        return True
+    except:
+        return False
