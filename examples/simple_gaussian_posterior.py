@@ -24,19 +24,29 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, substitute, trace
 
-from dppp.svi import per_example_elbo, dpsvi
+from dppp.svi import per_example_elbo, dpsvi, minibatch
+from dppp.svi import example_count
 
 from datasets import batchify_data
 
-def model(d, N=1, obs=None):
+def model(obs=None, num_obs_total=None, d=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
     """
+    if obs is not None:
+        B = example_count(obs)
+        d = obs.shape[1]
+    else:
+        assert(num_obs_total is not None)
+        B = num_obs_total
+        assert(d is not None)
+
     z_mu = sample('mu', dist.Normal(np.zeros((d,)), 1.))
     x_var = .1
-    x = sample('obs', dist.Normal(np.broadcast_to(z_mu, (N,d)), x_var), obs=obs)
+    with minibatch(B, num_obs_total):
+        x = sample('obs', dist.Normal(z_mu, x_var), obs=obs, sample_shape=(B,))
     return x
 
-def guide(d, N, obs):
+def guide(obs, num_obs_total=None, d=None):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
     """
     # very smart guide: starts with analytical solution
@@ -73,7 +83,9 @@ def ml_estimate(obs):
 def create_toy_data(N, d):
     ## Create some toy data
     mu_true = np.ones(d)
-    X = substitute(seed(model, jax.random.PRNGKey(54795)), {'mu': mu_true})(d=d, N=N)
+    X = substitute(seed(model, jax.random.PRNGKey(54795)), {'mu': mu_true})(
+        num_obs_total=N, d=d
+    )
 
     return X, mu_true
 
@@ -84,14 +96,11 @@ def main(args):
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
-    fixed_model = lambda obs: model(d=args.dimensions, N=args.batch_size, obs=obs)
-    fixed_guide = lambda obs: guide(d=args.dimensions, N=args.batch_size, obs=obs)
-
     # note(lumip): value for c currently completely made up
     svi_init, svi_update, svi_eval = dpsvi(
-        fixed_model, fixed_guide, per_example_elbo, opt_init, opt_update, 
-        get_params, clipping_threshold=20.,
-        per_example_variables={'obs'}
+        model, guide, per_example_elbo, opt_init, opt_update, 
+        get_params, num_obs_total=args.num_samples,
+        clipping_threshold=20., per_example_variables={'obs'}
     )
 
     svi_update = jit(svi_update)
@@ -112,27 +121,24 @@ def main(args):
             loss, opt_state, rng = svi_update(
                 i, update_rng, opt_state, batch, batch,
             )
-            loss_sum += loss / len(batch[0])
+            loss_sum += loss / args.num_samples
             return loss_sum, opt_state, rng
 
-        loss, opt_state, rng = lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
-        loss /= num_batch
-        return loss, opt_state, rng
+        return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
 
-    
     @jit
     def eval_test(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
             loss_sum, rng = val
             batch = train_fetch(i, data_idx)
             rng, eval_rng = jax.random.split(rng, 2)
-            loss = svi_eval(eval_rng, opt_state, batch, batch) / len(batch[0])
+            loss = svi_eval(eval_rng, opt_state, batch, batch) / args.num_samples
             loss_sum += loss
 
             return loss_sum, rng
 
         loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
-        loss = loss / num_batch
+        loss /= num_batch
         return loss
 
 	## Train model
