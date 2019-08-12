@@ -208,7 +208,9 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         :param tuple guide_args: dynamic arguments to the guide.
         :return: tuple of `(loss_val, opt_state, rng)`.
         """
-        model_init, guide_init = _seed(model, guide, rng)
+        rng, model_rng = random.split(rng, 2)
+        model_init, guide_init = _seed(model, guide, model_rng)
+        
         params = get_params(opt_state)
 
         per_example_loss, per_example_grads = per_example_value_and_grad(
@@ -274,7 +276,6 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
 
         # take a step in the optimizer using the gradients
         opt_state = optim_update(i, grads, opt_state)
-        rng, = random.split(rng, 1)
         return loss_val, opt_state, rng
 
     def evaluate(rng, opt_state, model_args=(), guide_args=()):
