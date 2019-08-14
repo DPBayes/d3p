@@ -23,7 +23,7 @@ from jax.random import PRNGKey
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample
 
-from dppp.svi import per_example_elbo, dpsvi
+from dppp.svi import per_example_elbo, dpsvi, minibatch
 
 from datasets import MNIST, load_dataset
 from example_util import sigmoid
@@ -87,7 +87,7 @@ def decoder(hidden_dim, out_dim):
     )
 
 
-def model(batch, decode, z_dim, **kwargs):
+def model(batch, decode, z_dim, num_obs_total=None, **kwargs):
     """Defines the generative probabilistic model: p(x|z)p(z)
 
     The model is conditioned on the observed data
@@ -100,14 +100,15 @@ def model(batch, decode, z_dim, **kwargs):
     :return: (named) sample x from the model observation distribution p(x|z)p(z)
     """
     decoder_params = param('decoder', None) # advertise/register decoder parameters
-    batch = np.reshape(batch, (batch.shape[0], -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
-    z = sample('z', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior on z is N(0,I)
-    img_loc = decode(decoder_params, z) # evaluate decoder (p(x|z)) on sampled z to get means for output bernoulli distribution
-    x = sample('obs', dist.Bernoulli(img_loc), obs=batch) # outputs x are sampled from bernoulli distribution depending on z and conditioned on the observed data
-    return x
+    with minibatch(batch, num_obs_total=num_obs_total):
+        batch = np.reshape(batch, (batch.shape[0], -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
+        z = sample('z', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior on z is N(0,I)
+        img_loc = decode(decoder_params, z) # evaluate decoder (p(x|z)) on sampled z to get means for output bernoulli distribution
+        x = sample('obs', dist.Bernoulli(img_loc), obs=batch) # outputs x are sampled from bernoulli distribution depending on z and conditioned on the observed data
+        return x
 
 
-def guide(batch, encode, **kwargs):
+def guide(batch, encode, num_obs_total=None, **kwargs):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|q)
 
     :param batch: a batch of observations
@@ -116,10 +117,11 @@ def guide(batch, encode, **kwargs):
     :return: (named) sampled z from the variational (guide) distribution q(z)
     """
     encoder_params = param('encoder', None) # advertise/register encoder parameters
-    batch = np.reshape(batch, (batch.shape[0], -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
-    z_loc, z_std = encode(encoder_params, batch) # obtain mean and variance for q(z) ~ p(z|x) from encoder
-    z = sample('z', dist.Normal(z_loc, z_std)) # z follows q(z)
-    return z
+    with minibatch(batch, num_obs_total=num_obs_total):
+        batch = np.reshape(batch, (batch.shape[0], -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
+        z_loc, z_std = encode(encoder_params, batch) # obtain mean and variance for q(z) ~ p(z|x) from encoder
+        z = sample('z', dist.Normal(z_loc, z_std)) # z follows q(z)
+        return z
 
 
 @jit
@@ -145,8 +147,11 @@ def binarize(rng, batch):
     return random.bernoulli(rng, batch).astype(batch.dtype)
 
 
-
 def main(args):
+    # loading data
+    train_init, train_fetch_plain, num_samples = load_dataset(MNIST, batch_size=args.batch_size, split='train')
+    test_init, test_fetch_plain, _ = load_dataset(MNIST, batch_size=args.batch_size, split='test')
+
     # obtaining model and training algorithms
     out_dim = 28*28
     encoder_init, encode = encoder(args.hidden_dim, args.z_dim)
@@ -157,29 +162,32 @@ def main(args):
     #   in early iterations gradient norm values are typically
     #   between 100 and 200 but in epoch 20 usually at 280 to 290
     svi_init, svi_update, svi_eval = dpsvi(
-        model, guide, per_example_elbo, opt_init, opt_update, 
-        get_params, clipping_threshold=300.,
-        per_example_variables={'obs', 'z'},
-        encode=encode, decode=decode, z_dim=args.z_dim
+        model, guide, per_example_elbo, opt_init, opt_update, get_params,
+        clipping_threshold=300., per_example_variables={'obs', 'z'},
+        num_obs_total=num_samples, encode=encode, decode=decode, z_dim=args.z_dim
     )
+
+    # from numpyro.svi import svi, elbo
+    # svi_init, svi_update, svi_eval = svi(
+    #     model, guide, elbo, opt_init, opt_update, 
+    #     get_params, num_obs_total=num_samples,
+    #     encode=encode, decode=decode, z_dim=args.z_dim
+    # )
 
     svi_update = jit(svi_update)
 
-    # preparing random number generators and loading data
+    # preparing random number generators
     rng = PRNGKey(0)
     rng, rng_enc, rng_dec, rng_shuffle_train = random.split(rng, 4)
-    train_init, train_fetch_plain = load_dataset(MNIST, batch_size=args.batch_size, split='train')
-    test_init, test_fetch_plain = load_dataset(MNIST, batch_size=args.batch_size, split='test')
 
-    def binarize_fetch(fetch_fn, rng):
-        def train_fetch_binarized(batch_nr, idxs):
+    def binarize_fetch(fetch_fn):
+        def fetch_binarized(batch_nr, idxs, binarize_rng):
             batch = fetch_fn(batch_nr, idxs)
-            return binarize(rng, batch[0]), batch[1]
-        return train_fetch_binarized
+            return binarize(binarize_rng, batch[0]), batch[1]
+        return fetch_binarized
 
-    rng, rng_binarize_train, rng_binarize_test = random.split(rng, 3)
-    train_fetch = binarize_fetch(train_fetch_plain, rng_binarize_train)
-    test_fetch = binarize_fetch(test_fetch_plain, rng_binarize_test)
+    train_fetch = binarize_fetch(train_fetch_plain)
+    test_fetch = binarize_fetch(test_fetch_plain)
 
     # initializing model and training algorithms
     _, encoder_params = encoder_init(rng_enc, (args.batch_size, out_dim))
@@ -187,14 +195,14 @@ def main(args):
     params = {'encoder': encoder_params, 'decoder': decoder_params}
 
     rng, svi_init_rng = random.split(rng, 2)
-    rng_shuffle_train, rng_train_init = random.split(rng_shuffle_train, 2)
+    rng_shuffle_train, binarize_rng = random.split(rng_shuffle_train, 2)
     _, train_idx = train_init()
-    sample_batch = train_fetch(0, train_idx)[0]
-    opt_state = svi_init(svi_init_rng, (sample_batch,), (sample_batch,), params)
+    sample_batch = train_fetch(0, train_idx, binarize_rng)[0]
+    opt_state, _ = svi_init(svi_init_rng, (sample_batch,), (sample_batch,), params)
 
     # functions for training tasks
     @jit
-    def epoch_train(opt_state, rng, train_idx, num_batch):
+    def epoch_train(rng, opt_state, train_idx, num_batch):
         """Trains one epoch
 
         :param opt_state: current state of the optimizer
@@ -203,19 +211,18 @@ def main(args):
         :return: overall training loss over the epoch
         """
         def body_fn(i, val):
-            loss_sum, opt_state, rng = val
-            rng, update_rng = random.split(rng, 2)
-            batch = train_fetch(i, train_idx)[0]
-            loss, opt_state, rng = svi_update(
-                i, opt_state, update_rng, (batch,), (batch,),
+            opt_state, rng = val
+            rng, binarize_rng, update_rng = random.split(rng, 3)
+            batch = train_fetch(i, train_idx, binarize_rng)[0]
+            _, opt_state, rng = svi_update(
+                i, update_rng, opt_state, (batch,), (batch,),
             )
-            loss_sum += loss
-            return loss_sum, opt_state, rng
+            return opt_state, rng
 
-        return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
+        return lax.fori_loop(0, num_batch, body_fn, (opt_state, rng))
 
     @jit
-    def eval_test(opt_state, rng, test_idx, num_batch):
+    def eval_test(rng, opt_state, test_idx, num_batch):
         """Evaluates current model state on test data.
 
         :param opt_state: current state of the optimizer
@@ -225,14 +232,14 @@ def main(args):
         """
         def body_fn(i, val):
             loss_sum, rng = val
-            rng, eval_rng = random.split(rng, 2)
-            batch = test_fetch(i, test_idx)[0]
-            loss = svi_eval(opt_state, eval_rng, (batch,), (batch,)) / len(batch)
-            loss_sum += loss
+            rng, binarize_rng, eval_rng = random.split(rng, 3)
+            batch = test_fetch(i, test_idx, binarize_rng)[0]
+            loss = svi_eval(eval_rng, opt_state, (batch,), (batch,))
+            loss_sum += loss / num_samples
             return loss_sum, rng
 
         loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
-        loss = loss / num_batch
+        loss /= num_batch
         return loss
 
     def reconstruct_img(epoch, num_epochs, opt_state, rng):
@@ -248,7 +255,7 @@ def main(args):
         :param rng: rng key
         """
         assert(num_epochs > 0)
-        img = test_fetch(0, test_idx)[0][0]
+        img = test_fetch_plain(0, test_idx)[0][0]
         plt.imsave(
             os.path.join(RESULTS_DIR, "epoch_{:0{}d}_original.png".format(
                 epoch, (int(np.log10(num_epochs))+1))
@@ -277,11 +284,11 @@ def main(args):
             rng_shuffle_train, 3
         )
         num_train, train_idx = train_init(rng=rng_train_init)
-        _, opt_state, rng = epoch_train(opt_state, rng, train_idx, num_train)
+        opt_state, rng = epoch_train(rng, opt_state, train_idx, num_train)
 
         rng, rng_test, rng_recons = random.split(rng, 3)
         num_test, test_idx = test_init(rng=rng_test_init)
-        test_loss = eval_test(opt_state, rng_test, test_idx, num_test)
+        test_loss = eval_test(rng_test, opt_state, test_idx, num_test)
 
         reconstruct_img(i, args.num_epochs, opt_state, rng_recons)
         print("Epoch {}: loss = {} ({:.2f} s.)".format(

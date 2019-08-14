@@ -14,12 +14,13 @@ setup(
     packages=find_packages(include=['dppp', 'dppp.*']),
     author='PADS @ Helsinki University and Aalto University',
     install_requires=[
-        'jax>=0.1.35',
+        'jax>=0.1.37',
         'jaxlib>=0.1.20',
-        'numpyro>=0.1.0'
+        'numpyro>0.1.0',
     ],
     extras_require={
         'dev': ['ipython'],
+        'examples': ['matplotlib'],
     },
     long_description="",
     long_description_content_type='text/markdown',

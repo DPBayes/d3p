@@ -23,29 +23,31 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, substitute
 
-from numpyro.svi import svi, elbo
-from dppp.svi import dpsvi, per_example_elbo
-import dppp.svi as mysvi
+from dppp.svi import per_example_elbo, dpsvi, minibatch
+from numpyro.svi import elbo
 
 from datasets import batchify_data
 from example_util import sigmoid
 
 
-def model(batch_X, batch_y=None):
+def model(batch_X, batch_y=None, num_obs_total=None):
     """Defines the generative probabilistic model: p(y|z,X)p(z)
 
     The model is conditioned on the observed data
     :param batch_X: a batch of predictors
     :param batch_y: a batch of observations
     """
+    assert(batch_y is None or batch_X.shape[0] == batch_y.shape[0])
     z_dim = np.atleast_2d(batch_X).shape[1]
     z_w = sample('w', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior is N(0,I)
     z_intercept = sample('intercept', dist.Normal(0,1)) # prior is N(0,1)
     logits = batch_X.dot(z_w)+z_intercept
-    return sample('obs', dist.Bernoulli(logits=logits), obs=batch_y)
+
+    with minibatch(batch_X, num_obs_total=num_obs_total):
+        return sample('obs', dist.Bernoulli(logits=logits), obs=batch_y)
 
 
-def guide(batch_X, batch_y=None):
+def guide(batch_X, batch_y=None, num_obs_total=None):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
     """
     # we are interested in the posterior of w and intercept
@@ -75,19 +77,19 @@ def create_toy_data(N, d):
 
     logits_true = X.dot(w_true)+intercept_true
     y = 1.*(sigmoid(logits_true)>onp.random.rand(N))
+    # y = 1.*(logits_true > 0.)
 
-    # note(lumip): workaround! np.array( ) of jax 0.1.35 (required by
-    #   numpyro 0.1.0) does not transform incoming numpy arrays into its
+    # note(lumip): workaround! np.array( ) of jax 0.1.37 does not necessarily
+    #   transform incoming numpy arrays into its
     #   internal representation, which can lead to an exception being thrown
-    #   if any of the affected arrays find their way into a jit'ed function.
+    #   if any of these arrays find their way into a jit'ed function.
     #   This is fixed in the current master branch of jax but due to numpyro
     #   we cannot currently benefit from that.
     # todo: remove device_put once sufficiently high version number of jax is
     #   present
-    device_put = jit(lambda x: x)
-    X = device_put(X)
-    w_true = device_put(w_true)
-    intercept_true = device_put(intercept_true)
+    X = jax.device_put(X)
+    w_true = jax.device_put(w_true)
+    intercept_true = jax.device_put(intercept_true)
 
     return X, y, w_true, intercept_true
 
@@ -123,7 +125,6 @@ def estimate_accuracy(X, y, params, rng, num_iterations=1):
     accuracies = jax.vmap(body_fn)(rngs)
     return np.average(accuracies)
 
-
 def main(args):
     X, y, w_true, intercept_true = create_toy_data(args.num_samples, args.dimensions)
     train_init, train_fetch = batchify_data((X, y), args.batch_size)
@@ -131,17 +132,10 @@ def main(args):
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
-    # svi_init, svi_update, svi_eval = dpsvi(
-    #     model, guide, elbo, opt_init, opt_update, 
-    #     get_params, clipping_threshold=20000., per_example_variables={'obs'}
-    # )
-
-    # svi_init, svi_update, svi_eval = svi(
-    #     model, guide, elbo, opt_init, opt_update, get_params
-    # )
-
-    svi_init, svi_update, svi_eval = mysvi.svi(
-        model, guide, elbo, opt_init, opt_update, get_params
+    svi_init, svi_update, svi_eval = dpsvi(
+        model, guide, elbo, opt_init, opt_update, 
+        get_params, num_obs_total=args.num_samples,
+        clipping_threshold=20., per_example_variables={'obs'}
     )
 
     svi_update = jit(svi_update)
@@ -154,23 +148,21 @@ def main(args):
     opt_state, _ = svi_init(svi_init_rng, (batch_X, batch_Y), (batch_X, batch_Y))
 
     @jit
-    def epoch_train(opt_state, rng, data_idx, num_batch):
+    def epoch_train(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
-            loss_sum, opt_state, rng = val
+            opt_state, rng = val
             rng, update_rng = random.split(rng, 2)
             batch = train_fetch(i, data_idx)
-            loss, opt_state, rng = svi_update(
+
+            _, opt_state, rng = svi_update(
                 i, update_rng, opt_state, batch, batch,
             )
-            loss_sum += loss / len(batch[0])
-            return loss_sum, opt_state, rng
+            return opt_state, rng
 
-        loss, opt_state, rng = lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
-        loss /= num_batch
-        return loss, opt_state, rng
+        return lax.fori_loop(0, num_batch, body_fn, (opt_state, rng))
 
     @jit
-    def eval_test(opt_state, rng, data_idx, num_batch):
+    def eval_test(rng, opt_state, data_idx, num_batch):
         params = get_params(opt_state)
 
         def body_fn(i, val):
@@ -180,7 +172,7 @@ def main(args):
             batch_X, batch_Y = batch
             rng, eval_rng, acc_rng = jax.random.split(rng, 3)
 
-            loss = svi_eval(eval_rng, opt_state, batch, batch) / len(batch_X)
+            loss = svi_eval(eval_rng, opt_state, batch, batch) / args.num_samples
             loss_sum += loss
 
             acc = estimate_accuracy(batch_X, batch_Y, params, acc_rng, 10)
@@ -189,8 +181,8 @@ def main(args):
             return loss_sum, acc_sum, rng
 
         loss, acc, _ = lax.fori_loop(0, num_batch, body_fn, (0., 0., rng))
-        loss = loss / num_batch
-        acc = acc / num_batch
+        loss /= num_batch
+        acc /= num_batch
         return loss, acc
 
 	## Train model
@@ -199,14 +191,14 @@ def main(args):
         rng, data_fetch_rng, test_rng = random.split(rng, 3)
 
         num_train, train_idx = train_init(rng=data_fetch_rng)
-        _, opt_state, rng = epoch_train(
-            opt_state, rng, train_idx, num_train
+        opt_state, rng = epoch_train(
+            rng, opt_state, train_idx, num_train
         )
 
         if (i % (args.num_epochs//10)) == 0:
             # computing loss over training data (for now?)
             test_loss, test_acc = eval_test(
-                opt_state, test_rng, train_idx, num_train
+                test_rng, opt_state, train_idx, num_train
             )
             print("Epoch {}: loss = {}, acc = {} ({:.2f} s.)".format(
                 i, test_loss, test_acc, time.time() - t_start

@@ -13,12 +13,35 @@ import jax
 from jax import random, vjp
 import jax.numpy as np
 
-from numpyro.handlers import replay, substitute, trace
+from numpyro.handlers import replay, substitute, trace, scale
 from numpyro.svi import _seed
 from numpyro.distributions import constraints
 from numpyro.distributions.constraints import biject_to
 
-from dppp.util import map_over_secondary_dims
+from dppp.util import map_over_secondary_dims, example_count, is_int_scalar, has_shape
+
+def minibatch(batch_or_batchsize, num_obs_total=None):
+    """Returns a context within which all samples are treated as being a
+    minibatch of a larger data set.
+
+    In essence, this marks the (log)likelihood of the sampled examples to be
+    scaled to the total loss value over the whole data set.
+
+    :param batch_or_batchsize: An integer indicating the batch size or an array
+        indicating the shape of the batch where the length of the first axis
+        is interpreted as batch size.
+    :param num_obs_total: The total number of examples/observations in the
+        full data set. Optional, defaults to the given batch size.
+    """
+    if is_int_scalar(batch_or_batchsize):
+        batch_size = batch_or_batchsize
+    elif has_shape(batch_or_batchsize):
+        batch_size = example_count(batch_or_batchsize)
+    else:
+        raise ValueError("batch_or_batchsize must be an array or an integer")
+    if num_obs_total is None:
+        num_obs_total = batch_size
+    return scale(scale_factor = num_obs_total / batch_size)
 
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
     value_and_grad_fun = jax.jit(jax.value_and_grad(fun, argnums, has_aux, holomorphic))
@@ -125,6 +148,8 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
     :return: tuple of `(init_fn, update_fn, evaluate)`.
     """
 
+    constrain_fn = None
+
     def loss_fn(*args, **kwargs):
         return loss_combiner_fn(per_example_loss_fn(*args, **kwargs))
 
@@ -188,7 +213,8 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         :param tuple guide_args: dynamic arguments to the guide.
         :return: tuple of `(loss_val, opt_state, rng)`.
         """
-        model_init, guide_init = _seed(model, guide, rng)
+        rng, model_rng = random.split(rng, 2)
+        model_init, guide_init = _seed(model, guide, model_rng)
 
         params = get_params(opt_state)
         def wrapped_fn(p, model_args, guide_args):
@@ -263,7 +289,6 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
 
         # take a step in the optimizer using the gradients
         opt_state = optim_update(i, grads, opt_state)
-        rng, = random.split(rng, 1)
         return loss_val, opt_state, rng
 
     def evaluate(rng, opt_state, model_args=(), guide_args=()):
@@ -295,6 +320,7 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         svi.evaluate = evaluate
 
     return init_fn, update_fn, evaluate
+
 
 def per_example_log_density(
     model, model_args, model_kwargs, params, per_example_variables=None):
@@ -355,21 +381,27 @@ def per_example_log_density(
         else:
             return np.ones(num_examples) * (np.sum(x) / num_examples)
 
-    per_site_sums = \
-        [axis_aware_per_example_sum(
-            site['fn'].log_prob(site['value']), site['name']
-         )
-         for site in model_trace.values()
-         if site['type'] == 'sample']
+    per_example_log_joint = np.zeros(num_examples)
+    for site in model_trace.values():
+        if site['type'] == 'sample':
+            value = site['value']
+            intermediates = site['intermediates']
+            log_prob = (
+                site['fn'].log_prob(value, intermediates) if intermediates
+                else site['fn'].log_prob(value)
+            )
+            log_prob = axis_aware_per_example_sum(log_prob, site['name'])
+            if 'scale' in site:
+                log_prob = site['scale'] * log_prob
 
-    per_example_log_joint = np.sum(per_site_sums, axis=0)
+            per_example_log_joint += log_prob
 
     return per_example_log_joint, model_trace
 
 
 def per_example_elbo(
     param_map, model, guide, model_args, guide_args, kwargs, 
-    per_example_variables=None):
+    constrain_fn, per_example_variables=None):
     """
     Per-example version of the most basic implementation of the Evidence
     Lower Bound, which is the fundamental objective in Variational Inference.
@@ -392,9 +424,13 @@ def per_example_elbo(
     :param tuple guide_args: arguments to the guide (these can possibly vary
         during the course of fitting).
     :param dict kwargs: static keyword arguments to the model / guide.
+    :param constrain_fn: a callable that transforms unconstrained parameter values
+        from the optimizer to the specified constrained domain.
     :return: negative of the Evidence Lower Bound (ELBo) per example to be
         minimized.
     """
+    
+    param_map = constrain_fn(param_map)
 
     guide_log_density, guide_trace = per_example_log_density(
         guide, guide_args, kwargs, param_map, per_example_variables
@@ -442,7 +478,7 @@ def clip_gradient(list_of_gradient_parts, c):
 
     The norm is computed by interpreting the given list of parts as a single
     vector (see `full_norm`). Each entry is then scaled by the factor
-    (C/max(C, norm)) which effectively clips the norm to C.
+    (1/max(1, norm/C)) which effectively clips the norm to C.
 
     :param list_of_gradient_parts: A list of values (of any shape) that make up
         the overall gradient vector.
@@ -451,7 +487,7 @@ def clip_gradient(list_of_gradient_parts, c):
         list_of_gradient_parts.
     """
     norm = full_norm(list_of_gradient_parts)
-    normalization_constant = c/np.maximum(norm, c)
+    normalization_constant = 1./np.maximum(1., norm/c)
     clipped_grads = [g*normalization_constant for g in list_of_gradient_parts]
     # assert(np.all(full_gradient_norm(clipped_grads)<c)) # jax doesn't like this
     return clipped_grads
