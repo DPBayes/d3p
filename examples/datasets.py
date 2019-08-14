@@ -196,9 +196,10 @@ def load_dataset(dset, batch_size=None, split='train'):
         get_batch() returns the next batch_size amount of items from the data set as specified in dataset_sample_indices
     """
     arrays = _load(dset)[split]
+    size = len(arrays[0])
     if not batch_size:
-        batch_size = len(arrays[0])
-    return batchify_data(arrays, batch_size)
+        batch_size = size
+    return batchify_data(arrays, batch_size) + (size,)
 
 def batchify_data(arrays, batch_size):
     """Returns functions to fetch (randomized) batches of a given dataset

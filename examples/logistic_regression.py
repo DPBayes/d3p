@@ -78,6 +78,7 @@ def create_toy_data(N, d):
 
     logits_true = X.dot(w_true)+intercept_true
     y = 1.*(sigmoid(logits_true)>onp.random.rand(N))
+    # y = 1.*(logits_true > 0.)
 
     # note(lumip): workaround! np.array( ) of jax 0.1.37 does not necessarily
     #   transform incoming numpy arrays into its
@@ -150,17 +151,16 @@ def main(args):
     @jit
     def epoch_train(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
-            loss_sum, opt_state, rng = val
+            opt_state, rng = val
             rng, update_rng = random.split(rng, 2)
             batch = train_fetch(i, data_idx)
 
-            loss, opt_state, rng = svi_update(
+            _, opt_state, rng = svi_update(
                 i, update_rng, opt_state, batch, batch,
             )
-            loss_sum += loss / args.num_samples
-            return loss_sum, opt_state, rng
+            return opt_state, rng
 
-        return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
+        return lax.fori_loop(0, num_batch, body_fn, (opt_state, rng))
 
     @jit
     def eval_test(rng, opt_state, data_idx, num_batch):
@@ -182,7 +182,8 @@ def main(args):
             return loss_sum, acc_sum, rng
 
         loss, acc, _ = lax.fori_loop(0, num_batch, body_fn, (0., 0., rng))
-        acc = acc / num_batch
+        loss /= num_batch
+        acc /= num_batch
         return loss, acc
 
 	## Train model
@@ -191,7 +192,7 @@ def main(args):
         rng, data_fetch_rng, test_rng = random.split(rng, 3)
 
         num_train, train_idx = train_init(rng=data_fetch_rng)
-        _, opt_state, rng = epoch_train(
+        opt_state, rng = epoch_train(
             rng, opt_state, train_idx, num_train
         )
 

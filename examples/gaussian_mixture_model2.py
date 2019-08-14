@@ -31,7 +31,7 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, trace, substitute
 
-from dppp.svi import per_example_elbo, dpsvi
+from dppp.svi import per_example_elbo, dpsvi, minibatch
 
 from jax.scipy.special import logsumexp
 from numpyro.distributions.distribution import Distribution, TransformedDistribution
@@ -54,8 +54,8 @@ class MixGaus(Distribution):
     support = constraints.real
 
     def __init__(self, locs=0., scales=1., pis=1.0, validate_args=None):
-        self.locs, self.scales, self.pis = promote_shapes(locs, scales, pis)
-        batch_shape = lax.broadcast_shapes(np.shape(locs), np.shape(scales), np.shape(pis))
+        self.locs, self.scales, self.pis = locs, scales, pis
+        batch_shape = np.shape(locs[0])
         super(MixGaus, self).__init__(batch_shape=batch_shape, validate_args=validate_args)
 
     def log_prob(self, value):
@@ -69,21 +69,22 @@ class MixGaus(Distribution):
         # ignoring this for now as we only care to compute the log_probability
         return 1
 
-def model(k, obs, _ks):
+def model(k, obs, num_obs_total=None):
     assert(obs is not None)
     _, d = np.atleast_2d(obs).shape
     pis = sample('pis', dist.Dirichlet(np.ones(k)))
     mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
     sigs = np.ones((k, d))
-    return sample('obs', MixGaus(mus, sigs, pis), obs=obs)
+    with minibatch(obs, num_obs_total=num_obs_total):
+        return sample('obs', MixGaus(mus, sigs, pis), obs=obs)
 
-def guide(k, obs, _ks):
+def guide(k, obs, num_obs_total=None):
     assert(obs is not None)
     _, d = np.atleast_2d(obs).shape
     mus_loc = param('mus_loc', np.zeros((k, d)))
     mus = sample('mus', dist.Normal(mus_loc, 1.))
     sigs = np.ones((k, d))
-    alpha = param('alpha', np.array([1.,2.]))
+    alpha = param('alpha', np.ones(k))
     pis = sample('pis', dist.Dirichlet(alpha))
     return pis, mus, sigs
 
@@ -125,19 +126,19 @@ def main(args):
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
     # note(lumip): fix the parameters in the models
-    def fix_params(model_fn, k, z):
-        def fixed_params_fn(obs):
-            return model_fn(k, obs, z)
+    def fix_params(model_fn, k):
+        def fixed_params_fn(obs, **kwargs):
+            return model_fn(k, obs, **kwargs)
         return fixed_params_fn
 
-    model_fixed = fix_params(model, k, latent_vals[0])
-    guide_fixed = fix_params(guide, k, latent_vals[0])
+    model_fixed = fix_params(model, k)
+    guide_fixed = fix_params(guide, k)
 
     # note(lumip): value for c currently completely made up
     svi_init, svi_update, svi_eval = dpsvi(
         model_fixed, guide_fixed, per_example_elbo, opt_init,
-        opt_update, get_params, clipping_threshold=20.,
-        per_example_variables={'obs'}
+        opt_update, get_params, num_obs_total=args.num_samples,
+        clipping_threshold=20., per_example_variables={'obs'}
     )
 
     svi_update = jit(svi_update)
@@ -151,18 +152,16 @@ def main(args):
     @jit
     def epoch_train(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
-            loss_sum, opt_state, rng = val
+            opt_state, rng = val
             rng, update_rng = random.split(rng, 2)
             batch = train_fetch(i, data_idx)
-            loss, opt_state, rng = svi_update(
+            _, opt_state, rng = svi_update(
                 i, update_rng, opt_state, batch, batch
             )
-            loss_sum += loss / len(batch[0])
-            return loss_sum, opt_state, rng
+            return opt_state, rng
 
-        loss, opt_state, rng = lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
-        loss /= num_batch
-        return loss, opt_state, rng
+        opt_state, rng = lax.fori_loop(0, num_batch, body_fn, (opt_state, rng))
+        return opt_state, rng
 
     
     @jit
@@ -170,7 +169,7 @@ def main(args):
         def body_fn(i, val):
             loss_sum, rng = val
             batch = train_fetch(i, data_idx)
-            loss = svi_eval(rng, opt_state, batch, batch) / len(batch[0])
+            loss = svi_eval(rng, opt_state, batch, batch) / args.num_samples
             loss_sum += loss
             return loss_sum, rng
 
@@ -188,7 +187,7 @@ def main(args):
         rng, data_fetch_rng, test_rng = random.split(rng, 3)
 
         num_train, train_idx = train_init(rng=data_fetch_rng)
-        _, opt_state, rng = epoch_train(
+        opt_state, rng = epoch_train(
             rng, opt_state, train_idx, num_train
         )
 
@@ -217,7 +216,7 @@ if __name__ == "__main__":
     parser.add_argument('-batch-size', default=32, type=int, help='batch size')
     parser.add_argument('-d', '--dimensions', default=2, type=int, help='data dimension')
     parser.add_argument('-N', '--num-samples', default=2048, type=int, help='data samples count')
-    parser.add_argument('-k', '--num-components', default=2, type=int, help='number of components in the mixture model')
-    parser.add_argument('-K', '--num-components-generated', default=2, type=int, help='number of components in generated data')
+    parser.add_argument('-k', '--num-components', default=3, type=int, help='number of components in the mixture model')
+    parser.add_argument('-K', '--num-components-generated', default=3, type=int, help='number of components in generated data')
     args = parser.parse_args()
     main(args)

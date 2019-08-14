@@ -24,11 +24,11 @@ import jax
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, trace, substitute
 
-from dppp.svi import per_example_elbo, dpsvi
+from dppp.svi import per_example_elbo, dpsvi, minibatch
 
 from datasets import batchify_data
 
-def model(k, obs_or_shape):
+def model(k, obs_or_shape, num_obs_total=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
 
     :param k: number of components in the mixture
@@ -61,10 +61,11 @@ def model(k, obs_or_shape):
     assert(np.atleast_2d(mus).shape == (k, d))
     assert(np.atleast_1d(sigs).shape[0] == k)
 
-    z = sample('z', dist.Categorical(pis)).flatten()
-    assert(z.shape == (N,))
-    X = sample('obs', dist.Normal(mus[z], sigs[z]), obs=obs)
-    assert(np.atleast_2d(X).shape == (N, d))
+    with minibatch(obs, num_obs_total=num_obs_total):
+        z = sample('z', dist.Categorical(pis)).flatten()
+        assert(z.shape == (N,))
+        X = sample('obs', dist.Normal(mus[z], sigs[z]), obs=obs, sample_shape=N)
+        assert(np.atleast_2d(X).shape == (N, d))
 
     return X
 
@@ -114,7 +115,7 @@ def estimate_pis(assignment_log_posterior):
     return pis_post
 
 
-def guide(k, obs):
+def guide(k, obs, num_obs_total=None):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
 
     :param k: number of components in the mixture
@@ -143,7 +144,8 @@ def guide(k, obs):
     # we require a z for each example. ensure that pis is of correct shape
     assert(np.atleast_2d(pis_post).shape == (N, k))
 
-    z = sample('z', dist.Categorical(pis_post)).flatten()
+    with minibatch(obs, num_obs_total=num_obs_total):
+        z = sample('z', dist.Categorical(pis_post)).flatten()
     return pis_post, z, mus, sigs
 
 def create_toy_data(N, k, d):
@@ -184,8 +186,8 @@ def main(args):
 
     # note(lumip): fix the parameters in the models
     def fix_params(model_fn, k):
-        def fixed_params_fn(obs):
-            return model_fn(k, obs)
+        def fixed_params_fn(obs, num_obs_total=None):
+            return model_fn(k, obs, num_obs_total=num_obs_total)
         return fixed_params_fn
 
     model_fixed = fix_params(model, k)
@@ -194,8 +196,9 @@ def main(args):
     # note(lumip): value for c currently completely made up
     svi_init, svi_update, svi_eval = dpsvi(
         model_fixed, guide_fixed, per_example_elbo, opt_init,
-        opt_update, get_params, clipping_threshold=20.,
-        per_example_variables={'obs', 'z'},
+        opt_update, get_params,
+        num_obs_total=args.num_samples,
+        clipping_threshold=np.inf, per_example_variables={'obs', 'z'},
     )
 
     svi_update = jit(svi_update)
@@ -209,26 +212,23 @@ def main(args):
     @jit
     def epoch_train(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
-            loss_sum, opt_state, rng = val
+            opt_state, rng = val
             rng, update_rng = random.split(rng, 2)
             batch = train_fetch(i, data_idx)
-            loss, opt_state, rng = svi_update(
+            _, opt_state, rng = svi_update(
                 i, update_rng, opt_state, batch, batch
             )
-            loss_sum += loss / len(batch[0])
-            return loss_sum, opt_state, rng
+            return opt_state, rng
 
-        loss, opt_state, rng = lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
-        loss /= num_batch
-        return loss, opt_state, rng
+        return lax.fori_loop(0, num_batch, body_fn, (opt_state, rng))
 
-    
+
     @jit
     def eval_test(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
             loss_sum, rng = val
             batch = train_fetch(i, data_idx)
-            loss = svi_eval(rng, opt_state, batch, batch) / len(batch[0])
+            loss = svi_eval(rng, opt_state, batch, batch) / args.num_samples
             loss_sum += loss
             return loss_sum, rng
 
@@ -246,7 +246,7 @@ def main(args):
         rng, data_fetch_rng, test_rng = random.split(rng, 3)
 
         num_train, train_idx = train_init(rng=data_fetch_rng)
-        _, opt_state, rng = epoch_train(
+        opt_state, rng = epoch_train(
             rng, opt_state, train_idx, num_train
         )
 
