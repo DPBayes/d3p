@@ -43,24 +43,18 @@ def map_over_secondary_dims(f):
         return Z_.reshape(T.shape[1:])
     return map_over_secondary_dims_f
 
+
 def example_count(a):
     """Returns the amount of examples/observations in an array interpreted
     as multi-example data set.
 
     :param a: The data set from which to extract the example count.
     """
-    return a.shape[0]
+    try:
+        return np.shape(a)[0]
+    except:
+        raise ValueError("given batch was not an array with at least one dimension")
 
-
-def is_int_scalar(x):
-    """Returns true if the input can be interepreted as a scalar integer value.
-    
-    :param x: Anything that might be an integer scalar.
-    """
-    if isinstance(x, int): return True
-    elif isinstance(x, np.integer): return True
-    elif has_shape(x) and x.shape == () and isinstance(x.dtype, np.integer): return True
-    return False
 
 def has_shape(a):
     """Returns true if the input has the shape property (indicating that it is
@@ -73,3 +67,19 @@ def has_shape(a):
         return True
     except:
         return False
+
+
+def is_scalar(x):
+    return not has_shape(x) or x.shape == ()
+
+
+def is_integer(x):
+    return (has_shape(x) and np.issubdtype(x.dtype, np.integer)) or np.issubdtype(type(x), np.integer)
+
+
+def is_int_scalar(x):
+    """Returns true if the input can be interepreted as a scalar integer value.
+    
+    :param x: Anything that might be an integer scalar.
+    """
+    return is_scalar(x) and is_integer(x)

@@ -39,7 +39,7 @@ def minibatch(batch_or_batchsize, num_obs_total=None):
         batch_size = example_count(batch_or_batchsize)
     else:
         raise ValueError("batch_or_batchsize must be an array or an integer")
-    if num_obs_total == None:
+    if num_obs_total is None:
         num_obs_total = batch_size
     return scale(scale_factor = num_obs_total / batch_size)
 

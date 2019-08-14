@@ -1,3 +1,5 @@
+""" tests that the dppp.clip_gradient method works correctly
+"""
 import os
 
 # allow example to find dppp without installing
