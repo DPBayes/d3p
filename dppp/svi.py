@@ -153,8 +153,6 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
     def loss_fn(*args, **kwargs):
         return loss_combiner_fn(per_example_loss_fn(*args, **kwargs))
 
-    constrain_fn = None
-
     def init_fn(rng, model_args=(), guide_args=(), params=None):
         """
 
@@ -224,68 +222,60 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
                 # per_example_variables=per_example_variables
             )
 
-        loss_val, grads = jax.value_and_grad(wrapped_fn)(params, model_args, guide_args)
+        per_example_loss, per_example_grads = per_example_value_and_grad(
+            wrapped_fn
+        )(
+            params, model_args, guide_args
+        )
 
-        # per_example_loss, per_example_grads = per_example_value_and_grad(
-        #     wrapped_fn
-        # )(
-        #     params, model_args, guide_args
-        # )
-        # # per_example_grads will be jax tree of jax np.arrays of shape
-        # #   [batch_size, (param_shape)] for each parameter
+        # get total loss and loss combiner vjp func
+        loss_val, loss_combine_vjp = jax.vjp(loss_combiner_fn, per_example_loss)
+        # loss_combine_vjp gives us the backward differentiation function
+        #   from combined loss to per-example losses. we use it to get the
+        #   (1xbatch_size) Jacobian and construct a function that takes
+        #   per-example gradients and left-multiplies them with that jacobian
+        #   to get the final combined gradient
+        loss_jacobian = np.reshape(loss_combine_vjp(np.array(1))[0], (1, -1))
+        loss_vjp = lambda px_grads: np.matmul(loss_jacobian, px_grads)
 
-        # # if per-sample gradient manipulation is present, we apply it to
-        # #   each gradient site in the tree
-        # # if per_example_grad_manipulation_fn:
+        # we map the loss combination vjp func over all secondary dimensions
+        #   of gradient sites. This is necessary since some gradient
+        #   sites might be matrices in itself (e.g., for NN layers), so a stack
+        #   of those would be 3-dimensional and not admittable to np.matmul
+        loss_vjp = map_over_secondary_dims(loss_vjp)
 
-        # #     # flatten it out
-        # #     px_grads_list, px_grads_tree_def = jax.tree_flatten(
-        # #         per_example_grads
-        # #     )
+        # per_example_grads will be jax tree of jax np.arrays of shape
+        #   [batch_size, (param_shape)] for each parameter. flatten it out!
+        px_grads_list, px_grads_tree_def = jax.tree_flatten(
+            per_example_grads
+        )
 
-        # #     # apply per-sample gradient manipulation, if present
-        # #     px_grads_list = jax.vmap(
-        # #         per_example_grad_manipulation_fn, in_axes=0
-        # #     )(
-        # #         px_grads_list
-        # #     )
-        # #     # todo(lumip, all): by flattening the tree before passing it into
-        # #     #   gradient manipulation, we lose all information on which value
-        # #     #   belongs to which parameter. on the other hand, we have plain and
-        # #     #   straightforward access to the values, which might be all we need.
-        # #     #   think about whether that is okay or whether ps_grad_manipulation_fn
-        # #     #   should just get the whole tree per sample to get all available
-        # #     #   information
+        # if per-sample gradient manipulation is present, we apply it to
+        #   each gradient site in the tree
+        if per_example_grad_manipulation_fn:
 
-        # #     # todo(lumip): can maybe apply gradient combination here instead of
-        # #     #   mapping over the reconstructed tree? think about that!
+            # apply per-sample gradient manipulation, if present
+            px_grads_list = jax.vmap(
+                per_example_grad_manipulation_fn, in_axes=0
+            )(
+                px_grads_list
+            )
+            # todo(lumip, all): by flattening the tree before passing it into
+            #   gradient manipulation, we lose all information on which value
+            #   belongs to which parameter. on the other hand, we have plain and
+            #   straightforward access to the values, which might be all we need.
+            #   think about whether that is okay or whether ps_grad_manipulation_fn
+            #   should just get the whole tree per sample to get all available
+            #   information
 
-        # #     per_example_grads = jax.tree_unflatten(
-        # #         px_grads_tree_def, px_grads_list
-        # #     )
+        # combine gradients for all parameters in the gradient jax tree
+        #   according to the loss combination vjp func
+        grads = tuple(map(loss_vjp, px_grads_list))
 
-        # # get total loss and loss combiner vjp func
-        # loss_val, loss_combine_vjp = jax.vjp(loss_combiner_fn, per_example_loss)
-
-        # # loss_combine_vjp gives us the backward differentiation function
-        # #   from combined loss to per-example losses. we use it to get the
-        # #   (1xbatch_size) Jacobian and construct a function that takes
-        # #   per-example gradients and left-multiplies them with that jacobian
-        # #   to get the final combined gradient
-        # loss_jacobian = np.reshape(loss_combine_vjp(np.array(1))[0], (1, -1))
-        # loss_vjp = lambda px_grads: np.matmul(loss_jacobian, px_grads)
-
-        # # we map the loss combination vjp func over all secondary dimensions
-        # #   of gradient sites. This is necessary since some gradient
-        # #   sites might be matrices in itself (e.g., for NN layers), so a stack
-        # #   of those would be 3-dimensional and not admittable to np.matmul
-        # loss_vjp = map_over_secondary_dims(loss_vjp)
-
-        # # combine gradients for all parameters in the gradient jax tree
-        # #   according to the loss combination vjp func
-        # grads = jax.tree_util.tree_map(loss_vjp, per_example_grads)
-
-        # grads = loss_vjp(per_example_grads)
+        # reassemble the jax tree used by optimizer for the final gradients
+        grads = jax.tree_unflatten(
+            px_grads_tree_def, grads
+        )
 
         # take a step in the optimizer using the gradients
         opt_state = optim_update(i, grads, opt_state)
