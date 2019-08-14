@@ -53,7 +53,7 @@ def example_count(a):
     try:
         return np.shape(a)[0]
     except:
-        raise ValueError("given batch was not an array with at least one dimension")
+        return 1
 
 
 def has_shape(a):
