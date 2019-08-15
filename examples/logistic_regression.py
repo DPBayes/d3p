@@ -23,7 +23,7 @@ import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, substitute
 
 from dppp.util import example_count
-from dppp.svi import per_example_elbo, dpsvi, minibatch
+from dppp.svi import dpsvi, minibatch
 from numpyro.svi import elbo
 
 from datasets import batchify_data
@@ -145,7 +145,7 @@ def main(args):
     svi_init, svi_update, svi_eval = dpsvi(
         model, guide, elbo, opt_init, opt_update, 
         get_params, num_obs_total=args.num_samples,
-        clipping_threshold=20., per_example_variables={'obs'}
+        clipping_threshold=20.
     )
 
     svi_update = jit(svi_update)
