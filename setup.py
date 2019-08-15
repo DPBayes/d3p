@@ -14,12 +14,9 @@ setup(
     packages=find_packages(include=['dppp', 'dppp.*']),
     author='PADS @ Helsinki University and Aalto University',
     install_requires=[
-        'jax>=0.1.37',
-        'jaxlib>=0.1.20',
-        'numpyro>0.1.0',
+        'numpyro @ git+https://github.com/pyro-ppl/numpyro.git@6d9af73380fae3b6217c68601e7a979eb708494a#egg=numpyro'
     ],
     extras_require={
-        'dev': ['ipython'],
         'examples': ['matplotlib'],
     },
     long_description="",
