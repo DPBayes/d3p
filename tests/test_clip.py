@@ -35,8 +35,8 @@ def assert_array_tuple_close(expected, actual):
 onp.random.seed(0)
 gradient_parts = (onp.random.randn(2, 5), onp.random.randn(6, 4, 2))
 norm = full_norm(gradient_parts)
-expectedNorm = np.sum(np.stack(tuple(np.linalg.norm(a.reshape((-1,))) for a in gradient_parts)))
-assert(expectedNorm, norm)
+expectedNorm = np.sqrt(np.sum(tuple(np.sum(np.square(x)) for x in gradient_parts)))
+assert(np.allclose(expectedNorm, norm))
 
 
 clip_threshold = norm
