@@ -22,8 +22,9 @@ from jax.random import PRNGKey
 
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample
+from numpyro.svi import elbo
 
-from dppp.svi import per_example_elbo, dpsvi, minibatch
+from dppp.svi import dpsvi, minibatch, svi
 
 from datasets import MNIST, load_dataset
 from example_util import sigmoid
@@ -99,9 +100,20 @@ def model(batch, decode, z_dim, num_obs_total=None, **kwargs):
 
     :return: (named) sample x from the model observation distribution p(x|z)p(z)
     """
+    # note(lumip): the following if construct is currently necessary because
+    #   the per-example value_and_grad function uses vmap internally, applying
+    #   model and guide to 1-example batches (and stripping the first dimension)
+    #   this is not nice because it means that model/guide have to be adapted
+    #   if they do the kind of checks as below..
+    if batch.ndim == 3:
+        batch_size = batch.shape[0]
+        batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
+    elif batch.ndim == 2:
+        batch_size = 1
+        batch = np.reshape(batch, (-1,))
+
     decoder_params = param('decoder', None) # advertise/register decoder parameters
-    with minibatch(batch, num_obs_total=num_obs_total):
-        batch = np.reshape(batch, (batch.shape[0], -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
+    with minibatch(batch_size, num_obs_total=num_obs_total):
         z = sample('z', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior on z is N(0,I)
         img_loc = decode(decoder_params, z) # evaluate decoder (p(x|z)) on sampled z to get means for output bernoulli distribution
         x = sample('obs', dist.Bernoulli(img_loc), obs=batch) # outputs x are sampled from bernoulli distribution depending on z and conditioned on the observed data
@@ -116,9 +128,20 @@ def guide(batch, encode, num_obs_total=None, **kwargs):
     :param other keyword arguments: are accepted but ignored
     :return: (named) sampled z from the variational (guide) distribution q(z)
     """
+    # note(lumip): the following if construct is currently necessary because
+    #   the per-example value_and_grad function uses vmap internally, applying
+    #   model and guide to 1-example batches (and stripping the first dimension)
+    #   this is not nice because it means that model/guide have to be adapted
+    #   if they do the kind of checks as below..
+    if batch.ndim == 3:
+        batch_size = batch.shape[0]
+        batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
+    elif batch.ndim == 2:
+        batch_size = 1
+        batch = np.reshape(batch, (-1, ))
+
     encoder_params = param('encoder', None) # advertise/register encoder parameters
-    with minibatch(batch, num_obs_total=num_obs_total):
-        batch = np.reshape(batch, (batch.shape[0], -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
+    with minibatch(batch_size, num_obs_total=num_obs_total):
         z_loc, z_std = encode(encoder_params, batch) # obtain mean and variance for q(z) ~ p(z|x) from encoder
         z = sample('z', dist.Normal(z_loc, z_std)) # z follows q(z)
         return z
@@ -161,17 +184,13 @@ def main(args):
     # note(lumip): choice of c is somewhat arbitrary at the moment.
     #   in early iterations gradient norm values are typically
     #   between 100 and 200 but in epoch 20 usually at 280 to 290
-    svi_init, svi_update, svi_eval = dpsvi(
-        model, guide, per_example_elbo, opt_init, opt_update, get_params,
-        clipping_threshold=300., per_example_variables={'obs', 'z'},
-        num_obs_total=num_samples, encode=encode, decode=decode, z_dim=args.z_dim
-    )
-
-    # from numpyro.svi import svi, elbo
-    # svi_init, svi_update, svi_eval = svi(
-    #     model, guide, elbo, opt_init, opt_update, 
-    #     get_params, num_obs_total=num_samples,
-    #     encode=encode, decode=decode, z_dim=args.z_dim
+    svi_init, svi_update, svi_eval = svi(
+        model, guide, elbo, opt_init, opt_update, get_params,
+        num_obs_total=num_samples, encode=encode, decode=decode, z_dim=args.z_dim)
+    # svi_init, svi_update, svi_eval = dpsvi(
+    #     model, guide, elbo, opt_init, opt_update, get_params,
+    #     clipping_threshold=300., per_example_variables={'obs', 'z'},
+    #     num_obs_total=num_samples, encode=encode, decode=decode, z_dim=args.z_dim
     # )
 
     svi_update = jit(svi_update)
@@ -184,7 +203,7 @@ def main(args):
         def fetch_binarized(batch_nr, idxs, binarize_rng):
             batch = fetch_fn(batch_nr, idxs)
             return binarize(binarize_rng, batch[0]), batch[1]
-        return fetch_binarized
+        return jit(fetch_binarized)
 
     train_fetch = binarize_fetch(train_fetch_plain)
     test_fetch = binarize_fetch(test_fetch_plain)

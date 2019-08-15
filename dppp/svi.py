@@ -8,6 +8,7 @@ Based on numpyro's `svi`:
 import os
 
 import functools
+import warnings
 
 import jax
 from jax import random, vjp
@@ -149,6 +150,11 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
     """
 
     constrain_fn = None
+    # note(lumip): with minibatch and vmap, we do not need the per_example_variables
+    #   parameter anymore. I haven't yet adapted all examples, so let there be
+    #   a warnign so that I don't forget.
+    if per_example_variables is not None:
+        warnings.warn("per_example_variables has been deprecated and will be removed.", DeprecationWarning)
 
     def loss_fn(*args, **kwargs):
         return loss_combiner_fn(per_example_loss_fn(*args, **kwargs))
@@ -215,11 +221,11 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         model_init, guide_init = _seed(model, guide, model_rng)
 
         params = get_params(opt_state)
+        @jax.jit
         def wrapped_fn(p, model_args, guide_args):
             return per_example_loss_fn(
                 p, model_init, guide_init, model_args, guide_args, kwargs,
                 constrain_fn=constrain_fn
-                # per_example_variables=per_example_variables
             )
 
         per_example_loss, per_example_grads = per_example_value_and_grad(
@@ -228,54 +234,79 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
             params, model_args, guide_args
         )
 
-        # get total loss and loss combiner vjp func
-        loss_val, loss_combine_vjp = jax.vjp(loss_combiner_fn, per_example_loss)
-        # loss_combine_vjp gives us the backward differentiation function
-        #   from combined loss to per-example losses. we use it to get the
-        #   (1xbatch_size) Jacobian and construct a function that takes
-        #   per-example gradients and left-multiplies them with that jacobian
-        #   to get the final combined gradient
-        loss_jacobian = np.reshape(loss_combine_vjp(np.array(1))[0], (1, -1))
-        loss_vjp = lambda px_grads: np.matmul(loss_jacobian, px_grads)
+        # note(lumip): the part below here is really messy right now. Mapping over
+        #   the per_example_grads tree messes with performance a lot, so I need
+        #   to do further experiments on what causes this.
 
-        # we map the loss combination vjp func over all secondary dimensions
-        #   of gradient sites. This is necessary since some gradient
-        #   sites might be matrices in itself (e.g., for NN layers), so a stack
-        #   of those would be 3-dimensional and not admittable to np.matmul
-        loss_vjp = map_over_secondary_dims(loss_vjp)
+        loss_val = per_example_loss[0]
 
-        # per_example_grads will be jax tree of jax np.arrays of shape
-        #   [batch_size, (param_shape)] for each parameter. flatten it out!
-        px_grads_list, px_grads_tree_def = jax.tree_flatten(
-            per_example_grads
-        )
+        # note(lumip): just flattening and then unflattening the tree is fine,
+        #   i.e., I don't notice any performance impact
+        # grads_list, grad_tree_def = jax.tree_flatten(grads)
+        # grads = jax.tree_unflatten(grad_tree_def, grads_list)
 
-        # if per-sample gradient manipulation is present, we apply it to
-        #   each gradient site in the tree
-        if per_example_grad_manipulation_fn:
+        # note(lumip): this one is fast. basically no performance impact, all
+        #   cpu cores have basically the same constant usage (obviously, this
+        #   does not produce the result we want!)
+        grads = jax.tree_map(lambda x: x[0], per_example_grads)
 
-            # apply per-sample gradient manipulation, if present
-            px_grads_list = jax.vmap(
-                per_example_grad_manipulation_fn, in_axes=0
-            )(
-                px_grads_list
-            )
-            # todo(lumip, all): by flattening the tree before passing it into
-            #   gradient manipulation, we lose all information on which value
-            #   belongs to which parameter. on the other hand, we have plain and
-            #   straightforward access to the values, which might be all we need.
-            #   think about whether that is okay or whether ps_grad_manipulation_fn
-            #   should just get the whole tree per sample to get all available
-            #   information
+        # note(lumip): this one causes cpu usage to vary a lot on each core and
+        #   has a heavy performance impact
+        grads = jax.tree_map(lambda x: np.sum(x, axis=0), per_example_grads)
 
-        # combine gradients for all parameters in the gradient jax tree
-        #   according to the loss combination vjp func
-        grads = tuple(map(loss_vjp, px_grads_list))
 
-        # reassemble the jax tree used by optimizer for the final gradients
-        grads = jax.tree_unflatten(
-            px_grads_tree_def, grads
-        )
+        # note(lumip): the below is original functionality. it is currently
+        #   commented out to focus on the tree-mapping issue and will
+        #   be reintroduced later on.
+
+        # # get total loss and loss combiner vjp func
+        # loss_val, loss_combine_vjp = jax.vjp(loss_combiner_fn, per_example_loss)
+        # # loss_combine_vjp gives us the backward differentiation function
+        # #   from combined loss to per-example losses. we use it to get the
+        # #   (1xbatch_size) Jacobian and construct a function that takes
+        # #   per-example gradients and left-multiplies them with that jacobian
+        # #   to get the final combined gradient
+        # loss_jacobian = np.reshape(loss_combine_vjp(np.array(1))[0], (1, -1))
+        # loss_vjp = lambda px_grads: np.matmul(loss_jacobian, px_grads)
+
+        # # we map the loss combination vjp func over all secondary dimensions
+        # #   of gradient sites. This is necessary since some gradient
+        # #   sites might be matrices in itself (e.g., for NN layers), so a stack
+        # #   of those would be 3-dimensional and not admittable to np.matmul
+        # loss_vjp = map_over_secondary_dims(loss_vjp)
+
+        # # per_example_grads will be jax tree of jax np.arrays of shape
+        # #   [batch_size, (param_shape)] for each parameter. flatten it out!
+        # px_grads_list, px_grads_tree_def = jax.tree_flatten(
+        #     per_example_grads
+        # )
+
+        # # if per-sample gradient manipulation is present, we apply it to
+        # #   each gradient site in the tree
+        # if per_example_grad_manipulation_fn:
+
+        #     # apply per-sample gradient manipulation, if present
+        #     px_grads_list = jax.vmap(
+        #         per_example_grad_manipulation_fn, in_axes=0
+        #     )(
+        #         px_grads_list
+        #     )
+        #     # todo(lumip, all): by flattening the tree before passing it into
+        #     #   gradient manipulation, we lose all information on which value
+        #     #   belongs to which parameter. on the other hand, we have plain and
+        #     #   straightforward access to the values, which might be all we need.
+        #     #   think about whether that is okay or whether ps_grad_manipulation_fn
+        #     #   should just get the whole tree per sample to get all available
+        #     #   information
+
+        # # combine gradients for all parameters in the gradient jax tree
+        # #   according to the loss combination vjp func
+        # grads = tuple(map(loss_vjp, px_grads_list))
+
+        # # reassemble the jax tree used by optimizer for the final gradients
+        # grads = jax.tree_unflatten(
+        #     px_grads_tree_def, grads
+        # )
 
         # take a step in the optimizer using the gradients
         opt_state = optim_update(i, grads, opt_state)
@@ -299,7 +330,6 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         return loss_fn(params, model_init, guide_init, 
                        model_args, guide_args, kwargs, 
                        constrain_fn=constrain_fn
-                    #    per_example_variables
         )
 
     # Make local functions visible from the global scope once
@@ -419,6 +449,7 @@ def per_example_elbo(
     :return: negative of the Evidence Lower Bound (ELBo) per example to be
         minimized.
     """
+    warnings.warn("per_example_elbo is deprecated", DeprecationWarning)
     
     param_map = constrain_fn(param_map)
 
@@ -495,7 +526,6 @@ def get_gradients_clipping_function(c):
         return clip_gradient(list_of_gradient_parts, c)
     return gradient_clipping_fn_inner
 
-
 def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
     get_params, clipping_threshold, per_example_variables=None, **kwargs):
     """
@@ -527,6 +557,9 @@ def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
     gradients_clipping_fn = get_gradients_clipping_function(
         clipping_threshold
     )
+
+    if per_example_variables is not None:
+        warnings.warn("per_example_variables has been deprecated and will be removed.", DeprecationWarning)
 
     return svi(model, guide, per_example_loss_fn, optim_init, optim_update,
         get_params, per_example_variables=per_example_variables,
