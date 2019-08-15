@@ -11,7 +11,6 @@ sys.path.append(os.path.dirname(sys.path[0]))
 import argparse
 import time
 
-import matplotlib.pyplot as plt
 import numpy as onp
 
 import jax.numpy as np

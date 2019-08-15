@@ -19,7 +19,6 @@ sys.path.append(os.path.dirname(sys.path[0]))
 import argparse
 import time
 
-import matplotlib.pyplot as plt
 import numpy as onp
 
 import jax.numpy as np
@@ -33,13 +32,12 @@ from numpyro.handlers import param, sample, seed, trace, substitute
 
 from dppp.svi import per_example_elbo, dpsvi, minibatch
 
-from jax.scipy.special import logsumexp
+from jax.scipy.special import logsumexp, multigammaln
 from numpyro.distributions.distribution import Distribution, TransformedDistribution
 from numpyro.distributions import constraints
 from numpyro.distributions.util import (
     cumsum,
     matrix_to_tril_vec,
-    multigammaln,
     promote_shapes,
     signed_stick_breaking_tril,
     standard_gamma,

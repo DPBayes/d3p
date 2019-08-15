@@ -12,7 +12,6 @@ import argparse
 import time
 from functools import partial
 
-import matplotlib.pyplot as plt
 import numpy as onp
 
 import jax.numpy as np
