@@ -404,6 +404,21 @@ def full_norm(list_of_parts, ord=2):
     norm = np.linalg.norm(gradients, ord=ord)
     return norm
 
+def normalize_gradient(list_of_gradient_parts, ord=2):
+    """Normalizes a gradient by its total norm.
+
+    The norm is computed by interpreting the given list of parts as a single
+    vector (see `full_norm`).
+
+    :param list_of_gradient_parts: A list of values (of any shape) that make up
+        the overall gradient vector.
+    :return: Normalized gradients given in the same format/layout/shape as
+        list_of_gradient_parts.
+    """
+    norm_inv = 1./full_norm(list_of_gradient_parts, ord=ord)
+    normalized = [norm_inv * g for g in list_of_gradient_parts]
+    return normalized
+
 def clip_gradient(list_of_gradient_parts, c):
     """Clips the total norm of a gradient by a given value C.
 
