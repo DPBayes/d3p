@@ -14,6 +14,30 @@ import numpy as onp
 
 from dppp import util
 
+# test map_over_secondary_dims
+
+x = np.array([
+    [
+        [.3, .4],
+        [2., 1.],
+        [6., 1.5]
+    ],
+    [
+        [1., 2.],
+        [2.4, -1],
+        [3.2, 1.]
+    ]
+])
+expected = np.array([
+    [1.3, 2.4],
+    [4.4, 0],
+    [9.2, 2.5]
+])
+
+mapped_sum = util.map_over_secondary_dims(np.sum)
+result = mapped_sum(x)
+assert(np.allclose(expected, result))
+
 # test is_int_scalar
 
 assert(util.is_int_scalar(5) == True)
