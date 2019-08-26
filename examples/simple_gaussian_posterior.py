@@ -21,19 +21,28 @@ from jax.random import PRNGKey
 import jax
 
 import numpyro.distributions as dist
-from numpyro.handlers import param, sample, seed, substitute, trace
+from numpyro.handlers import sample, param, seed, substitute, trace
+from numpyro.svi import elbo
 
-from dppp.svi import per_example_elbo, dpsvi, minibatch
-from dppp.svi import example_count
+from dppp.svi import dpsvi, minibatch, example_count
 
 from datasets import batchify_data
 
 def model(obs=None, num_obs_total=None, d=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
     """
+    # note(lumip): the following if construct is currently necessary because
+    #   the per-example value_and_grad function uses vmap internally, applying
+    #   model and guide to 1-example batches (and stripping the first dimension)
+    #   this is not nice because it means that model/guide have to be adapted
+    #   if they do the kind of checks as below..
     if obs is not None:
-        B = example_count(obs)
-        d = obs.shape[1]
+        if np.ndim(obs) == 2:
+            B = example_count(obs)
+            d = obs.shape[1]
+        elif np.ndim(obs) == 1:
+            B = 1
+            d = obs.shape[0]
     else:
         assert(num_obs_total is not None)
         B = num_obs_total
@@ -97,7 +106,7 @@ def main(args):
 
     # note(lumip): value for c currently completely made up
     svi_init, svi_update, svi_eval = dpsvi(
-        model, guide, per_example_elbo, opt_init, opt_update, 
+        model, guide, elbo, opt_init, opt_update, 
         get_params, num_obs_total=args.num_samples,
         clipping_threshold=20., per_example_variables={'obs'}
     )

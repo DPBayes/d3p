@@ -22,8 +22,9 @@ import jax
 
 import numpyro.distributions as dist
 from numpyro.handlers import param, sample, seed, trace, substitute
+from numpyro.svi import elbo
 
-from dppp.svi import per_example_elbo, dpsvi, minibatch
+from dppp.svi import dpsvi, minibatch
 
 from datasets import batchify_data
 
@@ -194,7 +195,7 @@ def main(args):
 
     # note(lumip): value for c currently completely made up
     svi_init, svi_update, svi_eval = dpsvi(
-        model_fixed, guide_fixed, per_example_elbo, opt_init,
+        model_fixed, guide_fixed, elbo, opt_init,
         opt_update, get_params,
         num_obs_total=args.num_samples,
         clipping_threshold=np.inf, per_example_variables={'obs', 'z'},

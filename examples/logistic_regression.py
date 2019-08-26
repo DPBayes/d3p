@@ -20,11 +20,11 @@ from jax.random import PRNGKey
 import jax
 
 import numpyro.distributions as dist
-from numpyro.handlers import param, sample, seed, substitute
+from numpyro.handlers import sample, param, seed, substitute
+from numpyro.svi import elbo
 
 from dppp.util import example_count
 from dppp.svi import dpsvi, minibatch
-from numpyro.svi import elbo
 
 from datasets import batchify_data
 from example_util import sigmoid
@@ -42,9 +42,9 @@ def model(batch_X, batch_y=None, num_obs_total=None):
     #   model and guide to 1-example batches (and stripping the first dimension)
     #   this is not nice because it means that model/guide have to be adapted
     #   if they do the kind of checks as below..
-    if batch_X.ndim == 2:
+    if np.ndim(batch_X) == 2:
         assert(batch_y is None or example_count(batch_X) == example_count(batch_y))
-    elif batch_X.ndim == 1:
+    elif np.ndim(batch_X) == 1:
         assert(batch_y is None or example_count(batch_y) == 1)
 
     z_dim = np.atleast_2d(batch_X).shape[1]
