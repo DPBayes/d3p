@@ -21,7 +21,8 @@ from jax.random import PRNGKey
 import jax
 
 import numpyro.distributions as dist
-from numpyro.handlers import param, sample, seed, trace, substitute
+from numpyro.handlers import seed, trace, substitute
+from numpyro.primitives import param, sample
 from numpyro.svi import elbo
 
 from dppp.svi import dpsvi, minibatch

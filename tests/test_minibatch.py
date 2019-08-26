@@ -17,7 +17,9 @@ import numpy as onp
 import numpyro.distributions as dist
 from numpyro.svi import elbo
 from numpyro.infer_util import log_density
-from numpyro.handlers import sample, seed
+from numpyro.handlers import seed
+from numpyro.primitives import sample
+
 from dppp.svi import minibatch
 
 def model_fn(X, N=None, num_obs_total=None):
