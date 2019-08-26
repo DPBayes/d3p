@@ -22,6 +22,7 @@ setup(
     long_description="",
     long_description_content_type='text/markdown',
     tests_require=[],
+    test_suite='tests',
     keywords='probabilistic machine learning bayesian statistics differential-privacy',
     classifiers=[
         'Intended Audience :: Developers',

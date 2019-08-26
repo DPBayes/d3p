@@ -19,7 +19,7 @@ from numpyro.svi import _seed
 from numpyro.distributions import constraints
 from numpyro.distributions.constraints import biject_to
 
-from dppp.util import map_over_secondary_dims, example_count, is_int_scalar, has_shape
+from dppp.util import map_over_secondary_dims, example_count, is_int_scalar, is_array
 
 def minibatch(batch_or_batchsize, num_obs_total=None):
     """Returns a context within which all samples are treated as being a
@@ -35,8 +35,12 @@ def minibatch(batch_or_batchsize, num_obs_total=None):
         full data set. Optional, defaults to the given batch size.
     """
     if is_int_scalar(batch_or_batchsize):
+        if not np.isscalar(batch_or_batchsize):
+            raise ValueError("if a scalar is given for batch_or_batchsize, it "
+                "can't be traced through jit. consider using static_argnums "
+                "for the jit invocation.")
         batch_size = batch_or_batchsize
-    elif has_shape(batch_or_batchsize):
+    elif is_array(batch_or_batchsize):
         batch_size = example_count(batch_or_batchsize)
     else:
         raise ValueError("batch_or_batchsize must be an array or an integer")
@@ -266,6 +270,9 @@ def full_norm(list_of_parts, ord=2):
     `numpy.linalg.norm`.
     :return: The indicated norm over the full vector.
     """
+    if list_of_parts is None or len(list_of_parts) == 0:
+        return 0.
+
     ravelled = [g.ravel() for g in list_of_parts]
     gradients = np.concatenate(ravelled)
     assert(len(gradients.shape) == 1)
@@ -285,6 +292,8 @@ def clip_gradient(list_of_gradient_parts, c):
     :return: Clipped gradients given in the same format/layout/shape as
         list_of_gradient_parts.
     """
+    if c == 0.:
+        raise ValueError("The clipping threshold must be greater than 0.")
     norm = full_norm(list_of_gradient_parts)
     normalization_constant = 1./np.maximum(1., norm/c)
     clipped_grads = [g*normalization_constant for g in list_of_gradient_parts]

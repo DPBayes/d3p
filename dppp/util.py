@@ -1,9 +1,9 @@
 import jax
 import jax.numpy as np
+from functools import reduce
 
-from numpyro.handlers import scale
-
-__all__ = ["map_over_secondary_dims"]
+__all__ = ["map_over_secondary_dims", "has_shape", "is_array", "is_scalar",
+    "is_integer", "is_int_scalar", "example_count"]
 
 def map_over_secondary_dims(f):
     """
@@ -57,28 +57,58 @@ def example_count(a):
 
 
 def has_shape(a):
-    """Returns true if the input has the shape property (indicating that it is
-    some array type).
+    """Returns True if the input has the shape attribute, indicating that it is
+    of a numpy array type.
 
-    :param a: Anything that might have the shape property.
+    Note that this also applies to scalars in jax.jit decorated functions.
     """
     try:
         a.shape
         return True
-    except:
+    except AttributeError:
         return False
+
+def is_array(a):
+    """Returns True if the input has is determined to be an array, i.e.,
+    has more than 0 dimensions and a shape attribute.
+
+    Note that this does not apply to scalars in jax.jit decorated functions.
+
+    :param a: Anything that might be an array.
+    """
+    return has_shape(a) and np.ndim(a) > 0
 
 
 def is_scalar(x):
-    return not has_shape(x) or x.shape == ()
+    """Returns True if the input can be interpreted as a scalar.
+
+    This fits actual scalars as well as arrays that contain only one element
+    (regardless of their number of dimensions). I.e., a (jax.)numpy array
+    with shape (1,1,1,1) would be considered a scalar.
+
+    Works with jax.jit.
+    """
+    # note(lumip): a call to jax.jit(is_scalar)(s), where x is a scalar,
+    #   results in an x that is a jax.numpy array without any dimensions but
+    #   which has a shape attribute. therefore, np.isscalar(x) as well as
+    #   is_array(x) are False -> we have to use has_shape(x) to detect this
+    return np.isscalar(x) or (has_shape(x) and reduce(lambda x, a: x*a, np.shape(x), 1) == 1)
 
 
 def is_integer(x):
+    """Returns True if the input value(s) (a scalar or (jax.)numpy array) have integer type.
+
+    Works with jax.jit.
+
+    :param x: Scalar or (jax.)numpy array that could have integer values.
+    """
     return (has_shape(x) and np.issubdtype(x.dtype, np.integer)) or np.issubdtype(type(x), np.integer)
 
 
 def is_int_scalar(x):
-    """Returns true if the input can be interepreted as a scalar integer value.
+    """Returns True if the input can be interepreted as a scalar integer value.
+
+    Works with jax.jit.
     
     :param x: Anything that might be an integer scalar.
     """
