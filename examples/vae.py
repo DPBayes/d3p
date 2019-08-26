@@ -187,11 +187,6 @@ def main(args):
     svi_init, svi_update, svi_eval = svi(
         model, guide, elbo, opt_init, opt_update, get_params,
         num_obs_total=num_samples, encode=encode, decode=decode, z_dim=args.z_dim)
-    # svi_init, svi_update, svi_eval = dpsvi(
-    #     model, guide, elbo, opt_init, opt_update, get_params,
-    #     clipping_threshold=300., per_example_variables={'obs', 'z'},
-    #     num_obs_total=num_samples, encode=encode, decode=decode, z_dim=args.z_dim
-    # )
 
     svi_update = jit(svi_update)
 

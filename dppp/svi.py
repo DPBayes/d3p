@@ -49,8 +49,7 @@ def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False)
     return jax.jit(jax.vmap(value_and_grad_fun, in_axes=(None, 0, 0)))
 
 def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
-    per_example_variables=None, per_example_grad_manipulation_fn=None,
-    loss_combiner_fn=np.sum, **kwargs):
+    per_example_grad_manipulation_fn=None, loss_combiner_fn=np.sum, **kwargs):
     """
     Stochastic Variational Inference given a per-example loss objective and a
     loss combiner function.
@@ -60,6 +59,20 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
     before combining them to a total loss value using `loss_combiner_fn`.
     This will allow manipulating the per-example gradients which has
     applications, e.g., in differentially private machine learning applications.
+
+    To obtain the per-example gradients, the `per_example_loss_fn` is evaluated
+    for (and the gradient take wrt) each example in a vectorized manner (using
+    `jax.vmap`).
+    
+    For this to work, the following requirements are imposed upon
+    `per_example_loss_fn`:
+    - in per-example evaluation, the leading dimension of the batch (indicating
+        the number of examples) is stripped away. the loss function must be able
+        to handle this (if it was originally designed to handle batched values)
+    - since it will be evaluated on each example, take special care that the
+        loss function scales the likelihood contribution of the data properly
+        wrt to batch size and total example count (use e.g. the `numpyro.scale`
+        or the convenience `minibatch` context managers)
 
     :param model: Python callable with Pyro primitives for the model.
     :param guide: Python callable with Pyro primitives for the guide
@@ -71,8 +84,6 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
     :param optim_update: update function for the optimizer
     :param get_params: function to get current parameters values given the
         optimizer state.
-    :param per_example_variables: Names of the variables that have per-example
-        contribution to the (log) probabilities.
     :param per_example_grad_manipulation_fn: optional function that allows to
         manipulate the gradient for each sample.
     :param loss_combiner_fn: Function to combine the per-example loss values.
@@ -83,11 +94,6 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
     """
 
     constrain_fn = None
-    # note(lumip): with minibatch and vmap, we do not need the per_example_variables
-    #   parameter anymore. I haven't yet adapted all examples, so let there be
-    #   a warnign so that I don't forget.
-    if per_example_variables is not None:
-        warnings.warn("per_example_variables has been deprecated and will be removed.", DeprecationWarning)
 
     def loss_fn(*args, **kwargs):
         return loss_combiner_fn(per_example_loss_fn(*args, **kwargs))
@@ -299,7 +305,7 @@ def get_gradients_clipping_function(c):
     return gradient_clipping_fn_inner
 
 def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
-    get_params, clipping_threshold, per_example_variables=None, **kwargs):
+    get_params, clipping_threshold, **kwargs):
     """
     Differentially-Private Stochastic Variational Inference given a per-example
     loss objective and a gradient clipping threshold.
@@ -319,8 +325,6 @@ def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
         optimizer state.
     :param clipping_threshold: The clipping threshold C to which the norm
         of each per-example gradient is clipped.
-    :param per_example_variables: Names of the variables that have per-example
-        contribution to the (log) probabilities.
     :param `**kwargs`: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     :return: tuple of `(init_fn, update_fn, evaluate)`.
@@ -330,10 +334,7 @@ def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
         clipping_threshold
     )
 
-    if per_example_variables is not None:
-        warnings.warn("per_example_variables has been deprecated and will be removed.", DeprecationWarning)
-
     return svi(model, guide, per_example_loss_fn, optim_init, optim_update,
-        get_params, per_example_variables=per_example_variables,
-        per_example_grad_manipulation_fn=gradients_clipping_fn, **kwargs
+        get_params, per_example_grad_manipulation_fn=gradients_clipping_fn,
+        **kwargs
     )

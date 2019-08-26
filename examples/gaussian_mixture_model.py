@@ -198,7 +198,7 @@ def main(args):
         model_fixed, guide_fixed, elbo, opt_init,
         opt_update, get_params,
         num_obs_total=args.num_samples,
-        clipping_threshold=np.inf, per_example_variables={'obs', 'z'},
+        clipping_threshold=np.inf
     )
 
     svi_update = jit(svi_update)
