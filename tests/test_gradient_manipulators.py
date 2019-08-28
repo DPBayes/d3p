@@ -6,7 +6,7 @@ import jax.numpy as np
 import jax
 import numpy as onp
 
-from dppp.svi import clip_gradient, full_norm
+from dppp.svi import clip_gradient, full_norm, normalize_gradient
 
 class GradientManipulatorsTests(unittest.TestCase):
 
@@ -16,15 +16,23 @@ class GradientManipulatorsTests(unittest.TestCase):
             self.assertEqual(e.shape, a.shape)
             self.assertTrue(np.allclose(a, e))
 
+    def assert_gradient_direction(self, expected_gradient_parts, actual_gradient_parts):
+        self.assertEqual(len(expected_gradient_parts), len(actual_gradient_parts))
+        norm_expected = full_norm(expected_gradient_parts)
+        norm_actual = full_norm(actual_gradient_parts)
+        for g_expected, g_actual in zip(expected_gradient_parts, actual_gradient_parts):
+            self.assertEqual(g_expected.shape, g_actual.shape)
+            g_expected_normalized = g_expected / norm_expected
+            g_actual_normalized = g_actual / norm_actual
+            self.assertTrue(np.allclose(g_expected_normalized, g_actual_normalized))
+
     def assert_clipping_results(self, gradient_parts, clipped_gradient_parts, clip_threshold):
-        self.assertEqual(len(clipped_gradient_parts), len(gradient_parts))
-        norm = full_norm(gradient_parts)
+        self.assert_gradient_direction(gradient_parts, clipped_gradient_parts)
         norm_clipped = full_norm(clipped_gradient_parts)
-        for g, g_clipped in zip(gradient_parts, clipped_gradient_parts):
-            self.assertEqual(g.shape, g_clipped.shape)
-            g_normalized = g / norm
-            g_clipped_normalized = g_clipped / norm_clipped
-            self.assertTrue(np.allclose(g_normalized, g_clipped_normalized))
+        norm = full_norm(gradient_parts)
+        self.assertLessEqual(norm_clipped, clip_threshold)
+        self.assertLessEqual(norm_clipped, norm)
+        self.assertLessEqual(norm_clipped, norm)
 
     def setUp(self):
         onp.random.seed(0)
@@ -67,6 +75,11 @@ class GradientManipulatorsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             clip_gradient(self.gradient_parts, 0.)
 
+    def test_normalize_gradient(self):
+        normalized_gradient_parts = normalize_gradient(self.gradient_parts)
+        self.assert_gradient_direction(self.gradient_parts, normalized_gradient_parts)
+        normalized_norm = full_norm(normalized_gradient_parts)
+        self.assertAlmostEqual(1., normalized_norm)
 
 if __name__ == '__main__':
     unittest.main()
