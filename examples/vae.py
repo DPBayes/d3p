@@ -24,23 +24,9 @@ import numpyro.distributions as dist
 from numpyro.primitives import param, sample
 from numpyro.svi import elbo
 
-from dppp.svi import dpsvi, minibatch, svi
+from dppp.svi import dpsvi, minibatch
 
 from datasets import MNIST, load_dataset
-from example_util import sigmoid
-
-def _elemwise_no_params(fun, **kwargs):
-    def init_fun(rng, input_shape):
-        return input_shape, ()
-
-    def apply_fun(params, inputs, rng=None):
-        return fun(inputs, **kwargs)
-
-    return init_fun, apply_fun
-
-
-Sigmoid = _elemwise_no_params(sigmoid)
-
 
 RESULTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
                               '.results'))
@@ -84,7 +70,7 @@ def decoder(hidden_dim, out_dim):
     """
     return stax.serial(
         stax.Dense(hidden_dim, W_init=stax.randn()), stax.Softplus,
-        stax.Dense(out_dim, W_init=stax.randn()), Sigmoid,
+        stax.Dense(out_dim, W_init=stax.randn()), stax.Sigmoid,
     )
 
 
