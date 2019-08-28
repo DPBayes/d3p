@@ -14,16 +14,15 @@ setup(
     packages=find_packages(include=['dppp', 'dppp.*']),
     author='PADS @ Helsinki University and Aalto University',
     install_requires=[
-        'jax>=0.1.35',
-        'jaxlib>=0.1.20',
-        'numpyro>=0.1.0'
+        'numpyro @ git+https://github.com/pyro-ppl/numpyro.git@7284e4b2e6b59847391c1b16c5b0e0ee66555c34#egg=numpyro'
     ],
     extras_require={
-        'dev': ['ipython'],
+        'examples': ['matplotlib'],
     },
     long_description="",
     long_description_content_type='text/markdown',
     tests_require=[],
+    test_suite='tests',
     keywords='probabilistic machine learning bayesian statistics differential-privacy',
     classifiers=[
         'Intended Audience :: Developers',

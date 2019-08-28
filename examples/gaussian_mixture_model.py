@@ -1,4 +1,9 @@
 """Gaussian mixture model example.
+
+Note: does not work currently and has numerical inaccuracies (in the assignment
+estimation routines). Will likely be removed in favor of the alternative
+implementation that does not directly model the (somewhat fragile) latent cluster
+assignment variable soon.
 """
 
 import os
@@ -12,7 +17,6 @@ import argparse
 import time
 from functools import partial
 
-import matplotlib.pyplot as plt
 import numpy as onp
 
 import jax.numpy as np
@@ -22,13 +26,15 @@ from jax.random import PRNGKey
 import jax
 
 import numpyro.distributions as dist
-from numpyro.handlers import param, sample, seed, trace, substitute
+from numpyro.handlers import seed, trace, substitute
+from numpyro.primitives import param, sample
+from numpyro.svi import elbo
 
-from dppp.svi import per_example_elbo, dpsvi
+from dppp.svi import dpsvi, minibatch
 
 from datasets import batchify_data
 
-def model(k, obs_or_shape):
+def model(k, obs_or_shape, num_obs_total=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
 
     :param k: number of components in the mixture
@@ -61,10 +67,11 @@ def model(k, obs_or_shape):
     assert(np.atleast_2d(mus).shape == (k, d))
     assert(np.atleast_1d(sigs).shape[0] == k)
 
-    z = sample('z', dist.Categorical(pis)).flatten()
-    assert(z.shape == (N,))
-    X = sample('obs', dist.Normal(mus[z], sigs[z]), obs=obs)
-    assert(np.atleast_2d(X).shape == (N, d))
+    with minibatch(obs, num_obs_total=num_obs_total):
+        z = sample('z', dist.Categorical(pis)).flatten()
+        assert(z.shape == (N,))
+        X = sample('obs', dist.Normal(mus[z], sigs[z]), obs=obs, sample_shape=N)
+        assert(np.atleast_2d(X).shape == (N, d))
 
     return X
 
@@ -114,7 +121,7 @@ def estimate_pis(assignment_log_posterior):
     return pis_post
 
 
-def guide(k, obs):
+def guide(k, obs, num_obs_total=None):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
 
     :param k: number of components in the mixture
@@ -143,7 +150,8 @@ def guide(k, obs):
     # we require a z for each example. ensure that pis is of correct shape
     assert(np.atleast_2d(pis_post).shape == (N, k))
 
-    z = sample('z', dist.Categorical(pis_post)).flatten()
+    with minibatch(obs, num_obs_total=num_obs_total):
+        z = sample('z', dist.Categorical(pis_post)).flatten()
     return pis_post, z, mus, sigs
 
 def create_toy_data(N, k, d):
@@ -152,9 +160,10 @@ def create_toy_data(N, k, d):
 
     # We create some toy data. To spice things up, it is imbalanced:
     #   The last component has twice as many samples as the others.
-    z = onp.random.randint(0, k+1, N)
+    z = onp.random.randint(0, k+1, 2*N)
+    
     z[z == k] = k - 1
-    X = onp.zeros((N, d))
+    X = onp.zeros((2*N, d))
 
     assert(k < 4)
     mus = [-10. * onp.ones(d), 10. * onp.ones(d), -2. * onp.ones(d)]
@@ -167,8 +176,14 @@ def create_toy_data(N, k, d):
     mus = np.array(mus)
     sigs = np.array(sigs)
 
-    latent_vals = (z, mus, sigs)
-    return X, latent_vals
+    z_train = z[:N]
+    X_train = X[:N]
+
+    z_test = z[N:]
+    X_test = X[N:]
+
+    latent_vals = (z_train, z_test, mus, sigs)
+    return X_train, X_test, latent_vals
 
 def main(args):
     N = args.num_samples
@@ -176,16 +191,16 @@ def main(args):
     k_gen = args.num_components_generated
     d = args.dimensions
 
-    X, latent_vals = create_toy_data(N, k_gen, d)
-    train_init, train_fetch = batchify_data((X,), args.batch_size)
+    X_train, X_test, latent_vals = create_toy_data(N, k_gen, d)
+    train_init, train_fetch = batchify_data((X_train,), args.batch_size)
 
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
     # note(lumip): fix the parameters in the models
     def fix_params(model_fn, k):
-        def fixed_params_fn(obs):
-            return model_fn(k, obs)
+        def fixed_params_fn(obs, num_obs_total=None):
+            return model_fn(k, obs, num_obs_total=num_obs_total)
         return fixed_params_fn
 
     model_fixed = fix_params(model, k)
@@ -193,9 +208,10 @@ def main(args):
 
     # note(lumip): value for c currently completely made up
     svi_init, svi_update, svi_eval = dpsvi(
-        model_fixed, guide_fixed, per_example_elbo, opt_init,
-        opt_update, get_params, clipping_threshold=20.,
-        per_example_variables={'obs', 'z'},
+        model_fixed, guide_fixed, elbo, opt_init,
+        opt_update, get_params,
+        num_obs_total=args.num_samples,
+        clipping_threshold=np.inf
     )
 
     svi_update = jit(svi_update)
@@ -204,31 +220,28 @@ def main(args):
 
     rng, svi_init_rng = random.split(rng, 2)
     batch = train_fetch(0)
-    opt_state = svi_init(svi_init_rng, batch, batch)
+    opt_state, _ = svi_init(svi_init_rng, batch, batch)
 
     @jit
-    def epoch_train(opt_state, rng, data_idx, num_batch):
+    def epoch_train(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
-            loss_sum, opt_state, rng = val
+            opt_state, rng = val
             rng, update_rng = random.split(rng, 2)
             batch = train_fetch(i, data_idx)
-            loss, opt_state, rng = svi_update(
-                i, opt_state, update_rng, batch, batch
+            _, opt_state, rng = svi_update(
+                i, update_rng, opt_state, batch, batch
             )
-            loss_sum += loss / len(batch[0])
-            return loss_sum, opt_state, rng
+            return opt_state, rng
 
-        loss, opt_state, rng = lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
-        loss /= num_batch
-        return loss, opt_state, rng
+        return lax.fori_loop(0, num_batch, body_fn, (opt_state, rng))
 
-    
+
     @jit
-    def eval_test(opt_state, rng, data_idx, num_batch):
+    def eval_test(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
             loss_sum, rng = val
             batch = train_fetch(i, data_idx)
-            loss = svi_eval(opt_state, rng, batch, batch) / len(batch[0])
+            loss = svi_eval(rng, opt_state, batch, batch) / args.num_samples
             loss_sum += loss
             return loss_sum, rng
 
@@ -246,14 +259,14 @@ def main(args):
         rng, data_fetch_rng, test_rng = random.split(rng, 3)
 
         num_train, train_idx = train_init(rng=data_fetch_rng)
-        _, opt_state, rng = epoch_train(
-            opt_state, rng, train_idx, num_train
+        opt_state, rng = epoch_train(
+            rng, opt_state, train_idx, num_train
         )
 
         if i % 100 == 0:
             # computing loss over training data (for now?)
             test_loss = eval_test(
-                opt_state, test_rng, train_idx, num_train
+                test_rng, opt_state, train_idx, num_train
             )
             smoothed_loss_window[window_idx] = test_loss
             smoothed_loss = onp.nanmean(smoothed_loss_window)
