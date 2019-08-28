@@ -24,23 +24,9 @@ import numpyro.distributions as dist
 from numpyro.primitives import param, sample
 from numpyro.svi import elbo
 
-from dppp.svi import dpsvi, minibatch, svi
+from dppp.svi import dpsvi, minibatch
 
 from datasets import MNIST, load_dataset
-from example_util import sigmoid
-
-def _elemwise_no_params(fun, **kwargs):
-    def init_fun(rng, input_shape):
-        return input_shape, ()
-
-    def apply_fun(params, inputs, rng=None):
-        return fun(inputs, **kwargs)
-
-    return init_fun, apply_fun
-
-
-Sigmoid = _elemwise_no_params(sigmoid)
-
 
 RESULTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
                               '.results'))
@@ -84,7 +70,7 @@ def decoder(hidden_dim, out_dim):
     """
     return stax.serial(
         stax.Dense(hidden_dim, W_init=stax.randn()), stax.Softplus,
-        stax.Dense(out_dim, W_init=stax.randn()), Sigmoid,
+        stax.Dense(out_dim, W_init=stax.randn()), stax.Sigmoid,
     )
 
 
@@ -184,9 +170,10 @@ def main(args):
     # note(lumip): choice of c is somewhat arbitrary at the moment.
     #   in early iterations gradient norm values are typically
     #   between 100 and 200 but in epoch 20 usually at 280 to 290
-    svi_init, svi_update, svi_eval = svi(
+    svi_init, svi_update, svi_eval = dpsvi(
         model, guide, elbo, opt_init, opt_update, get_params,
-        num_obs_total=num_samples, encode=encode, decode=decode, z_dim=args.z_dim)
+        num_obs_total=num_samples, clipping_threshold=300,
+        encode=encode, decode=decode, z_dim=args.z_dim)
 
     svi_update = jit(svi_update)
 

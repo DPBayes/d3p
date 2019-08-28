@@ -13,11 +13,11 @@ import time
 
 import numpy as onp
 
+import jax
 import jax.numpy as np
 from jax import jit, lax, random
-from jax.experimental import optimizers, stax
+from jax.experimental import optimizers
 from jax.random import PRNGKey
-import jax
 
 import numpyro.distributions as dist
 from numpyro.handlers import seed, substitute

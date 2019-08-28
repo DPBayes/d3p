@@ -19,14 +19,14 @@ from functools import partial
 
 import numpy as onp
 
-import jax.numpy as np
-from jax import jit, lax, random
-from jax.experimental import optimizers, stax
-from jax.random import PRNGKey
 import jax
+from jax import jit, lax, random
+from jax.experimental import optimizers
+from jax.random import PRNGKey
+import jax.numpy as np
 
 import numpyro.distributions as dist
-from numpyro.handlers import seed, trace, substitute
+from numpyro.handlers import seed
 from numpyro.primitives import param, sample
 from numpyro.svi import elbo
 

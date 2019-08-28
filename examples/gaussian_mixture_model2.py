@@ -27,33 +27,23 @@ import time
 
 import numpy as onp
 
+import jax
 import jax.numpy as np
 from jax import jit, lax, random
-from jax.experimental import optimizers, stax
+from jax.experimental import optimizers
 from jax.random import PRNGKey
-import jax
+from jax.scipy.special import logsumexp
 
 import numpyro.distributions as dist
-from numpyro.handlers import seed, trace, substitute
+from numpyro.handlers import seed
 from numpyro.primitives import sample, param
 from numpyro.svi import elbo
+from numpyro.distributions.distribution import Distribution
+from numpyro.distributions import constraints
 
 from dppp.svi import dpsvi, minibatch
 
-from jax.scipy.special import logsumexp, multigammaln
-from numpyro.distributions.distribution import Distribution, TransformedDistribution
-from numpyro.distributions import constraints
-from numpyro.distributions.util import (
-    cumsum,
-    matrix_to_tril_vec,
-    promote_shapes,
-    signed_stick_breaking_tril,
-    standard_gamma,
-    vec_to_tril_matrix
-)
-
 from datasets import batchify_data
-from example_util import softmax
 
 # we define a Distribution subclass for the gaussian mixture model
 class MixGaus(Distribution):
