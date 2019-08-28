@@ -113,3 +113,6 @@ def is_int_scalar(x):
     :param x: Anything that might be an integer scalar.
     """
     return is_scalar(x) and is_integer(x)
+
+def normalize(x):
+    return x / np.linalg.norm(x)

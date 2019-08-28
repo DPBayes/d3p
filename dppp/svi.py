@@ -4,11 +4,8 @@
 Based on numpyro's `svi`:
     https://github.com/pyro-ppl/numpyro/blob/master/numpyro/svi.py
 """
-
 import os
-
 import functools
-import warnings
 
 import jax
 from jax import random, vjp
@@ -151,6 +148,11 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         """
         Take a single step of SVI (possibly on a batch / minibatch of data),
         using the optimizer.
+
+        Caution: The returned loss is currently scaled by the batch_size. To get
+        an estimator of the overall loss on the data it needs to be normalized
+        by 1/batch_size. (The gradients used within the update are not affected
+        by this).
 
         :param int i: represents the i'th iteration over the epoch, passed as an
             argument to the optimizer's update function.

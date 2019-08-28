@@ -260,5 +260,17 @@ class UtilityTests(unittest.TestCase):
         result = example_count_jitted(a)
         self.assertEqual(expected, result)
 
+    #### normalize ####
+
+    def test_normalize_correct(self):
+        x = np.arange(7)
+        res = util.normalize(x)
+        self.assertTrue(np.allclose(1., np.linalg.norm(res)))
+
+    def test_normalize_correct_for_scalar(self):
+        x = 8.
+        res = util.normalize(x)
+        self.assertAlmostEqual(1., res)
+
 if __name__ == '__main__':
     unittest.main()

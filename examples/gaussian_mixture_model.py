@@ -1,4 +1,9 @@
 """Gaussian mixture model example.
+
+Note: does not work currently and has numerical inaccuracies (in the assignment
+estimation routines). Will likely be removed in favor of the alternative
+implementation that does not directly model the (somewhat fragile) latent cluster
+assignment variable soon.
 """
 
 import os
@@ -155,9 +160,10 @@ def create_toy_data(N, k, d):
 
     # We create some toy data. To spice things up, it is imbalanced:
     #   The last component has twice as many samples as the others.
-    z = onp.random.randint(0, k+1, N)
+    z = onp.random.randint(0, k+1, 2*N)
+    
     z[z == k] = k - 1
-    X = onp.zeros((N, d))
+    X = onp.zeros((2*N, d))
 
     assert(k < 4)
     mus = [-10. * onp.ones(d), 10. * onp.ones(d), -2. * onp.ones(d)]
@@ -170,8 +176,14 @@ def create_toy_data(N, k, d):
     mus = np.array(mus)
     sigs = np.array(sigs)
 
-    latent_vals = (z, mus, sigs)
-    return X, latent_vals
+    z_train = z[:N]
+    X_train = X[:N]
+
+    z_test = z[N:]
+    X_test = X[N:]
+
+    latent_vals = (z_train, z_test, mus, sigs)
+    return X_train, X_test, latent_vals
 
 def main(args):
     N = args.num_samples
@@ -179,8 +191,8 @@ def main(args):
     k_gen = args.num_components_generated
     d = args.dimensions
 
-    X, latent_vals = create_toy_data(N, k_gen, d)
-    train_init, train_fetch = batchify_data((X,), args.batch_size)
+    X_train, X_test, latent_vals = create_toy_data(N, k_gen, d)
+    train_init, train_fetch = batchify_data((X_train,), args.batch_size)
 
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)

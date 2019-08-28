@@ -225,15 +225,16 @@ def main(args):
         :return: overall training loss over the epoch
         """
         def body_fn(i, val):
-            opt_state, rng = val
+            loss, opt_state, rng = val
             rng, binarize_rng, update_rng = random.split(rng, 3)
             batch = train_fetch(i, train_idx, binarize_rng)[0]
-            _, opt_state, rng = svi_update(
+            batch_loss, opt_state, rng = svi_update(
                 i, update_rng, opt_state, (batch,), (batch,),
             )
-            return opt_state, rng
+            loss += batch_loss / (num_samples * args.batch_size * num_batch)
+            return loss, opt_state, rng
 
-        return lax.fori_loop(0, num_batch, body_fn, (opt_state, rng))
+        return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
 
     @jit
     def eval_test(rng, opt_state, test_idx, num_batch):
@@ -298,15 +299,15 @@ def main(args):
             rng_shuffle_train, 3
         )
         num_train, train_idx = train_init(rng=rng_train_init)
-        opt_state, rng = epoch_train(rng, opt_state, train_idx, num_train)
+        train_loss, opt_state, rng = epoch_train(rng, opt_state, train_idx, num_train)
 
         rng, rng_test, rng_recons = random.split(rng, 3)
         num_test, test_idx = test_init(rng=rng_test_init)
         test_loss = eval_test(rng_test, opt_state, test_idx, num_test)
 
         reconstruct_img(i, args.num_epochs, opt_state, rng_recons)
-        print("Epoch {}: loss = {} ({:.2f} s.)".format(
-            i, test_loss, time.time() - t_start
+        print("Epoch {}: loss = {} (on training set: {}) ({:.2f} s.)".format(
+            i, test_loss, train_loss, time.time() - t_start
         ))
 
 

@@ -24,7 +24,7 @@ from numpyro.handlers import seed, substitute
 from numpyro.primitives import param, sample
 from numpyro.svi import elbo
 
-from dppp.util import example_count
+from dppp.util import example_count, normalize
 from dppp.svi import dpsvi, minibatch
 
 from datasets import batchify_data
@@ -84,10 +84,10 @@ def create_toy_data(N, d):
     w_true = np.array(onp.random.randn(d))
     intercept_true = np.array(onp.random.randn())
 
-    X = np.array(onp.random.randn(N, d))
+    X = np.array(onp.random.randn(2*N, d))
 
     logits_true = X.dot(w_true)+intercept_true
-    y = 1.*(sigmoid(logits_true)>onp.random.rand(N))
+    y = 1.*(sigmoid(logits_true)>onp.random.rand(2*N))
     # y = 1.*(logits_true > 0.)
 
     # note(lumip): workaround! np.array( ) of jax 0.1.37 does not necessarily
@@ -102,7 +102,12 @@ def create_toy_data(N, d):
     w_true = jax.device_put(w_true)
     intercept_true = jax.device_put(intercept_true)
 
-    return X, y, w_true, intercept_true
+    X_train = X[:N]
+    y_train = y[:N]
+    X_test = X[N:]
+    y_test = y[N:]
+
+    return (X_train, y_train), (X_test, y_test), (w_true, intercept_true)
 
 
 def estimate_accuracy_fixed_params(X, y, w, intercept, rng, num_iterations=1):
@@ -137,8 +142,12 @@ def estimate_accuracy(X, y, params, rng, num_iterations=1):
     return np.average(accuracies)
 
 def main(args):
-    X, y, w_true, intercept_true = create_toy_data(args.num_samples, args.dimensions)
-    train_init, train_fetch = batchify_data((X, y), args.batch_size)
+    train_data, test_data, true_params = create_toy_data(
+        args.num_samples, args.dimensions
+    )
+
+    train_init, train_fetch = batchify_data(train_data, args.batch_size)
+    test_init, test_fetch = batchify_data(test_data, args.batch_size)
 
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
@@ -161,16 +170,17 @@ def main(args):
     @jit
     def epoch_train(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
-            opt_state, rng = val
+            loss, opt_state, rng = val
             rng, update_rng = random.split(rng, 2)
             batch = train_fetch(i, data_idx)
 
-            _, opt_state, rng = svi_update(
+            batch_loss, opt_state, rng = svi_update(
                 i, update_rng, opt_state, batch, batch,
             )
-            return opt_state, rng
+            loss += batch_loss / (args.num_samples * args.batch_size * num_batch)
+            return loss, opt_state, rng
 
-        return lax.fori_loop(0, num_batch, body_fn, (opt_state, rng))
+        return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
 
     @jit
     def eval_test(rng, opt_state, data_idx, num_batch):
@@ -179,7 +189,7 @@ def main(args):
         def body_fn(i, val):
             loss_sum, acc_sum, rng = val
 
-            batch = train_fetch(i, data_idx)
+            batch = test_fetch(i, data_idx)
             batch_X, batch_Y = batch
             rng, eval_rng, acc_rng = jax.random.split(rng, 3)
 
@@ -199,35 +209,50 @@ def main(args):
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng, data_fetch_rng, test_rng = random.split(rng, 3)
+        rng, train_rng, data_fetch_rng = random.split(rng, 3)
 
         num_train, train_idx = train_init(rng=data_fetch_rng)
-        opt_state, rng = epoch_train(
-            rng, opt_state, train_idx, num_train
+        train_loss, opt_state, _ = epoch_train(
+            train_rng, opt_state, train_idx, num_train
         )
 
         if (i % (args.num_epochs//10)) == 0:
-            # computing loss over training data (for now?)
+            rng, test_rng, test_fetch_rng = random.split(rng, 3)
+            num_test, test_idx = test_init(rng=test_fetch_rng)
             test_loss, test_acc = eval_test(
-                test_rng, opt_state, train_idx, num_train
+                test_rng, opt_state, test_idx, num_test
             )
-            print("Epoch {}: loss = {}, acc = {} ({:.2f} s.)".format(
-                i, test_loss, test_acc, time.time() - t_start
+            print("Epoch {}: loss = {}, acc = {} (loss on training set: {}) ({:.2f} s.)".format(
+                i, test_loss, test_acc, train_loss, time.time() - t_start
             ))
 
+    # parameters for logistic regression may be scaled arbitrarily. normalize
+    #   w (and scale intercept accordingly) for comparison
+    w_true = normalize(true_params[0])
+    scale_true = np.linalg.norm(true_params[0])
+    intercept_true = true_params[1] / scale_true
+
     params = get_params(opt_state)
-    print("w_loc: {}\nexpected: {}\nerror: {}".format(params['w_loc'], w_true, np.linalg.norm(params['w_loc']-w_true)))
+    w_post = normalize(params['w_loc'])
+    scale_post = np.linalg.norm(params['w_loc'])
+    intercept_post = params['intercept_loc'] / scale_post
+
+    print("w_loc: {}\nexpected: {}\nerror: {}".format(w_post, w_true, np.linalg.norm(w_post-w_true)))
     print("w_std: {}".format(np.exp(params['w_std_log'])))
     print("")
-    print("intercept_loc: {}\nexpected: {}\nerror: {}".format(params['intercept_loc'], intercept_true, np.abs(params['intercept_loc']-intercept_true)))
+    print("intercept_loc: {}\nexpected: {}\nerror: {}".format(intercept_post, intercept_true, np.abs(intercept_post-intercept_true)))
     print("intercept_std: {}".format(np.exp(params['intercept_std_log'])))
     print("")
 
+    X_test, y_test = test_data
     rng, rng_acc_true, rng_acc_post = jax.random.split(rng, 3)
-    acc_true = estimate_accuracy_fixed_params(X, y, w_true, intercept_true, rng_acc_true, 100)
-    acc_post = estimate_accuracy(X, y, params, rng_acc_post, 100)
+    # for evaluation accuracy with true parameters, we scale them to the same
+    #   scale as the found posterior. (gives better results than normalized
+    #   parameters (probably due to numerical instabilities))
+    acc_true = estimate_accuracy_fixed_params(X_test, y_test, w_true*scale_post, intercept_true*scale_post, rng_acc_true, 100)
+    acc_post = estimate_accuracy(X_test, y_test, params, rng_acc_post, 100)
 
-    print("avg accuracy:  with true parameters: {} ; with found posterior: {}\n".format(acc_true, acc_post))
+    print("avg accuracy on test set:  with true parameters: {} ; with found posterior: {}\n".format(acc_true, acc_post))
 
 
 if __name__ == "__main__":
