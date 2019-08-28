@@ -12,7 +12,6 @@ sys.path.append(os.path.dirname(sys.path[0]))
 import argparse
 import time
 
-import matplotlib.pyplot as plt
 import numpy as onp
 
 import jax.numpy as np
@@ -22,36 +21,55 @@ from jax.random import PRNGKey
 import jax
 
 import numpyro.distributions as dist
-from numpyro.handlers import param, sample, seed, substitute, trace
+from numpyro.handlers import seed, substitute, trace
+from numpyro.primitives import param, sample
+from numpyro.svi import elbo
 
-from dppp.svi import per_example_elbo, dpsvi
+from dppp.svi import dpsvi, minibatch, example_count
 
 from datasets import batchify_data
 
-def model(d, N=1, obs=None):
+def model(obs=None, num_obs_total=None, d=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
     """
+    # note(lumip): the following if construct is currently necessary because
+    #   the per-example value_and_grad function uses vmap internally, applying
+    #   model and guide to 1-example batches (and stripping the first dimension)
+    #   this is not nice because it means that model/guide have to be adapted
+    #   if they do the kind of checks as below..
+    if obs is not None:
+        if np.ndim(obs) == 2:
+            B = example_count(obs)
+            d = obs.shape[1]
+        elif np.ndim(obs) == 1:
+            B = 1
+            d = obs.shape[0]
+    else:
+        assert(num_obs_total is not None)
+        B = num_obs_total
+        assert(d is not None)
+
     z_mu = sample('mu', dist.Normal(np.zeros((d,)), 1.))
     x_var = .1
-    x = sample('obs', dist.Normal(np.broadcast_to(z_mu, (N,d)), x_var), obs=obs)
+    with minibatch(B, num_obs_total):
+        x = sample('obs', dist.Normal(z_mu, x_var), obs=obs, sample_shape=(B,))
     return x
 
-def guide(d, N, obs):
+def guide(obs, num_obs_total=None, d=None):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
     """
-    # very smart guide: starts with analytical solution
-    mu_loc, mu_std = analytical_solution(obs)
-    mu_loc = param('mu_loc', mu_loc)
-    mu_std = np.exp(param('mu_std_log', np.log(mu_std)))
+    # # very smart guide: starts with analytical solution
+    # mu_loc, mu_std = analytical_solution(obs)
+    # mu_loc = param('mu_loc', mu_loc)
+    # mu_std = np.exp(param('mu_std_log', np.log(mu_std)))
 
-    # # not so smart guide: starts from prior for mu
-    # mu_loc = param('mu_loc', np.zeros(d))
-    # mu_std = np.exp(param('mu_std_log', np.zeros(d)))
+    # not so smart guide: starts from prior for mu
+    mu_loc = param('mu_loc', np.zeros(d))
+    mu_std = np.exp(param('mu_std_log', np.zeros(d)))
 
     z_mu = sample('mu', dist.Normal(mu_loc, mu_std))
     return z_mu, mu_loc, mu_std
 
-@jit
 def analytical_solution(obs):
     N = np.atleast_1d(obs).shape[0]
     x_var = .1
@@ -73,25 +91,28 @@ def ml_estimate(obs):
 def create_toy_data(N, d):
     ## Create some toy data
     mu_true = np.ones(d)
-    X = substitute(seed(model, jax.random.PRNGKey(54795)), {'mu': mu_true})(d=d, N=N)
+    X = substitute(seed(model, jax.random.PRNGKey(54795)), {'mu': mu_true})(
+        num_obs_total=2*N, d=d
+    )
 
-    return X, mu_true
+    X_train = X[:N]
+    X_test = X[N:]
+
+    return X_train, X_test, mu_true
 
 def main(args):
-    X, mu_true = create_toy_data(args.num_samples, args.dimensions)
-    train_init, train_fetch = batchify_data((X,), args.batch_size)
+    X_train, X_test, mu_true = create_toy_data(args.num_samples, args.dimensions)
+    train_init, train_fetch = batchify_data((X_train,), args.batch_size)
+    test_init, test_fetch = batchify_data((X_test,), args.batch_size)
 
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
-    fixed_model = lambda obs: model(d=args.dimensions, N=args.batch_size, obs=obs)
-    fixed_guide = lambda obs: guide(d=args.dimensions, N=args.batch_size, obs=obs)
-
     # note(lumip): value for c currently completely made up
     svi_init, svi_update, svi_eval = dpsvi(
-        fixed_model, fixed_guide, per_example_elbo, opt_init, opt_update, 
-        get_params, clipping_threshold=20.,
-        per_example_variables={'obs'}
+        model, guide, elbo, opt_init, opt_update, 
+        get_params, d=args.dimensions,
+        num_obs_total=args.num_samples, clipping_threshold=20.
     )
 
     svi_update = jit(svi_update)
@@ -101,58 +122,56 @@ def main(args):
     rng, svi_init_rng = random.split(rng, 2)
     _, train_idx = train_init()
     batch = train_fetch(0, train_idx)
-    opt_state = svi_init(svi_init_rng, batch, batch)
+    opt_state, _ = svi_init(svi_init_rng, batch, batch)
 
     @jit
-    def epoch_train(opt_state, rng, data_idx, num_batch):
+    def epoch_train(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
-            loss_sum, opt_state, rng = val
+            loss, opt_state, rng = val
             rng, update_rng = random.split(rng, 2)
             batch = train_fetch(i, data_idx)
-            loss, opt_state, rng = svi_update(
-                i, opt_state, update_rng, batch, batch,
+            batch_loss, opt_state, rng = svi_update(
+                i, update_rng, opt_state, batch, batch,
             )
-            loss_sum += loss / len(batch[0])
-            return loss_sum, opt_state, rng
+            loss += batch_loss / (args.num_samples * args.batch_size * num_batch)
+            return loss, opt_state, rng
 
-        loss, opt_state, rng = lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
-        loss /= num_batch
-        return loss, opt_state, rng
+        return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
 
-    
     @jit
-    def eval_test(opt_state, rng, data_idx, num_batch):
+    def eval_test(rng, opt_state, data_idx, num_batch):
         def body_fn(i, val):
             loss_sum, rng = val
-            batch = train_fetch(i, data_idx)
+            batch = test_fetch(i, data_idx)
             rng, eval_rng = jax.random.split(rng, 2)
-            loss = svi_eval(opt_state, eval_rng, batch, batch) / len(batch[0])
+            loss = svi_eval(eval_rng, opt_state, batch, batch) / args.num_samples
             loss_sum += loss
 
             return loss_sum, rng
 
         loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
-        loss = loss / num_batch
+        loss /= num_batch
         return loss
 
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng, data_fetch_rng, test_rng = random.split(rng, 3)
+        rng, train_rng, data_fetch_rng = random.split(rng, 3)
 
         num_train, train_idx = train_init(rng=data_fetch_rng)
-        _, opt_state, rng = epoch_train(
-            opt_state, rng, train_idx, num_train
+        train_loss, opt_state, _ = epoch_train(
+            train_rng, opt_state, train_idx, num_train
         )
 
         if (i % (args.num_epochs // 10) == 0):
-            # computing loss over training data (for now?)
+            rng, test_rng, test_fetch_rng = random.split(rng, 3)
+            num_test, test_idx = test_init(rng=test_fetch_rng)
             test_loss = eval_test(
-                opt_state, test_rng, train_idx, num_train
+                test_rng, opt_state, test_idx, num_test
             )
 
-            print("Epoch {}: loss = {} ({:.2f} s.)".format(
-                i, test_loss, time.time() - t_start
+            print("Epoch {}: loss = {} (on training set: {}) ({:.2f} s.)".format(
+                i, test_loss, train_loss, time.time() - t_start
             ))
 
     params = get_params(opt_state)
@@ -160,9 +179,9 @@ def main(args):
     mu_std = np.exp(params['mu_std_log'])
     print("### expected: {}".format(mu_true))
     print("### svi result\nmu_loc: {}\nerror: {}\nmu_std: {}".format(mu_loc, np.linalg.norm(mu_loc-mu_true), mu_std))
-    mu_loc, mu_std = analytical_solution(X)
+    mu_loc, mu_std = analytical_solution(X_train)
     print("### analytical solution\nmu_loc: {}\nerror: {}\nmu_std: {}".format(mu_loc, np.linalg.norm(mu_loc-mu_true), mu_std))
-    mu_loc, mu_std = ml_estimate(X)
+    mu_loc, mu_std = ml_estimate(X_train)
     print("### ml estimate\nmu_loc: {}\nerror: {}\nmu_std: {}".format(mu_loc, np.linalg.norm(mu_loc-mu_true), mu_std))
 
 if __name__ == "__main__":
