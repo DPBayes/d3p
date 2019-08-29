@@ -173,7 +173,8 @@ def main(args):
 
     # note(lumip): choice of c is somewhat arbitrary at the moment.
     #   in early iterations gradient norm values are typically
-    #   between 100 and 200 but in epoch 20 usually at 280 to 290
+    #   between 100 and 200 but in epoch 20 usually at 280 to 290.
+    #   value for dp_scale completely made up currently.
     svi_init, svi_update, svi_eval = dpsvi(
         model, guide, elbo, opt_init, opt_update, 
         get_params, clipping_threshold=300.,
