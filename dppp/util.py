@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as np
-from functools import reduce
+from functools import reduce, wraps
 
 __all__ = ["map_over_secondary_dims", "has_shape", "is_array", "is_scalar",
     "is_integer", "is_int_scalar", "example_count"]
@@ -36,6 +36,7 @@ def map_over_secondary_dims(f):
         [f(a_3, b_3, c_3), f(a_4, b_4, c_4)]
     ]
     """
+    @wraps(f)
     def map_over_secondary_dims_f(T):
         assert(np.ndim(T) >= 1)
         T_ = T.reshape((T.shape[0], -1))

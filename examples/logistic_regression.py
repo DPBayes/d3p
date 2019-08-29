@@ -152,15 +152,18 @@ def main(args):
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
+    rng = PRNGKey(123)
+    rng, dp_rng = random.split(rng, 2)
+
+    # note(lumip): value for c currently completely made up
+    #   value for dp_scale completely made up currently.
     svi_init, svi_update, svi_eval = dpsvi(
-        model, guide, elbo, opt_init, opt_update, 
-        get_params, num_obs_total=args.num_samples,
+        model, guide, elbo, opt_init, opt_update, get_params,
+        rng=dp_rng, dp_scale=0.01, num_obs_total=args.num_samples,
         clipping_threshold=20.
     )
 
     svi_update = jit(svi_update)
-
-    rng = PRNGKey(123)
 
     rng, svi_init_rng, data_fetch_rng = random.split(rng, 3)
     _, train_idx = train_init(rng=data_fetch_rng)

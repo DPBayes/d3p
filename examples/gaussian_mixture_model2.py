@@ -205,16 +205,18 @@ def main(args):
     model_fixed = fix_params(model, k)
     guide_fixed = fix_params(guide, k)
 
+    rng = PRNGKey(123)
+    rng, dp_rng = random.split(rng, 2)
+
     # note(lumip): value for c currently completely made up
+    #   value for dp_scale completely made up currently.
     svi_init, svi_update, svi_eval = dpsvi(
-        model_fixed, guide_fixed, elbo, opt_init,
-        opt_update, get_params, num_obs_total=args.num_samples,
+        model_fixed, guide_fixed, elbo, opt_init, opt_update, get_params, 
+        rng=dp_rng, dp_scale=0.01, num_obs_total=args.num_samples,
         clipping_threshold=20.
     )
 
     svi_update = jit(svi_update)
-
-    rng = PRNGKey(123)
 
     rng, svi_init_rng = random.split(rng, 2)
     batch = train_fetch(0)

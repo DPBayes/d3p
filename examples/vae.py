@@ -167,18 +167,24 @@ def main(args):
     decoder_init, decode = decoder(args.hidden_dim, out_dim)
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
 
+    # preparing random number generators
+    rng = PRNGKey(0)
+    rng, dp_rng = random.split(rng, 2)
+
     # note(lumip): choice of c is somewhat arbitrary at the moment.
     #   in early iterations gradient norm values are typically
-    #   between 100 and 200 but in epoch 20 usually at 280 to 290
+    #   between 100 and 200 but in epoch 20 usually at 280 to 290.
+    #   value for dp_scale completely made up currently.
     svi_init, svi_update, svi_eval = dpsvi(
-        model, guide, elbo, opt_init, opt_update, get_params,
-        num_obs_total=num_samples, clipping_threshold=300,
-        encode=encode, decode=decode, z_dim=args.z_dim)
+        model, guide, elbo, opt_init, opt_update, 
+        get_params, clipping_threshold=300.,
+        rng=dp_rng, dp_scale=0.01, num_obs_total=num_samples,
+        encode=encode, decode=decode, z_dim=args.z_dim
+    )
 
     svi_update = jit(svi_update)
 
-    # preparing random number generators
-    rng = PRNGKey(0)
+    # decorate batch fetching routines with binarization
     rng, rng_enc, rng_dec, rng_shuffle_train = random.split(rng, 4)
 
     def binarize_fetch(fetch_fn):

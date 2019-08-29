@@ -13,6 +13,7 @@ import jax.numpy as np
 
 from numpyro.handlers import replay, substitute, trace, scale
 from numpyro.svi import _seed
+import numpyro.distributions as dist
 from numpyro.distributions import constraints
 from numpyro.distributions.constraints import biject_to
 
@@ -50,7 +51,8 @@ def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False)
     return jax.jit(jax.vmap(value_and_grad_fun, in_axes=(None, 0, 0)))
 
 def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
-    per_example_grad_manipulation_fn=None, loss_combiner_fn=np.sum, **kwargs):
+    per_example_grad_manipulation_fn=None, batch_grad_manipulation_fn=None,
+    loss_combiner_fn=np.sum, **kwargs):
     """
     Stochastic Variational Inference given a per-example loss objective and a
     loss combiner function.
@@ -89,6 +91,9 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         manipulate the gradient for each sample.
     :param loss_combiner_fn: Function to combine the per-example loss values.
         Defaults to np.sum.
+    :param batch_grad_manipulation_fn: An optional function that allows to modify
+        the total gradient. This gets called after applying the
+        per_example_grad_manipulation_fn and loss_combiner_fn.
     :param `**kwargs`: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     :return: tuple of `(init_fn, update_fn, evaluate)`.
@@ -201,10 +206,17 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
             per_example_grads
         )
 
+        # get total loss and loss combiner jvp (forward differentiation) func
+        loss_val, loss_jvp = jax.linearize(loss_combiner_fn, per_example_loss)
+
+        # flatten it out
+        px_grads_list, px_grads_tree_def = jax.tree_flatten(
+            per_example_grads
+        )
+
         # if per-sample gradient manipulation is present, we apply it to
         #   each gradient site in the tree
         if per_example_grad_manipulation_fn:
-
             # apply per-sample gradient manipulation, if present
             px_grads_list = jax.vmap(
                 per_example_grad_manipulation_fn, in_axes=0
@@ -221,11 +233,15 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
 
         # combine gradients for all parameters in the gradient jax tree
         #   according to the loss combination vjp func
-        grads = tuple(map(loss_vjp, px_grads_list))
+        grads_list = tuple(map(loss_vjp, px_grads_list))
+
+        # apply batch gradient modification (e.g., DP noise perturbation) (if any)
+        if batch_grad_manipulation_fn:
+            grads_list = batch_grad_manipulation_fn(grads_list)
 
         # reassemble the jax tree used by optimizer for the final gradients
         grads = jax.tree_unflatten(
-            px_grads_tree_def, grads
+            px_grads_tree_def, grads_list
         )
 
         # take a step in the optimizer using the gradients
@@ -331,7 +347,7 @@ def get_gradients_clipping_function(c):
     return gradient_clipping_fn_inner
 
 def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
-    get_params, clipping_threshold, **kwargs):
+    get_params, clipping_threshold, dp_scale, rng, **kwargs):
     """
     Differentially-Private Stochastic Variational Inference given a per-example
     loss objective and a gradient clipping threshold.
@@ -351,6 +367,10 @@ def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
         optimizer state.
     :param clipping_threshold: The clipping threshold C to which the norm
         of each per-example gradient is clipped.
+    :param dp_scale: Scale parameter for the Gaussian mechanism applied to
+        batch gradients.
+    :param rng: PRNG key used in sampling the Gaussian mechanism applied to
+        batch gradients.
     :param `**kwargs`: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     :return: tuple of `(init_fn, update_fn, evaluate)`.
@@ -360,7 +380,20 @@ def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
         clipping_threshold
     )
 
+    _, perturbation_rng = jax.random.split(rng, 2)
+    
+    @jax.jit
+    def grad_perturbation_fn(list_of_grads):
+        def perturb_one(grad):
+            noise = dist.Normal(0, dp_scale).sample(
+                perturbation_rng, sample_shape=grad.shape
+            )
+            return grad + noise
+
+        list_of_grads = [perturb_one(grad) for grad in list_of_grads]
+        return list_of_grads
+
     return svi(model, guide, per_example_loss_fn, optim_init, optim_update,
         get_params, per_example_grad_manipulation_fn=gradients_clipping_fn,
-        **kwargs
+        batch_grad_manipulation_fn=grad_perturbation_fn, **kwargs
     )
