@@ -206,14 +206,6 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
             per_example_grads
         )
 
-        # get total loss and loss combiner jvp (forward differentiation) func
-        loss_val, loss_jvp = jax.linearize(loss_combiner_fn, per_example_loss)
-
-        # flatten it out
-        px_grads_list, px_grads_tree_def = jax.tree_flatten(
-            per_example_grads
-        )
-
         # if per-sample gradient manipulation is present, we apply it to
         #   each gradient site in the tree
         if per_example_grad_manipulation_fn:
