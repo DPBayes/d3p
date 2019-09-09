@@ -44,8 +44,10 @@ def model(batch_X, batch_y=None, num_obs_total=None):
     #   this is not nice because it means that model/guide have to be adapted
     #   if they do the kind of checks as below..
     if np.ndim(batch_X) == 2:
+        batch_size = example_count(batch_X)
         assert(batch_y is None or example_count(batch_X) == example_count(batch_y))
     elif np.ndim(batch_X) == 1:
+        batch_size = 1
         assert(batch_y is None or example_count(batch_y) == 1)
 
     z_dim = np.atleast_2d(batch_X).shape[1]
@@ -54,8 +56,8 @@ def model(batch_X, batch_y=None, num_obs_total=None):
     z_intercept = sample('intercept', dist.Normal(0,1)) # prior is N(0,1)
     logits = batch_X.dot(z_w)+z_intercept
 
-    with minibatch(batch_X, num_obs_total=num_obs_total):
-        return sample('obs', dist.Bernoulli(logits=logits), obs=batch_y)
+    with minibatch(batch_size, num_obs_total=num_obs_total):
+        return sample('obs', dist.Bernoulli(logits=logits), obs=batch_y)#, sample_shape=(batch_size,))
 
 
 def guide(batch_X, batch_y=None, num_obs_total=None):
@@ -180,7 +182,7 @@ def main(args):
             batch_loss, opt_state, rng = svi_update(
                 i, update_rng, opt_state, batch, batch,
             )
-            loss += batch_loss / (args.num_samples * args.batch_size * num_batch)
+            loss += batch_loss / (args.num_samples * num_batch)
             return loss, opt_state, rng
 
         return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
@@ -193,20 +195,17 @@ def main(args):
             loss_sum, acc_sum, rng = val
 
             batch = test_fetch(i, data_idx)
-            batch_X, batch_Y = batch
             rng, eval_rng, acc_rng = jax.random.split(rng, 3)
 
-            loss = svi_eval(eval_rng, opt_state, batch, batch) / args.num_samples
-            loss_sum += loss
+            loss = svi_eval(eval_rng, opt_state, batch, batch)
+            loss_sum += loss / (args.num_samples * num_batch)
 
-            acc = estimate_accuracy(batch_X, batch_Y, params, acc_rng, 10)
-            acc_sum += acc
+            acc = estimate_accuracy(batch_X, batch_Y, params, acc_rng, 1)
+            acc_sum += acc / num_batch
 
             return loss_sum, acc_sum, rng
 
         loss, acc, _ = lax.fori_loop(0, num_batch, body_fn, (0., 0., rng))
-        loss /= num_batch
-        acc /= num_batch
         return loss, acc
 
 	## Train model
@@ -214,16 +213,16 @@ def main(args):
         t_start = time.time()
         rng, train_rng, data_fetch_rng = random.split(rng, 3)
 
-        num_train, train_idx = train_init(rng=data_fetch_rng)
+        num_train_batches, train_idx = train_init(rng=data_fetch_rng)
         train_loss, opt_state, _ = epoch_train(
-            train_rng, opt_state, train_idx, num_train
+            train_rng, opt_state, train_idx, num_train_batches
         )
 
         if (i % (args.num_epochs//10)) == 0:
             rng, test_rng, test_fetch_rng = random.split(rng, 3)
-            num_test, test_idx = test_init(rng=test_fetch_rng)
+            num_test_batches, test_idx = test_init(rng=test_fetch_rng)
             test_loss, test_acc = eval_test(
-                test_rng, opt_state, test_idx, num_test
+                test_rng, opt_state, test_idx, num_test_batches
             )
             print("Epoch {}: loss = {}, acc = {} (loss on training set: {}) ({:.2f} s.)".format(
                 i, test_loss, test_acc, train_loss, time.time() - t_start
@@ -252,8 +251,8 @@ def main(args):
     # for evaluation accuracy with true parameters, we scale them to the same
     #   scale as the found posterior. (gives better results than normalized
     #   parameters (probably due to numerical instabilities))
-    acc_true = estimate_accuracy_fixed_params(X_test, y_test, w_true*scale_post, intercept_true*scale_post, rng_acc_true, 100)
-    acc_post = estimate_accuracy(X_test, y_test, params, rng_acc_post, 100)
+    acc_true = estimate_accuracy_fixed_params(X_test, y_test, w_true*scale_post, intercept_true*scale_post, rng_acc_true, 10)
+    acc_post = estimate_accuracy(X_test, y_test, params, rng_acc_post, 10)
 
     print("avg accuracy on test set:  with true parameters: {} ; with found posterior: {}\n".format(acc_true, acc_post))
 

@@ -186,6 +186,7 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
 
         # get total loss and loss combiner vjp func
         loss_val, loss_combine_vjp = jax.vjp(loss_combiner_fn, per_example_loss)
+        
         # loss_combine_vjp gives us the backward differentiation function
         #   from combined loss to per-example losses. we use it to get the
         #   (1xbatch_size) Jacobian and construct a function that takes
@@ -231,11 +232,19 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         if batch_grad_manipulation_fn:
             grads_list = batch_grad_manipulation_fn(grads_list)
 
+        # computing per-example loss and gradients and summing means we have to
+        # scale by 1/batch_size to get the correct loss in expectation
+        batch_size = example_count(per_example_loss)
+        scale_to_batch = lambda x: x / batch_size
+
+        loss_val = scale_to_batch(loss_val)
+        grads_list = map(scale_to_batch, grads_list)
+
         # reassemble the jax tree used by optimizer for the final gradients
         grads = jax.tree_unflatten(
             px_grads_tree_def, grads_list
         )
-
+        
         # take a step in the optimizer using the gradients
         opt_state = optim_update(i, grads, opt_state)
         return loss_val, opt_state, rng
