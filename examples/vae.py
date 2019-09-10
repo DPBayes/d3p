@@ -25,6 +25,7 @@ from numpyro.primitives import param, sample
 from numpyro.svi import elbo
 
 from dppp.svi import dpsvi, minibatch
+from dppp.util import example_count
 
 from datasets import MNIST, load_dataset
 
@@ -91,12 +92,12 @@ def model(batch, decode, z_dim, num_obs_total=None, **kwargs):
     #   model and guide to 1-example batches (and stripping the first dimension)
     #   this is not nice because it means that model/guide have to be adapted
     #   if they do the kind of checks as below..
-    if batch.ndim == 3:
-        batch_size = batch.shape[0]
-        batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
-    elif batch.ndim == 2:
+    assert(np.ndim(batch) == 3 or np.ndim(batch) == 2)
+    if np.ndim(batch) == 3:
+        batch_size = example_count(batch)
+    else:
         batch_size = 1
-        batch = np.reshape(batch, (-1,))
+    batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
 
     decoder_params = param('decoder', None) # advertise/register decoder parameters
     with minibatch(batch_size, num_obs_total=num_obs_total):
@@ -224,7 +225,7 @@ def main(args):
             batch_loss, opt_state, rng = svi_update(
                 i, update_rng, opt_state, (batch,), (batch,),
             )
-            loss += batch_loss / (num_samples * args.batch_size * num_batch)
+            loss += batch_loss / (num_samples * num_batch)
             return loss, opt_state, rng
 
         return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
@@ -243,11 +244,10 @@ def main(args):
             rng, binarize_rng, eval_rng = random.split(rng, 3)
             batch = test_fetch(i, test_idx, binarize_rng)[0]
             loss = svi_eval(eval_rng, opt_state, (batch,), (batch,))
-            loss_sum += loss / num_samples
+            loss_sum += loss / (num_samples * num_batch)
             return loss_sum, rng
 
         loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
-        loss /= num_batch
         return loss
 
     def reconstruct_img(epoch, num_epochs, opt_state, rng):
@@ -291,12 +291,14 @@ def main(args):
         rng_shuffle_train, rng_train_init, rng_test_init = random.split(
             rng_shuffle_train, 3
         )
-        num_train, train_idx = train_init(rng=rng_train_init)
-        train_loss, opt_state, rng = epoch_train(rng, opt_state, train_idx, num_train)
+        num_train_batches, train_idx = train_init(rng=rng_train_init)
+        train_loss, opt_state, rng = epoch_train(
+            rng, opt_state, train_idx, num_train_batches
+        )
 
         rng, rng_test, rng_recons = random.split(rng, 3)
-        num_test, test_idx = test_init(rng=rng_test_init)
-        test_loss = eval_test(rng_test, opt_state, test_idx, num_test)
+        num_test_batches, test_idx = test_init(rng=rng_test_init)
+        test_loss = eval_test(rng_test, opt_state, test_idx, num_test_batches)
 
         reconstruct_img(i, args.num_epochs, opt_state, rng_recons)
         print("Epoch {}: loss = {} (on training set: {}) ({:.2f} s.)".format(

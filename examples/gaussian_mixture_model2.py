@@ -80,17 +80,21 @@ def model(k, obs, num_obs_total=None):
     # this is our model function using the MixGaus distribution defined above
     # with prior belief
     assert(obs is not None)
-    _, d = np.atleast_2d(obs).shape
+    assert(np.ndim(obs) <= 2)
+    # np.atleast_2d necessary because batch_size dimension is strapped during gradient computation
+    batch_size, d = np.shape(np.atleast_2d(obs))
+
     pis = sample('pis', dist.Dirichlet(np.ones(k)))
     mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
     sigs = np.ones((k, d))
-    with minibatch(obs, num_obs_total=num_obs_total):
+    with minibatch(batch_size, num_obs_total=num_obs_total):
         return sample('obs', MixGaus(mus, sigs, pis), obs=obs)
 
 def guide(k, obs, num_obs_total=None):
     # the latent MixGaus distribution which learns the parameters
     assert(obs is not None)
-    _, d = np.atleast_2d(obs).shape
+    _, d = np.shape(np.atleast_2d(obs))
+
     mus_loc = param('mus_loc', np.zeros((k, d)))
     mus = sample('mus', dist.Normal(mus_loc, 1.))
     sigs = np.ones((k, d))
@@ -191,7 +195,7 @@ def main(args):
 
     X_train, X_test, latent_vals = create_toy_data(N, k_gen, d)
     train_init, train_fetch = batchify_data((X_train,), args.batch_size)
-    test_init, test_fetch = batchify_data((X_train,), args.batch_size)
+    test_init, test_fetch = batchify_data((X_test,), args.batch_size)
 
     ## Init optimizer and training algorithms
     opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
@@ -231,7 +235,7 @@ def main(args):
             batch_loss, opt_state, rng = svi_update(
                 i, update_rng, opt_state, batch, batch
             )
-            loss += batch_loss / (args.num_samples * args.batch_size * num_batch)
+            loss += batch_loss / (args.num_samples * num_batch)
             return loss, opt_state, rng
 
         return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
@@ -241,8 +245,8 @@ def main(args):
         def body_fn(i, val):
             loss_sum, rng = val
             batch = test_fetch(i, data_idx)
-            loss = svi_eval(rng, opt_state, batch, batch) / args.num_samples
-            loss_sum += loss / num_batch
+            loss = svi_eval(rng, opt_state, batch, batch)
+            loss_sum += loss / (args.num_samples * num_batch)
             return loss_sum, rng
 
         loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
@@ -257,16 +261,16 @@ def main(args):
         t_start = time.time()
         rng, train_rng, data_fetch_rng = random.split(rng, 3)
 
-        num_train, train_idx = train_init(rng=data_fetch_rng)
+        num_train_batches, train_idx = train_init(rng=data_fetch_rng)
         train_loss, opt_state, _ = epoch_train(
-            train_rng, opt_state, train_idx, num_train
+            train_rng, opt_state, train_idx, num_train_batches
         )
 
         if i % 100 == 0:
             rng, test_rng, test_fetch_rng = random.split(rng, 3)
-            num_test, test_idx = test_init(rng=test_fetch_rng)
+            num_test_batches, test_idx = test_init(rng=test_fetch_rng)
             test_loss = eval_test(
-                test_rng, opt_state, test_idx, num_test
+                test_rng, opt_state, test_idx, num_test_batches
             )
             smoothed_loss_window[window_idx] = test_loss
             smoothed_loss = onp.nanmean(smoothed_loss_window)

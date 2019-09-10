@@ -32,27 +32,19 @@ from datasets import batchify_data
 def model(obs=None, num_obs_total=None, d=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
     """
-    # note(lumip): the following if construct is currently necessary because
-    #   the per-example value_and_grad function uses vmap internally, applying
-    #   model and guide to 1-example batches (and stripping the first dimension)
-    #   this is not nice because it means that model/guide have to be adapted
-    #   if they do the kind of checks as below..
     if obs is not None:
-        if np.ndim(obs) == 2:
-            B = example_count(obs)
-            d = obs.shape[1]
-        elif np.ndim(obs) == 1:
-            B = 1
-            d = obs.shape[0]
+        assert(np.ndim(obs) <= 2)
+        # np.atleast_2d necessary because batch_size dimension is strapped during gradient computation
+        batch_size, d = np.shape(np.atleast_2d(obs))
     else:
         assert(num_obs_total is not None)
-        B = num_obs_total
+        batch_size = num_obs_total
         assert(d is not None)
 
     z_mu = sample('mu', dist.Normal(np.zeros((d,)), 1.))
     x_var = .1
-    with minibatch(B, num_obs_total):
-        x = sample('obs', dist.Normal(z_mu, x_var), obs=obs, sample_shape=(B,))
+    with minibatch(batch_size, num_obs_total):
+        x = sample('obs', dist.Normal(z_mu, x_var), obs=obs, sample_shape=(batch_size,))
     return x
 
 def guide(obs, num_obs_total=None, d=None):
@@ -136,7 +128,7 @@ def main(args):
             batch_loss, opt_state, rng = svi_update(
                 i, update_rng, opt_state, batch, batch,
             )
-            loss += batch_loss / (args.num_samples * args.batch_size * num_batch)
+            loss += batch_loss / (args.num_samples * num_batch)
             return loss, opt_state, rng
 
         return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
@@ -147,13 +139,12 @@ def main(args):
             loss_sum, rng = val
             batch = test_fetch(i, data_idx)
             rng, eval_rng = jax.random.split(rng, 2)
-            loss = svi_eval(eval_rng, opt_state, batch, batch) / args.num_samples
-            loss_sum += loss
+            loss = svi_eval(eval_rng, opt_state, batch, batch)
+            loss_sum += loss / (args.num_samples * num_batch)
 
             return loss_sum, rng
 
         loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
-        loss /= num_batch
         return loss
 
 	## Train model
@@ -161,16 +152,16 @@ def main(args):
         t_start = time.time()
         rng, train_rng, data_fetch_rng = random.split(rng, 3)
 
-        num_train, train_idx = train_init(rng=data_fetch_rng)
+        num_train_batches, train_idx = train_init(rng=data_fetch_rng)
         train_loss, opt_state, _ = epoch_train(
-            train_rng, opt_state, train_idx, num_train
+            train_rng, opt_state, train_idx, num_train_batches
         )
 
         if (i % (args.num_epochs // 10) == 0):
             rng, test_rng, test_fetch_rng = random.split(rng, 3)
-            num_test, test_idx = test_init(rng=test_fetch_rng)
+            num_test_batches, test_idx = test_init(rng=test_fetch_rng)
             test_loss = eval_test(
-                test_rng, opt_state, test_idx, num_test
+                test_rng, opt_state, test_idx, num_test_batches
             )
 
             print("Epoch {}: loss = {} (on training set: {}) ({:.2f} s.)".format(

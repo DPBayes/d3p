@@ -38,19 +38,10 @@ def model(batch_X, batch_y=None, num_obs_total=None):
     :param batch_X: a batch of predictors
     :param batch_y: a batch of observations
     """
-    # note(lumip): the following if construct is currently necessary because
-    #   the per-example value_and_grad function uses vmap internally, applying
-    #   model and guide to 1-example batches (and stripping the first dimension)
-    #   this is not nice because it means that model/guide have to be adapted
-    #   if they do the kind of checks as below..
-    if np.ndim(batch_X) == 2:
-        batch_size = example_count(batch_X)
-        assert(batch_y is None or example_count(batch_X) == example_count(batch_y))
-    elif np.ndim(batch_X) == 1:
-        batch_size = 1
-        assert(batch_y is None or example_count(batch_y) == 1)
-
-    z_dim = np.atleast_2d(batch_X).shape[1]
+    assert(np.ndim(batch_X) <= 2)
+    # np.atleast_2d necessary because batch_size dimension is strapped during gradient computation
+    batch_size, z_dim = np.shape(np.atleast_2d(batch_X))
+    assert(batch_y is None or example_count(batch_y) == batch_size)
 
     z_w = sample('w', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior is N(0,I)
     z_intercept = sample('intercept', dist.Normal(0,1)) # prior is N(0,1)
