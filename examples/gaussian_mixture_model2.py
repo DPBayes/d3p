@@ -42,6 +42,7 @@ from numpyro.distributions.distribution import Distribution
 from numpyro.distributions import constraints
 
 from dppp.svi import dpsvi, minibatch
+from dppp.util import unvectorize_shape_2d
 
 from datasets import batchify_data
 
@@ -81,8 +82,7 @@ def model(k, obs, num_obs_total=None):
     # with prior belief
     assert(obs is not None)
     assert(np.ndim(obs) <= 2)
-    # np.atleast_2d necessary because batch_size dimension is strapped during gradient computation
-    batch_size, d = np.shape(np.atleast_2d(obs))
+    batch_size, d = unvectorize_shape_2d(obs)
 
     pis = sample('pis', dist.Dirichlet(np.ones(k)))
     mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
@@ -93,7 +93,7 @@ def model(k, obs, num_obs_total=None):
 def guide(k, obs, num_obs_total=None):
     # the latent MixGaus distribution which learns the parameters
     assert(obs is not None)
-    _, d = np.shape(np.atleast_2d(obs))
+    _, d = unvectorize_shape_2d(obs)
 
     mus_loc = param('mus_loc', np.zeros((k, d)))
     mus = sample('mus', dist.Normal(mus_loc, 1.))

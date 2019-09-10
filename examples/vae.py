@@ -25,7 +25,7 @@ from numpyro.primitives import param, sample
 from numpyro.svi import elbo
 
 from dppp.svi import dpsvi, minibatch
-from dppp.util import example_count
+from dppp.util import example_count, unvectorize_shape_3d
 
 from datasets import MNIST, load_dataset
 
@@ -87,16 +87,8 @@ def model(batch, decode, z_dim, num_obs_total=None, **kwargs):
 
     :return: (named) sample x from the model observation distribution p(x|z)p(z)
     """
-    # note(lumip): the following if construct is currently necessary because
-    #   the per-example value_and_grad function uses vmap internally, applying
-    #   model and guide to 1-example batches (and stripping the first dimension)
-    #   this is not nice because it means that model/guide have to be adapted
-    #   if they do the kind of checks as below..
     assert(np.ndim(batch) == 3 or np.ndim(batch) == 2)
-    if np.ndim(batch) == 3:
-        batch_size = example_count(batch)
-    else:
-        batch_size = 1
+    batch_size = unvectorize_shape_3d(batch)[0]
     batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
 
     decoder_params = param('decoder', None) # advertise/register decoder parameters
@@ -115,17 +107,9 @@ def guide(batch, encode, num_obs_total=None, **kwargs):
     :param other keyword arguments: are accepted but ignored
     :return: (named) sampled z from the variational (guide) distribution q(z)
     """
-    # note(lumip): the following if construct is currently necessary because
-    #   the per-example value_and_grad function uses vmap internally, applying
-    #   model and guide to 1-example batches (and stripping the first dimension)
-    #   this is not nice because it means that model/guide have to be adapted
-    #   if they do the kind of checks as below..
-    if batch.ndim == 3:
-        batch_size = batch.shape[0]
-        batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
-    elif batch.ndim == 2:
-        batch_size = 1
-        batch = np.reshape(batch, (-1, ))
+    assert(np.ndim(batch) == 3 or np.ndim(batch) == 2)
+    batch_size = unvectorize_shape_3d(batch)[0]
+    batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
 
     encoder_params = param('encoder', None) # advertise/register encoder parameters
     with minibatch(batch_size, num_obs_total=num_obs_total):

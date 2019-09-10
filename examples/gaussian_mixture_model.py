@@ -31,6 +31,7 @@ from numpyro.primitives import param, sample
 from numpyro.svi import elbo
 
 from dppp.svi import dpsvi, minibatch
+from dppp.util import unvectorize_shape_2d
 
 from datasets import batchify_data
 
@@ -54,8 +55,7 @@ def model(k, obs_or_shape, num_obs_total=None):
         obs = obs_or_shape
         assert(obs is not None)
         assert(np.ndim(obs) <= 2)
-        # np.atleast_2d necessary because batch_size dimension is strapped during gradient computation
-        batch_size, d = np.shape(np.atleast_2d(obs))
+        batch_size, d = unvectorize_shape_2d(obs)
 
     alpha = np.ones(k)*0.3
     a0, b0 = np.ones((k,1))*.5, np.ones((k,1))*.5
@@ -81,12 +81,9 @@ def compute_assignment_log_posterior(k, obs, mus, sigs, pis_prior):
     # computes the unnormalized log-posterior for each value of assignment z
     #   for each data point
     assert(np.ndim(obs) <= 2)
-    if np.ndim(obs) == 2:
-        batch_size = np.shape(obs)[0]
-    else:
-        shape = np.shape(obs)
-        obs = np.reshape(obs, (1, *shape))
-        batch_size = 1
+    unvectorized_shape = unvectorize_shape_2d(obs)
+    obs = np.reshape(obs, unvectorized_shape)
+    batch_size = unvectorized_shape[0]
 
     def per_component_fun(j):
         log_prob_x_zj = np.sum(
@@ -137,11 +134,7 @@ def guide(k, obs, num_obs_total=None):
     """
     assert(obs is not None)
     assert(np.ndim(obs) <= 2)
-    if np.ndim(obs) == 2:
-        batch_size, d = np.shape(obs)
-    else:
-        d = np.shape(obs)[0]
-        batch_size = 1
+    batch_size, d = unvectorize_shape_2d(obs)
 
     a0, b0 = param('a0', np.ones((k, 1))*.5), param('b0', np.ones((k, 1))*.5)
     alpha = param('alpha', np.ones(k)*0.3)

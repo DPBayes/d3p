@@ -26,6 +26,7 @@ from numpyro.primitives import param, sample
 from numpyro.svi import elbo
 
 from dppp.svi import dpsvi, minibatch, example_count
+from dppp.util import unvectorize_shape_2d
 
 from datasets import batchify_data
 
@@ -34,8 +35,7 @@ def model(obs=None, num_obs_total=None, d=None):
     """
     if obs is not None:
         assert(np.ndim(obs) <= 2)
-        # np.atleast_2d necessary because batch_size dimension is strapped during gradient computation
-        batch_size, d = np.shape(np.atleast_2d(obs))
+        batch_size, d = unvectorize_shape_2d(obs)
     else:
         assert(num_obs_total is not None)
         batch_size = num_obs_total

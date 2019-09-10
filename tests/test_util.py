@@ -272,5 +272,82 @@ class UtilityTests(unittest.TestCase):
         res = util.normalize(x)
         self.assertAlmostEqual(1., res)
 
+    #### unvectorize_shape ####
+
+    def test_unvectorize_shape_input_has_expected_amount_of_dims(self):
+        a = np.array([[3, 4], [5, 6], [7, 8]])
+        expected = (3, 2)
+        res = util.unvectorize_shape(a, 2)
+        self.assertEqual(expected, res)
+
+    def test_unvectorize_shape_input_has_more_dims(self):
+        a = np.array([[3, 4], [5, 6], [7, 8]])
+        expected = (3, 2)
+        res = util.unvectorize_shape(a, 1)
+        self.assertEqual(expected, res)
+
+    def test_unvectorize_shape_input_has_one_missing_dim(self):
+        a = np.array([[3, 4], [5, 6], [7, 8]])
+        expected = (1, 3, 2)
+        res = util.unvectorize_shape(a, 3)
+        self.assertEqual(expected, res)
+
+    def test_unvectorize_shape_input_has_two_missing_dims(self):
+        a = np.array([[3, 4], [5, 6], [7, 8]])
+        expected = (1, 1, 3, 2)
+        res = util.unvectorize_shape(a, 4)
+        self.assertEqual(expected, res)
+
+    def test_unvectorize_shape_input_is_scalar_and_one_dim_expected(self):
+        a = 3
+        expected = (1,)
+        res = util.unvectorize_shape(a, 1)
+        self.assertEqual(expected, res)
+
+    def test_unvectorize_shape_input_is_scalar_and_two_dims_expected(self):
+        a = 3
+        expected = (1, 1)
+        res = util.unvectorize_shape(a, 2)
+        self.assertEqual(expected, res)
+
+    #### expand_shape ####
+
+    def test_expand_shape_input_has_expected_amount_of_dims(self):
+        a = np.array([[3, 4], [5, 6], [7, 8]])
+        expected = (3, 2)
+        res = util.expand_shape(a, 2)
+        self.assertEqual(expected, res)
+
+    def test_expand_shape_input_has_more_dims(self):
+        a = np.array([[3, 4], [5, 6], [7, 8]])
+        expected = (3, 2)
+        res = util.expand_shape(a, 1)
+        self.assertEqual(expected, res)
+
+    def test_expand_shape_input_has_one_missing_dim(self):
+        a = np.array([[3, 4], [5, 6], [7, 8]])
+        expected = (3, 2, 1)
+        res = util.expand_shape(a, 3)
+        self.assertEqual(expected, res)
+
+    def test_expand_shape_input_has_two_missing_dims(self):
+        a = np.array([[3, 4], [5, 6], [7, 8]])
+        expected = (3, 2, 1, 1)
+        res = util.expand_shape(a, 4)
+        self.assertEqual(expected, res)
+
+    def test_expand_shape_input_is_scalar_and_one_dim_expected(self):
+        a = 3
+        expected = (1,)
+        res = util.expand_shape(a, 1)
+        self.assertEqual(expected, res)
+
+    def test_expand_shape_input_is_scalar_and_two_dims_expected(self):
+        a = 3
+        expected = (1, 1)
+        res = util.expand_shape(a, 2)
+        self.assertEqual(expected, res)
+
+
 if __name__ == '__main__':
     unittest.main()

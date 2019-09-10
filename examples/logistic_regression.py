@@ -24,7 +24,7 @@ from numpyro.handlers import seed, substitute
 from numpyro.primitives import param, sample
 from numpyro.svi import elbo
 
-from dppp.util import example_count, normalize
+from dppp.util import example_count, normalize, unvectorize_shape_2d
 from dppp.svi import dpsvi, minibatch
 
 from datasets import batchify_data
@@ -39,8 +39,7 @@ def model(batch_X, batch_y=None, num_obs_total=None):
     :param batch_y: a batch of observations
     """
     assert(np.ndim(batch_X) <= 2)
-    # np.atleast_2d necessary because batch_size dimension is strapped during gradient computation
-    batch_size, z_dim = np.shape(np.atleast_2d(batch_X))
+    batch_size, z_dim = unvectorize_shape_2d(batch_X)
     assert(batch_y is None or example_count(batch_y) == batch_size)
 
     z_w = sample('w', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior is N(0,I)
