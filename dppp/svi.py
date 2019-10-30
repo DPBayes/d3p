@@ -12,39 +12,12 @@ from jax import random, vjp
 import jax.numpy as np
 
 from numpyro.handlers import replay, substitute, trace, scale
-from numpyro.svi import _seed
 import numpyro.distributions as dist
 from numpyro.distributions import constraints
 from numpyro.distributions.constraints import biject_to
 
-from dppp.util import map_over_secondary_dims, example_count, is_int_scalar, is_array
-
-def minibatch(batch_or_batchsize, num_obs_total=None):
-    """Returns a context within which all samples are treated as being a
-    minibatch of a larger data set.
-
-    In essence, this marks the (log)likelihood of the sampled examples to be
-    scaled to the total loss value over the whole data set.
-
-    :param batch_or_batchsize: An integer indicating the batch size or an array
-        indicating the shape of the batch where the length of the first axis
-        is interpreted as batch size.
-    :param num_obs_total: The total number of examples/observations in the
-        full data set. Optional, defaults to the given batch size.
-    """
-    if is_int_scalar(batch_or_batchsize):
-        if not np.isscalar(batch_or_batchsize):
-            raise ValueError("if a scalar is given for batch_or_batchsize, it "
-                "can't be traced through jit. consider using static_argnums "
-                "for the jit invocation.")
-        batch_size = batch_or_batchsize
-    elif is_array(batch_or_batchsize):
-        batch_size = example_count(batch_or_batchsize)
-    else:
-        raise ValueError("batch_or_batchsize must be an array or an integer")
-    if num_obs_total is None:
-        num_obs_total = batch_size
-    return scale(scale_factor = num_obs_total / batch_size)
+from dppp.util import map_over_secondary_dims, is_array
+from dppp.minibatch import minibatch
 
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
     value_and_grad_fun = jax.jit(jax.value_and_grad(fun, argnums, has_aux, holomorphic))
@@ -126,7 +99,10 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         # todo(lumip): is there a way to improve?
         assert isinstance(model_args, tuple)
         assert isinstance(guide_args, tuple)
-        model_init, guide_init = _seed(model, guide, rng)
+        rng_key, model_seed, guide_seed = random.split(rng_key, 3)
+        model_init = seed(self.model, model_seed)
+        guide_init = seed(self.guide, guide_seed)
+        
         if params is None:
             params = {}
         else:

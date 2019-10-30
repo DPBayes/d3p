@@ -16,16 +16,17 @@ import numpy as onp
 import jax
 import jax.numpy as np
 from jax import jit, lax, random
-from jax.experimental import optimizers
 from jax.random import PRNGKey
 
 import numpyro.distributions as dist
 from numpyro.handlers import seed, substitute
 from numpyro.primitives import param, sample
-from numpyro.svi import elbo
+from numpyro.infer import ELBO, SVI
+import numpyro.optim as optimizers
 
 from dppp.util import example_count, normalize, unvectorize_shape_2d
-from dppp.svi import dpsvi, minibatch
+#from dppp.svi import dpsvi, minibatch
+from dppp.minibatch import minibatch
 
 from datasets import batchify_data
 from example_util import sigmoid
@@ -142,60 +143,58 @@ def main(args):
     test_init, test_fetch = batchify_data(test_data, args.batch_size)
 
     ## Init optimizer and training algorithms
-    opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
+    optimizer = optimizers.Adam(args.learning_rate)
 
     rng = PRNGKey(123)
-    rng, dp_rng = random.split(rng, 2)
 
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
-    svi_init, svi_update, svi_eval = dpsvi(
-        model, guide, elbo, opt_init, opt_update, get_params,
-        rng=dp_rng, dp_scale=0.01, num_obs_total=args.num_samples,
-        clipping_threshold=20.
-    )
-
-    svi_update = jit(svi_update)
+    svi = SVI(model, guide, optimizer, ELBO())
+    # svi_init, svi_update, svi_eval = dpsvi(
+    #     model, guide, elbo, opt_init, opt_update, get_params,
+    #     rng=dp_rng, dp_scale=0.01, num_obs_total=args.num_samples,
+    #     clipping_threshold=20.
+    # )
 
     rng, svi_init_rng, data_fetch_rng = random.split(rng, 3)
     _, train_idx = train_init(rng=data_fetch_rng)
-    batch_X, batch_Y = train_fetch(0, train_idx)
-    opt_state, _ = svi_init(svi_init_rng, (batch_X, batch_Y), (batch_X, batch_Y))
+    sample_batch = train_fetch(0, train_idx)
+
+    svi_state = svi.init(svi_init_rng, *sample_batch)
 
     @jit
-    def epoch_train(rng, opt_state, data_idx, num_batch):
+    def epoch_train(rng, svi_state, data_idx, num_batch):
         def body_fn(i, val):
-            loss, opt_state, rng = val
-            rng, update_rng = random.split(rng, 2)
+            loss, svi_state = val
             batch = train_fetch(i, data_idx)
+            batch_X, batch_Y = batch
 
-            batch_loss, opt_state, rng = svi_update(
-                i, update_rng, opt_state, batch, batch,
-            )
+            svi_state, batch_loss = svi.update(svi_state, batch_X, batch_Y)
             loss += batch_loss / (args.num_samples * num_batch)
-            return loss, opt_state, rng
+            return loss, svi_state
 
-        return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
+        return lax.fori_loop(0, num_batch, body_fn, (0., svi_state))
 
     @jit
-    def eval_test(rng, opt_state, data_idx, num_batch):
-        params = get_params(opt_state)
+    def eval_test(rng, svi_state, data_idx, num_batch):
+        params = svi.get_params(svi_state)
 
         def body_fn(i, val):
-            loss_sum, acc_sum, rng = val
+            loss_sum, acc_sum = val
 
             batch = test_fetch(i, data_idx)
-            rng, eval_rng, acc_rng = jax.random.split(rng, 3)
+            batch_X, batch_Y = batch
 
-            loss = svi_eval(eval_rng, opt_state, batch, batch)
+            loss = svi.evaluate(svi_state, batch_X, batch_Y)
             loss_sum += loss / (args.num_samples * num_batch)
 
+            acc_rng = jax.random.fold_in(rng, i)
             acc = estimate_accuracy(batch_X, batch_Y, params, acc_rng, 1)
             acc_sum += acc / num_batch
 
-            return loss_sum, acc_sum, rng
+            return loss_sum, acc_sum
 
-        loss, acc, _ = lax.fori_loop(0, num_batch, body_fn, (0., 0., rng))
+        loss, acc = lax.fori_loop(0, num_batch, body_fn, (0., 0.))
         return loss, acc
 
 	## Train model
@@ -204,15 +203,15 @@ def main(args):
         rng, train_rng, data_fetch_rng = random.split(rng, 3)
 
         num_train_batches, train_idx = train_init(rng=data_fetch_rng)
-        train_loss, opt_state, _ = epoch_train(
-            train_rng, opt_state, train_idx, num_train_batches
+        train_loss, svi_state = epoch_train(
+            train_rng, svi_state, train_idx, num_train_batches
         )
 
         if (i % (args.num_epochs//10)) == 0:
             rng, test_rng, test_fetch_rng = random.split(rng, 3)
             num_test_batches, test_idx = test_init(rng=test_fetch_rng)
             test_loss, test_acc = eval_test(
-                test_rng, opt_state, test_idx, num_test_batches
+                test_rng, svi_state, test_idx, num_test_batches
             )
             print("Epoch {}: loss = {}, acc = {} (loss on training set: {}) ({:.2f} s.)".format(
                 i, test_loss, test_acc, train_loss, time.time() - t_start
@@ -224,7 +223,7 @@ def main(args):
     scale_true = np.linalg.norm(true_params[0])
     intercept_true = true_params[1] / scale_true
 
-    params = get_params(opt_state)
+    params = svi.get_params(svi_state)
     w_post = normalize(params['w_loc'])
     scale_post = np.linalg.norm(params['w_loc'])
     intercept_post = params['intercept_loc'] / scale_post
