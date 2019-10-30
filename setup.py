@@ -7,7 +7,7 @@ from setuptools import find_packages, setup
 
 PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
 
-numpyro_commit = '7284e4b2e6b59847391c1b16c5b0e0ee66555c34'
+numpyro_commit = '101753fe69f00e8200c27789c570ff607c93cbd3'
 
 setup(
     name='dppp',
