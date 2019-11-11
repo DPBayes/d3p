@@ -25,7 +25,7 @@ from numpyro.infer import ELBO, SVI
 import numpyro.optim as optimizers
 
 from dppp.util import example_count, normalize, unvectorize_shape_2d
-#from dppp.svi import dpsvi, minibatch
+from dppp.svi import TunableSVI
 from dppp.minibatch import minibatch
 
 from datasets import batchify_data
@@ -149,7 +149,8 @@ def main(args):
 
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
-    svi = SVI(model, guide, optimizer, ELBO())
+    svi = TunableSVI(model, guide, optimizer, ELBO(), num_obs_total=args.num_samples)
+
     # svi_init, svi_update, svi_eval = dpsvi(
     #     model, guide, elbo, opt_init, opt_update, get_params,
     #     rng=dp_rng, dp_scale=0.01, num_obs_total=args.num_samples,

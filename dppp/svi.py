@@ -4,36 +4,43 @@
 Based on numpyro's `svi`:
     https://github.com/pyro-ppl/numpyro/blob/master/numpyro/svi.py
 """
-import os
 import functools
 
 import jax
-from jax import random, vjp
+from jax import random
 import jax.numpy as np
 
-from numpyro.handlers import replay, substitute, trace, scale
-import numpyro.distributions as dist
-from numpyro.distributions import constraints
-from numpyro.distributions.constraints import biject_to
+from numpyro.infer.svi import SVI, SVIState
 
-from dppp.util import map_over_secondary_dims, is_array
-from dppp.minibatch import minibatch
+from dppp.util import map_over_secondary_dims
+
 
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
-    value_and_grad_fun = jax.jit(jax.value_and_grad(fun, argnums, has_aux, holomorphic))
-    return jax.jit(jax.vmap(value_and_grad_fun, in_axes=(None, 0, 0)))
+    value_and_grad_fun = jax.value_and_grad(fun, argnums, has_aux, holomorphic)
+    return jax.vmap(value_and_grad_fun, in_axes=(None, 0))
 
-def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
-    per_example_grad_manipulation_fn=None, batch_grad_manipulation_fn=None,
-    loss_combiner_fn=np.sum, **kwargs):
+
+class CombinedLoss(object):
+
+    def __init__(self, per_example_loss, combiner_fn = np.mean):
+        self.px_loss = per_example_loss
+        self.combiner_fn = combiner_fn
+
+    def loss(self, rng_key, param_map, model, guide, *args, **kwargs):
+        return np.sum(self.px_loss.loss(
+            rng_key, param_map, model, guide, *args, **kwargs
+        ))
+
+
+class TunableSVI(SVI):
     """
-    Stochastic Variational Inference given a per-example loss objective and a
-    loss combiner function.
+    Tunable Stochastic Variational Inference given a per-example loss objective
+    and a loss combiner function.
 
-    This is identical to numpyro's `svi` but explicitely computes gradients
+    This is identical to numpyro's `SVI` but explicitely computes gradients
     per example (i.e. observed data instance) based on `per_example_loss_fn`
     before combining them to a total loss value using `loss_combiner_fn`.
-    This will allow manipulating the per-example gradients which has
+    This allows manipulating the per-example gradients which has
     applications, e.g., in differentially private machine learning applications.
 
     To obtain the per-example gradients, the `per_example_loss_fn` is evaluated
@@ -43,132 +50,64 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
     For this to work, the following requirements are imposed upon
     `per_example_loss_fn`:
     - in per-example evaluation, the leading dimension of the batch (indicating
-        the number of examples) is stripped away. the loss function must be able
-        to handle this (if it was originally designed to handle batched values)
+        the number of examples) is stripped away. The loss function must be able
+        to handle this if it was originally designed to handle batched values
     - since it will be evaluated on each example, take special care that the
         loss function scales the likelihood contribution of the data properly
         wrt to batch size and total example count (use e.g. the `numpyro.scale`
         or the convenience `minibatch` context managers)
+
 
     :param model: Python callable with Pyro primitives for the model.
     :param guide: Python callable with Pyro primitives for the guide
         (recognition network).
     :param per_example_loss_fn: ELBo loss, i.e. negative Evidence Lower Bound,
         to minimize, per example.
-    :param optim_init: initialization function returned by a JAX optimizer.
-        see: :mod:`jax.experimental.optimizers`.
-    :param optim_update: update function for the optimizer
-    :param get_params: function to get current parameters values given the
-        optimizer state.
+    :param optim: an instance of :class:`~numpyro.optim._NumpyroOptim`.
     :param per_example_grad_manipulation_fn: optional function that allows to
         manipulate the gradient for each sample.
-    :param loss_combiner_fn: Function to combine the per-example loss values.
-        Defaults to np.sum.
     :param batch_grad_manipulation_fn: An optional function that allows to modify
         the total gradient. This gets called after applying the
         per_example_grad_manipulation_fn and loss_combiner_fn.
-    :param `**kwargs`: static arguments for the model / guide, i.e. arguments
+    :param static_kwargs: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
-    :return: tuple of `(init_fn, update_fn, evaluate)`.
     """
 
-    constrain_fn = None
-
-    def loss_fn(*args, **kwargs):
-        return loss_combiner_fn(per_example_loss_fn(*args, **kwargs))
-
-    def init_fn(rng, model_args=(), guide_args=(), params=None):
-        """
-
-        :param jax.random.PRNGKey rng: random number generator seed.
-        :param tuple model_args: arguments to the model (these can possibly vary during
-            the course of fitting).
-        :param tuple guide_args: arguments to the guide (these can possibly vary during
-            the course of fitting).
-        :param dict params: initial parameter values to condition on. This can be
-            useful for initializing neural networks using more specialized methods
-            rather than sampling from the prior.
-        :return: tuple containing initial optimizer state, and `constrain_fn`, a callable
-            that transforms unconstrained parameter values from the optimizer to the
-            specified constrained domain
-        """
-        # note(lumip): the below is unchanged from numpyro's `svi` but seems
-        #   like a very inefficient/complicated way to obtain the parameters,
-        #   especially since it means manual work by the user to obtain a
-        #   throw-away batch just for initialization...
-        # todo(lumip): is there a way to improve?
-        assert isinstance(model_args, tuple)
-        assert isinstance(guide_args, tuple)
-        rng_key, model_seed, guide_seed = random.split(rng_key, 3)
-        model_init = seed(self.model, model_seed)
-        guide_init = seed(self.guide, guide_seed)
+    def __init__(self, model, guide, optim, per_example_loss,
+            per_example_grad_manipulation_fn=None,
+            batch_grad_manipulation_fn=None, **static_kwargs):
         
-        if params is None:
-            params = {}
-        else:
-            model_init = substitute(model_init, params)
-            guide_init = substitute(guide_init, params)
-        guide_trace = trace(guide_init).get_trace(*guide_args, **kwargs)
-        model_trace = trace(model_init).get_trace(*model_args, **kwargs)
-        inv_transforms = {}
-        for site in list(guide_trace.values()) + list(model_trace.values()):
-            if site['type'] == 'param':
-                constraint = site['kwargs'].pop('constraint', constraints.real)
-                transform = biject_to(constraint)
-                inv_transforms[site['name']] = transform
-                params[site['name']] = transform.inv(site['value'])
+        self.px_grad_manipulation_fn = per_example_grad_manipulation_fn
+        self.batch_grad_manipulation_fn = batch_grad_manipulation_fn
 
-        def transform_constrained(inv_transforms, params):
-            return {k: inv_transforms[k](v) for k, v in params.items()}
+        total_loss = CombinedLoss(per_example_loss)
 
-        nonlocal constrain_fn
-        constrain_fn = jax.partial(transform_constrained, inv_transforms)
-        return optim_init(params), constrain_fn
+        super().__init__(model, guide, optim, total_loss, **static_kwargs)
 
-    def update_fn(i, rng, opt_state, model_args=(), guide_args=()):
-        """
-        Take a single step of SVI (possibly on a batch / minibatch of data),
-        using the optimizer.
+    def update(self, svi_state, *args, **kwargs):
+        rng_key, rng_key_step = random.split(svi_state.rng_key, 2)
+        params = self.optim.get_params(svi_state.optim_state)
 
-        Caution: The returned loss is currently scaled by the batch_size. To get
-        an estimator of the overall loss on the data it needs to be normalized
-        by 1/batch_size. (The gradients used within the update are not affected
-        by this).
-
-        :param int i: represents the i'th iteration over the epoch, passed as an
-            argument to the optimizer's update function.
-        :param opt_state: current optimizer state.
-        :param jax.random.PRNGKey rng: random number generator seed.
-        :param tuple model_args: dynamic arguments to the model.
-        :param tuple guide_args: dynamic arguments to the guide.
-        :return: tuple of `(loss_val, opt_state, rng)`.
-        """
-        rng, model_rng = random.split(rng, 2)
-        model_init, guide_init = _seed(model, guide, model_rng)
-
-        params = get_params(opt_state)
-        @jax.jit
-        def wrapped_fn(p, model_args, guide_args):
-            return per_example_loss_fn(
-                p, model_init, guide_init, model_args, guide_args, kwargs,
-                constrain_fn=constrain_fn
+        def wrapped_px_loss(x, loss_args):
+            return self.loss.px_loss.loss(
+                rng_key_step, self.constrain_fn(x), self.model, self.guide,
+                *loss_args, **kwargs, **self.static_kwargs
             )
 
         per_example_loss, per_example_grads = per_example_value_and_grad(
-            wrapped_fn
-        )(
-            params, model_args, guide_args
-        )
+            wrapped_px_loss
+        )(params, args)
 
         # get total loss and loss combiner vjp func
-        loss_val, loss_combine_vjp = jax.vjp(loss_combiner_fn, per_example_loss)
+        loss_val, loss_combine_vjp = jax.vjp(self.loss.combiner_fn, per_example_loss)
         
         # loss_combine_vjp gives us the backward differentiation function
         #   from combined loss to per-example losses. we use it to get the
         #   (1xbatch_size) Jacobian and construct a function that takes
         #   per-example gradients and left-multiplies them with that jacobian
         #   to get the final combined gradient
-        loss_jacobian = np.reshape(loss_combine_vjp(np.array(1))[0], (1, -1))
+        loss_jacobian = np.reshape(loss_combine_vjp(np.array(1.))[0], (1, -1))
+        # loss_vjp = lambda px_grads: np.sum(np.multiply(loss_jacobian, px_grads))
         loss_vjp = lambda px_grads: np.matmul(loss_jacobian, px_grads)
 
         # we map the loss combination vjp func over all secondary dimensions
@@ -185,10 +124,10 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
 
         # if per-sample gradient manipulation is present, we apply it to
         #   each gradient site in the tree
-        if per_example_grad_manipulation_fn:
+        if self.px_grad_manipulation_fn:
             # apply per-sample gradient manipulation, if present
             px_grads_list = jax.vmap(
-                per_example_grad_manipulation_fn, in_axes=0
+                self.px_grad_manipulation_fn, in_axes=0
             )(
                 px_grads_list
             )
@@ -205,54 +144,16 @@ def svi(model, guide, per_example_loss_fn, optim_init, optim_update, get_params,
         grads_list = tuple(map(loss_vjp, px_grads_list))
 
         # apply batch gradient modification (e.g., DP noise perturbation) (if any)
-        if batch_grad_manipulation_fn:
-            grads_list = batch_grad_manipulation_fn(grads_list)
-
-        # computing per-example loss and gradients and summing means we have to
-        # scale by 1/batch_size to get the correct loss in expectation
-        batch_size = example_count(per_example_loss)
-        scale_to_batch = lambda x: x / batch_size
-
-        loss_val = scale_to_batch(loss_val)
-        grads_list = map(scale_to_batch, grads_list)
+        if self.batch_grad_manipulation_fn:
+            grads_list = self.batch_grad_manipulation_fn(grads_list)
 
         # reassemble the jax tree used by optimizer for the final gradients
         grads = jax.tree_unflatten(
             px_grads_tree_def, grads_list
         )
-        
-        # take a step in the optimizer using the gradients
-        opt_state = optim_update(i, grads, opt_state)
-        return loss_val, opt_state, rng
 
-    def evaluate(rng, opt_state, model_args=(), guide_args=()):
-        """
-        Take a single step of SVI (possibly on a batch / minibatch of data).
-
-        :param opt_state: current optimizer state.
-        :param jax.random.PRNGKey rng: random number generator seed.
-        :param tuple model_args: arguments to the model (these can possibly vary
-            during the course of fitting).
-        :param tuple guide_args: arguments to the guide (these can possibly vary
-            during the course of fitting).
-        :return: evaluate ELBo loss given the current parameter values
-            (held within `opt_state`).
-        """
-        model_init, guide_init = _seed(model, guide, rng)
-        params = get_params(opt_state)
-        return loss_fn(params, model_init, guide_init, 
-                       model_args, guide_args, kwargs, 
-                       constrain_fn=constrain_fn
-        )
-
-    # Make local functions visible from the global scope once
-    # `svi` is called for sphinx doc generation.
-    if 'SPHINX_BUILD' in os.environ:
-        svi.init_fn = init_fn
-        svi.update_fn = update_fn
-        svi.evaluate = evaluate
-
-    return init_fn, update_fn, evaluate
+        optim_state = self.optim.update(grads, svi_state.optim_state)
+        return SVIState(optim_state, rng_key), loss_val
 
 
 def full_norm(list_of_parts, ord=2):
@@ -323,54 +224,54 @@ def get_gradients_clipping_function(c):
         return clip_gradient(list_of_gradient_parts, c)
     return gradient_clipping_fn_inner
 
-def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
-    get_params, clipping_threshold, dp_scale, rng, **kwargs):
-    """
-    Differentially-Private Stochastic Variational Inference given a per-example
-    loss objective and a gradient clipping threshold.
+# def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
+#     get_params, clipping_threshold, dp_scale, rng, **kwargs):
+#     """
+#     Differentially-Private Stochastic Variational Inference given a per-example
+#     loss objective and a gradient clipping threshold.
 
-    This is identical to numpyro's `svi` but adds differential privacy by
-    clipping the gradients (and currently nothing more).
+#     This is identical to numpyro's `svi` but adds differential privacy by
+#     clipping the gradients (and currently nothing more).
 
-    :param model: Python callable with Pyro primitives for the model.
-    :param guide: Python callable with Pyro primitives for the guide
-        (recognition network).
-    :param per_example_loss_fn: ELBo loss function, i.e. negative Evidence Lower
-        Bound, to minimize, per example.
-    :param optim_init: initialization function returned by a JAX optimizer.
-        see: :mod:`jax.experimental.optimizers`.
-    :param optim_update: update function for the optimizer
-    :param get_params: function to get current parameters values given the
-        optimizer state.
-    :param clipping_threshold: The clipping threshold C to which the norm
-        of each per-example gradient is clipped.
-    :param dp_scale: Scale parameter for the Gaussian mechanism applied to
-        batch gradients.
-    :param rng: PRNG key used in sampling the Gaussian mechanism applied to
-        batch gradients.
-    :param `**kwargs`: static arguments for the model / guide, i.e. arguments
-        that remain constant during fitting.
-    :return: tuple of `(init_fn, update_fn, evaluate)`.
-    """
+#     :param model: Python callable with Pyro primitives for the model.
+#     :param guide: Python callable with Pyro primitives for the guide
+#         (recognition network).
+#     :param per_example_loss_fn: ELBo loss function, i.e. negative Evidence Lower
+#         Bound, to minimize, per example.
+#     :param optim_init: initialization function returned by a JAX optimizer.
+#         see: :mod:`jax.experimental.optimizers`.
+#     :param optim_update: update function for the optimizer
+#     :param get_params: function to get current parameters values given the
+#         optimizer state.
+#     :param clipping_threshold: The clipping threshold C to which the norm
+#         of each per-example gradient is clipped.
+#     :param dp_scale: Scale parameter for the Gaussian mechanism applied to
+#         batch gradients.
+#     :param rng: PRNG key used in sampling the Gaussian mechanism applied to
+#         batch gradients.
+#     :param `**kwargs`: static arguments for the model / guide, i.e. arguments
+#         that remain constant during fitting.
+#     :return: tuple of `(init_fn, update_fn, evaluate)`.
+#     """
 
-    gradients_clipping_fn = get_gradients_clipping_function(
-        clipping_threshold
-    )
+#     gradients_clipping_fn = get_gradients_clipping_function(
+#         clipping_threshold
+#     )
 
-    _, perturbation_rng = jax.random.split(rng, 2)
+#     _, perturbation_rng = jax.random.split(rng, 2)
     
-    @jax.jit
-    def grad_perturbation_fn(list_of_grads):
-        def perturb_one(grad):
-            noise = dist.Normal(0, dp_scale).sample(
-                perturbation_rng, sample_shape=grad.shape
-            )
-            return grad + noise
+#     @jax.jit
+#     def grad_perturbation_fn(list_of_grads):
+#         def perturb_one(grad):
+#             noise = dist.Normal(0, dp_scale).sample(
+#                 perturbation_rng, sample_shape=grad.shape
+#             )
+#             return grad + noise
 
-        list_of_grads = [perturb_one(grad) for grad in list_of_grads]
-        return list_of_grads
+#         list_of_grads = [perturb_one(grad) for grad in list_of_grads]
+#         return list_of_grads
 
-    return svi(model, guide, per_example_loss_fn, optim_init, optim_update,
-        get_params, per_example_grad_manipulation_fn=gradients_clipping_fn,
-        batch_grad_manipulation_fn=grad_perturbation_fn, **kwargs
-    )
+#     return svi(model, guide, per_example_loss_fn, optim_init, optim_update,
+#         get_params, per_example_grad_manipulation_fn=gradients_clipping_fn,
+#         batch_grad_manipulation_fn=grad_perturbation_fn, **kwargs
+#     )
