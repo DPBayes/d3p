@@ -11,6 +11,7 @@ from jax import random
 import jax.numpy as np
 
 from numpyro.infer.svi import SVI, SVIState
+import numpyro.distributions as dist
 
 from dppp.util import map_over_secondary_dims
 
@@ -224,54 +225,74 @@ def get_gradients_clipping_function(c):
         return clip_gradient(list_of_gradient_parts, c)
     return gradient_clipping_fn_inner
 
-# def dpsvi(model, guide, per_example_loss_fn, optim_init, optim_update,
-#     get_params, clipping_threshold, dp_scale, rng, **kwargs):
-#     """
-#     Differentially-Private Stochastic Variational Inference given a per-example
-#     loss objective and a gradient clipping threshold.
 
-#     This is identical to numpyro's `svi` but adds differential privacy by
-#     clipping the gradients (and currently nothing more).
+class DPSVI(TunableSVI):
+    """
+    Differentially-Private Stochastic Variational Inference given a per-example
+    loss objective and a gradient clipping threshold.
 
-#     :param model: Python callable with Pyro primitives for the model.
-#     :param guide: Python callable with Pyro primitives for the guide
-#         (recognition network).
-#     :param per_example_loss_fn: ELBo loss function, i.e. negative Evidence Lower
-#         Bound, to minimize, per example.
-#     :param optim_init: initialization function returned by a JAX optimizer.
-#         see: :mod:`jax.experimental.optimizers`.
-#     :param optim_update: update function for the optimizer
-#     :param get_params: function to get current parameters values given the
-#         optimizer state.
-#     :param clipping_threshold: The clipping threshold C to which the norm
-#         of each per-example gradient is clipped.
-#     :param dp_scale: Scale parameter for the Gaussian mechanism applied to
-#         batch gradients.
-#     :param rng: PRNG key used in sampling the Gaussian mechanism applied to
-#         batch gradients.
-#     :param `**kwargs`: static arguments for the model / guide, i.e. arguments
-#         that remain constant during fitting.
-#     :return: tuple of `(init_fn, update_fn, evaluate)`.
-#     """
+    This is identical to numpyro's `svi` but adds differential privacy by
+    clipping gradients per example and perturbing the batch gradient.
 
-#     gradients_clipping_fn = get_gradients_clipping_function(
-#         clipping_threshold
-#     )
-
-#     _, perturbation_rng = jax.random.split(rng, 2)
+    To obtain the per-example gradients, the `per_example_loss_fn` is evaluated
+    for (and the gradient take wrt) each example in a vectorized manner (using
+    `jax.vmap`).
     
-#     @jax.jit
-#     def grad_perturbation_fn(list_of_grads):
-#         def perturb_one(grad):
-#             noise = dist.Normal(0, dp_scale).sample(
-#                 perturbation_rng, sample_shape=grad.shape
-#             )
-#             return grad + noise
+    For this to work, the following requirements are imposed upon
+    `per_example_loss_fn`:
+    - in per-example evaluation, the leading dimension of the batch (indicating
+        the number of examples) is stripped away. The loss function must be able
+        to handle this if it was originally designed to handle batched values
+    - since it will be evaluated on each example, take special care that the
+        loss function scales the likelihood contribution of the data properly
+        wrt to batch size and total example count (use e.g. the `numpyro.scale`
+        or the convenience `minibatch` context managers)
 
-#         list_of_grads = [perturb_one(grad) for grad in list_of_grads]
-#         return list_of_grads
+    :param model: Python callable with Pyro primitives for the model.
+    :param guide: Python callable with Pyro primitives for the guide
+        (recognition network).
+    :param per_example_loss_fn: ELBo loss, i.e. negative Evidence Lower Bound,
+        to minimize, per example.
+    :param optim: an instance of :class:`~numpyro.optim._NumpyroOptim`.
+    :param clipping_threshold: The clipping threshold C to which the norm
+        of each per-example gradient is clipped.
+    :param dp_scale: Scale parameter for the Gaussian mechanism applied to
+        each dimension of the batch gradients.
+    :param rng: PRNG key used in sampling the Gaussian mechanism applied to
+        batch gradients.
+    :param static_kwargs: static arguments for the model / guide, i.e. arguments
+        that remain constant during fitting.
+    """
 
-#     return svi(model, guide, per_example_loss_fn, optim_init, optim_update,
-#         get_params, per_example_grad_manipulation_fn=gradients_clipping_fn,
-#         batch_grad_manipulation_fn=grad_perturbation_fn, **kwargs
-#     )
+    def __init__(self, model, guide, optim, per_example_loss,
+            clipping_threshold, dp_scale, rng, **static_kwargs):
+
+
+        gradients_clipping_fn = get_gradients_clipping_function(
+            clipping_threshold
+        )
+
+        _, perturbation_rng = jax.random.split(rng, 2)
+
+        # todo(lumip): this might not be correct. think about how splitting
+        #   over the gradient influences the noise level. currently, dp_scale
+        #   noise is applied to each parameter over all gradient components
+        @jax.jit
+        def grad_perturbation_fn(list_of_grads):
+            def perturb_one(grad):
+                noise = dist.Normal(0, dp_scale).sample(
+                    perturbation_rng, sample_shape=grad.shape
+                )
+                return grad + noise
+
+            #list_of_grads = jax.vmap(perturb_one, in_axes=0)(list_of_grads)
+
+            # todo(lumip): somehow parallelizing/vmapping this would be great
+            #   but current vmap will instead vmap over each position in it
+            list_of_grads = tuple(perturb_one(grad) for grad in list_of_grads)
+            return list_of_grads
+
+        super().__init__(
+            model, guide, optim, per_example_loss,
+            gradients_clipping_fn, grad_perturbation_fn, **static_kwargs
+        )
