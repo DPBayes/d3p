@@ -25,7 +25,7 @@ from numpyro.infer import ELBO, SVI
 import numpyro.optim as optimizers
 
 from dppp.util import example_count, normalize, unvectorize_shape_2d
-from dppp.svi import TunableSVI
+from dppp.svi import TunableSVI, DPSVI
 from dppp.minibatch import minibatch
 
 from datasets import batchify_data
@@ -74,7 +74,7 @@ def create_toy_data(N, d):
     ## Create some toy data
     onp.random.seed(123)
 
-    w_true = np.array(onp.random.randn(d))
+    w_true = normalize(np.array(onp.random.randn(d)))
     intercept_true = np.array(onp.random.randn())
 
     X = np.array(onp.random.randn(2*N, d))
@@ -149,13 +149,12 @@ def main(args):
 
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
-    svi = TunableSVI(model, guide, optimizer, ELBO(), num_obs_total=args.num_samples)
+    rng, dp_rng = random.split(rng, 2)
 
-    # svi_init, svi_update, svi_eval = dpsvi(
-    #     model, guide, elbo, opt_init, opt_update, get_params,
-    #     rng=dp_rng, dp_scale=0.01, num_obs_total=args.num_samples,
-    #     clipping_threshold=20.
-    # )
+    svi = DPSVI(model, guide, optimizer, ELBO(),
+        rng=dp_rng, dp_scale=0.01, clipping_threshold=20.,
+        num_obs_total=args.num_samples
+    )
 
     rng, svi_init_rng, data_fetch_rng = random.split(rng, 3)
     _, train_idx = train_init(rng=data_fetch_rng)
@@ -241,7 +240,7 @@ def main(args):
     # for evaluation accuracy with true parameters, we scale them to the same
     #   scale as the found posterior. (gives better results than normalized
     #   parameters (probably due to numerical instabilities))
-    acc_true = estimate_accuracy_fixed_params(X_test, y_test, w_true*scale_post, intercept_true*scale_post, rng_acc_true, 10)
+    acc_true = estimate_accuracy_fixed_params(X_test, y_test, w_true, intercept_true, rng_acc_true, 10)
     acc_post = estimate_accuracy(X_test, y_test, params, rng_acc_post, 10)
 
     print("avg accuracy on test set:  with true parameters: {} ; with found posterior: {}\n".format(acc_true, acc_post))
