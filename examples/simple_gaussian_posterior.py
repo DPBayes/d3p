@@ -17,16 +17,17 @@ import numpy as onp
 import jax
 import jax.numpy as np
 from jax import jit, lax, random
-from jax.experimental import optimizers
 from jax.random import PRNGKey
 
 import numpyro.distributions as dist
 from numpyro.handlers import seed, substitute
 from numpyro.primitives import param, sample
-from numpyro.svi import elbo
+from numpyro.infer import ELBO
+import numpyro.optim as optimizers
 
-from dppp.svi import dpsvi, minibatch, example_count
-from dppp.util import unvectorize_shape_2d
+from dppp.svi import DPSVI
+from dppp.minibatch import minibatch
+from dppp.util import example_count, unvectorize_shape_2d
 
 from datasets import batchify_data
 
@@ -98,77 +99,70 @@ def main(args):
     test_init, test_fetch = batchify_data((X_test,), args.batch_size)
 
     ## Init optimizer and training algorithms
-    opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
+    optimizer = optimizers.Adam(args.learning_rate)
 
     rng = PRNGKey(1234)
     rng, dp_rng = random.split(rng, 2)
 
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
-    svi_init, svi_update, svi_eval = dpsvi(
-        model, guide, elbo, opt_init, opt_update, 
-        get_params, d=args.dimensions,
-        rng=dp_rng, dp_scale=0.01, num_obs_total=args.num_samples,
-        clipping_threshold=20.
+    svi = DPSVI(
+        model, guide, optimizer, ELBO(), 
+        rng=dp_rng, dp_scale=0.01, clipping_threshold=20.,
+        d=args.dimensions, num_obs_total=args.num_samples,
     )
-
-    svi_update = jit(svi_update)
 
     rng, svi_init_rng = random.split(rng, 2)
     _, train_idx = train_init()
     batch = train_fetch(0, train_idx)
-    opt_state, _ = svi_init(svi_init_rng, batch, batch)
+    svi_state = svi.init(svi_init_rng, *batch)
 
     @jit
-    def epoch_train(rng, opt_state, data_idx, num_batch):
+    def epoch_train(svi_state, data_idx, num_batch):
         def body_fn(i, val):
-            loss, opt_state, rng = val
-            rng, update_rng = random.split(rng, 2)
+            svi_state, loss = val
             batch = train_fetch(i, data_idx)
-            batch_loss, opt_state, rng = svi_update(
-                i, update_rng, opt_state, batch, batch,
+            svi_state, batch_loss = svi.update(
+                svi_state, *batch
             )
             loss += batch_loss / (args.num_samples * num_batch)
-            return loss, opt_state, rng
+            return svi_state, loss
 
-        return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
+        return lax.fori_loop(0, num_batch, body_fn, (svi_state, 0.))
 
     @jit
-    def eval_test(rng, opt_state, data_idx, num_batch):
-        def body_fn(i, val):
-            loss_sum, rng = val
+    def eval_test(svi_state, data_idx, num_batch):
+        def body_fn(i, loss_sum):
             batch = test_fetch(i, data_idx)
-            rng, eval_rng = jax.random.split(rng, 2)
-            loss = svi_eval(eval_rng, opt_state, batch, batch)
+            loss = svi.evaluate(svi_state, *batch)
             loss_sum += loss / (args.num_samples * num_batch)
 
-            return loss_sum, rng
+            return loss_sum
 
-        loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
-        return loss
+        return lax.fori_loop(0, num_batch, body_fn, 0.)
 
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng, train_rng, data_fetch_rng = random.split(rng, 3)
+        rng, data_fetch_rng = random.split(rng, 2)
 
         num_train_batches, train_idx = train_init(rng=data_fetch_rng)
-        train_loss, opt_state, _ = epoch_train(
-            train_rng, opt_state, train_idx, num_train_batches
+        svi_state, train_loss = epoch_train(
+            svi_state, train_idx, num_train_batches
         )
 
         if (i % (args.num_epochs // 10) == 0):
-            rng, test_rng, test_fetch_rng = random.split(rng, 3)
+            rng, test_fetch_rng = random.split(rng, 2)
             num_test_batches, test_idx = test_init(rng=test_fetch_rng)
             test_loss = eval_test(
-                test_rng, opt_state, test_idx, num_test_batches
+                svi_state, test_idx, num_test_batches
             )
 
             print("Epoch {}: loss = {} (on training set: {}) ({:.2f} s.)".format(
                 i, test_loss, train_loss, time.time() - t_start
             ))
 
-    params = get_params(opt_state)
+    params = svi.get_params(svi_state)
     mu_loc = params['mu_loc']
     mu_std = np.exp(params['mu_std_log'])
     print("### expected: {}".format(mu_true))
@@ -180,7 +174,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', default=400, type=int, help='number of training epochs')
+    parser.add_argument('-n', '--num-epochs', default=100, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
     parser.add_argument('-batch-size', default=100, type=int, help='batch size')
     parser.add_argument('-d', '--dimensions', default=4, type=int, help='data dimension')

@@ -30,19 +30,20 @@ import numpy as onp
 import jax
 import jax.numpy as np
 from jax import jit, lax, random
-from jax.experimental import optimizers
 from jax.random import PRNGKey
 from jax.scipy.special import logsumexp
 
 import numpyro.distributions as dist
+import numpyro.optim as optimizers
 from numpyro.handlers import seed
 from numpyro.primitives import sample, param
-from numpyro.svi import elbo
+from numpyro.infer import ELBO
 from numpyro.distributions.distribution import Distribution
 from numpyro.distributions import constraints
 
-from dppp.svi import dpsvi, minibatch
+from dppp.svi import DPSVI
 from dppp.util import unvectorize_shape_2d
+from dppp.minibatch import minibatch
 
 from datasets import batchify_data
 
@@ -198,7 +199,7 @@ def main(args):
     test_init, test_fetch = batchify_data((X_test,), args.batch_size)
 
     ## Init optimizer and training algorithms
-    opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
+    optimizer = optimizers.Adam(args.learning_rate)
 
     # note(lumip): fix the parameters in the models
     def fix_params(model_fn, k):
@@ -214,43 +215,38 @@ def main(args):
 
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
-    svi_init, svi_update, svi_eval = dpsvi(
-        model_fixed, guide_fixed, elbo, opt_init, opt_update, get_params, 
-        rng=dp_rng, dp_scale=0.01, num_obs_total=args.num_samples,
-        clipping_threshold=20.
+    svi = DPSVI(
+        model_fixed, guide_fixed, optimizer, ELBO(), 
+        rng=dp_rng, dp_scale=0.01,  clipping_threshold=20.,
+        num_obs_total=args.num_samples
     )
-
-    svi_update = jit(svi_update)
 
     rng, svi_init_rng = random.split(rng, 2)
     batch = train_fetch(0)
-    opt_state, _ = svi_init(svi_init_rng, batch, batch)
+    svi_state = svi.init(svi_init_rng, *batch)
 
     @jit
-    def epoch_train(rng, opt_state, data_idx, num_batch):
+    def epoch_train(svi_state, data_idx, num_batch):
         def body_fn(i, val):
-            loss, opt_state, rng = val
-            rng, update_rng = random.split(rng, 2)
+            svi_state, loss = val
             batch = train_fetch(i, data_idx)
-            batch_loss, opt_state, rng = svi_update(
-                i, update_rng, opt_state, batch, batch
+            svi_state, batch_loss = svi.update(
+                svi_state, *batch
             )
             loss += batch_loss / (args.num_samples * num_batch)
-            return loss, opt_state, rng
+            return svi_state, loss
 
-        return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
+        return lax.fori_loop(0, num_batch, body_fn, (svi_state, 0.))
     
     @jit
-    def eval_test(rng, opt_state, data_idx, num_batch):
-        def body_fn(i, val):
-            loss_sum, rng = val
+    def eval_test(svi_state, data_idx, num_batch):
+        def body_fn(i, loss_sum):
             batch = test_fetch(i, data_idx)
-            loss = svi_eval(rng, opt_state, batch, batch)
+            loss = svi.evaluate(svi_state, *batch)
             loss_sum += loss / (args.num_samples * num_batch)
-            return loss_sum, rng
+            return loss_sum
 
-        loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
-        return loss
+        return lax.fori_loop(0, num_batch, body_fn, 0.)
 
     smoothed_loss_window = onp.empty(5)
     smoothed_loss_window.fill(onp.nan)
@@ -259,18 +255,18 @@ def main(args):
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng, train_rng, data_fetch_rng = random.split(rng, 3)
+        rng, data_fetch_rng = random.split(rng, 2)
 
         num_train_batches, train_idx = train_init(rng=data_fetch_rng)
-        train_loss, opt_state, _ = epoch_train(
-            train_rng, opt_state, train_idx, num_train_batches
+        svi_state, train_loss = epoch_train(
+            svi_state, train_idx, num_train_batches
         )
 
         if i % 100 == 0:
-            rng, test_rng, test_fetch_rng = random.split(rng, 3)
+            rng, test_fetch_rng = random.split(rng, 2)
             num_test_batches, test_idx = test_init(rng=test_fetch_rng)
             test_loss = eval_test(
-                test_rng, opt_state, test_idx, num_test_batches
+                svi_state, test_idx, num_test_batches
             )
             smoothed_loss_window[window_idx] = test_loss
             smoothed_loss = onp.nanmean(smoothed_loss_window)
@@ -280,7 +276,7 @@ def main(args):
                     i, test_loss, smoothed_loss, train_loss, time.time() - t_start
                 ))
 
-    params = get_params(opt_state)
+    params = svi.get_params(svi_state)
     print(params)
     posterior_modes = params['mus_loc']
     posterior_pis = dist.Dirichlet(params['alpha']).mean

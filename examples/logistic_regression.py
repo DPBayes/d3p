@@ -21,7 +21,7 @@ from jax.random import PRNGKey
 import numpyro.distributions as dist
 from numpyro.handlers import seed, substitute
 from numpyro.primitives import param, sample
-from numpyro.infer import ELBO, SVI
+from numpyro.infer import ELBO
 import numpyro.optim as optimizers
 
 from dppp.util import example_count, normalize, unvectorize_shape_2d
@@ -163,20 +163,20 @@ def main(args):
     svi_state = svi.init(svi_init_rng, *sample_batch)
 
     @jit
-    def epoch_train(rng, svi_state, data_idx, num_batch):
+    def epoch_train(svi_state, data_idx, num_batch):
         def body_fn(i, val):
-            loss, svi_state = val
+            svi_state, loss = val
             batch = train_fetch(i, data_idx)
             batch_X, batch_Y = batch
 
             svi_state, batch_loss = svi.update(svi_state, batch_X, batch_Y)
             loss += batch_loss / (args.num_samples * num_batch)
-            return loss, svi_state
+            return svi_state, loss
 
-        return lax.fori_loop(0, num_batch, body_fn, (0., svi_state))
+        return lax.fori_loop(0, num_batch, body_fn, (svi_state, 0.))
 
     @jit
-    def eval_test(rng, svi_state, data_idx, num_batch):
+    def eval_test(svi_state, data_idx, num_batch, rng):
         params = svi.get_params(svi_state)
 
         def body_fn(i, val):
@@ -194,24 +194,23 @@ def main(args):
 
             return loss_sum, acc_sum
 
-        loss, acc = lax.fori_loop(0, num_batch, body_fn, (0., 0.))
-        return loss, acc
+        return lax.fori_loop(0, num_batch, body_fn, (0., 0.))
 
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng, train_rng, data_fetch_rng = random.split(rng, 3)
+        rng, data_fetch_rng = random.split(rng, 2)
 
         num_train_batches, train_idx = train_init(rng=data_fetch_rng)
-        train_loss, svi_state = epoch_train(
-            train_rng, svi_state, train_idx, num_train_batches
+        svi_state, train_loss = epoch_train(
+            svi_state, train_idx, num_train_batches
         )
 
         if (i % (args.num_epochs//10)) == 0:
             rng, test_rng, test_fetch_rng = random.split(rng, 3)
             num_test_batches, test_idx = test_init(rng=test_fetch_rng)
             test_loss, test_acc = eval_test(
-                test_rng, svi_state, test_idx, num_test_batches
+                svi_state, test_idx, num_test_batches, test_rng
             )
             print("Epoch {}: loss = {}, acc = {} (loss on training set: {}) ({:.2f} s.)".format(
                 i, test_loss, test_acc, train_loss, time.time() - t_start
