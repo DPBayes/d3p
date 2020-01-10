@@ -1,9 +1,18 @@
-"""Gaussian mixture model example.
+"""Gaussian mixture model example 2.
 
-Note: does not work currently and has numerical inaccuracies (in the assignment
-estimation routines). Will likely be removed in favor of the alternative
-implementation that does not directly model the (somewhat fragile) latent cluster
-assignment variable soon.
+This example also demonstrates the gaussian mixture model but instead
+of composing it from primitive distributions in the model and guide
+respectively, we define a MixGaus distribution class to compute the probability
+function for a Gaussian mixture, which we then directly use in the model.
+
+note(lumip): Currently infers fewer priors than the other example and seems to
+be unable to learn learn empty clusters (if the model is configured with more
+components than there are in the data. This is (was) possible in the alternative
+implementation). Somewhat prone to producing NaN values in certain conditions.
+
+note(lumip): The reported loss from svi_update (training set) is roughly 1/2 of
+that returned by svi_eval (on test or training set). Something seems not right
+there..
 """
 
 import os
@@ -15,158 +24,92 @@ sys.path.append(os.path.dirname(sys.path[0]))
 
 import argparse
 import time
-from functools import partial
 
 import numpy as onp
 
 import jax
-from jax import jit, lax, random
-from jax.experimental import optimizers
-from jax.random import PRNGKey
 import jax.numpy as np
+from jax import jit, lax, random
+from jax.random import PRNGKey
+from jax.scipy.special import logsumexp
 
 import numpyro.distributions as dist
+import numpyro.optim as optimizers
 from numpyro.handlers import seed
-from numpyro.primitives import param, sample
-from numpyro.svi import elbo
+from numpyro.primitives import sample, param
+from numpyro.infer import ELBO
+from numpyro.distributions.distribution import Distribution
+from numpyro.distributions import constraints
 
-from dppp.svi import dpsvi, minibatch
+from dppp.svi import DPSVI
 from dppp.util import unvectorize_shape_2d
+from dppp.minibatch import minibatch
 
 from datasets import batchify_data
 
-def model(k, obs_or_shape, num_obs_total=None):
-    """Defines the generative probabilistic model: p(x|z)p(z)
+# we define a Distribution subclass for the gaussian mixture model
+class MixGaus(Distribution):
+    arg_constraints = {
+        'locs': constraints.real, 
+        'scales': constraints.positive, 
+        'pis' : constraints.simplex
+    }
+    support = constraints.real
 
-    :param k: number of components in the mixture
-    :param obs_or_shape: Either a jax.numpy array giving observed samples
-        or a 2-tuple giving the shape of the data the sample.
-    """
-    # f(x) = sum_k pi_k * phi(x; mu_k, sigma_k^2), where phi denotes Gaussian pdf
-    #   * pi_k ~ Dirichlet(alpha), where alpha = (0.3, 0.3, ..., 0.3) \in R_+^k
-    #   * mu_k ~ Normal(0, (10*I)^2)
-    #   * sigma_k ~ Gamma(a0, b0), where a0 = b0 = 0.5 > 0
+    def __init__(self, locs=0., scales=1., pis=1.0, validate_args=None):
+        self.locs, self.scales, self.pis = locs, scales, pis
+        batch_shape = np.shape(locs[0])
+        super(MixGaus, self).__init__(
+            batch_shape=batch_shape, validate_args=validate_args
+        )
 
-    if isinstance(obs_or_shape, tuple):
-        assert(len(obs_or_shape) == 2)
-        batch_size, d = obs_or_shape
-        obs = None
-    else:
-        obs = obs_or_shape
-        assert(obs is not None)
-        assert(np.ndim(obs) <= 2)
-        batch_size, d = unvectorize_shape_2d(obs)
+    def log_prob(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
+        log_pis = np.log(self.pis)
+        log_phis = np.array([
+            dist.Normal(loc, scale).log_prob(value).sum(-1)
+            for loc, scale
+            in zip(self.locs, self.scales)
+        ]).T
+        return logsumexp(log_pis + log_phis, axis=-1)
 
-    alpha = np.ones(k)*0.3
-    a0, b0 = np.ones((k,1))*.5, np.ones((k,1))*.5
+    def sample(self, *args):
+        # ignoring this for now as we only care to compute the log_probability
+        raise NotImplementedError()
 
-    pis = np.broadcast_to(sample('pis', dist.Dirichlet(alpha)), (batch_size,k))
-    mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
-    sigs = sample('sigmas', dist.Gamma(a0, b0))
-
-    assert(pis.shape == (batch_size, k))
-    assert(np.atleast_2d(mus).shape == (k, d))
-    assert(np.atleast_1d(sigs).shape[0] == k)
-
-    with minibatch(batch_size, num_obs_total=num_obs_total):
-        z = sample('z', dist.Categorical(pis)).flatten()
-        assert(z.shape == (batch_size,))
-        X = sample('obs', dist.Normal(mus[z], sigs[z]), obs=obs, sample_shape=batch_size)
-        assert(np.atleast_2d(X).shape == (batch_size, d))
-
-    return X
-
-@partial(jit, static_argnums=(0,))
-def compute_assignment_log_posterior(k, obs, mus, sigs, pis_prior):
-    # computes the unnormalized log-posterior for each value of assignment z
-    #   for each data point
-    assert(np.ndim(obs) <= 2)
-    unvectorized_shape = unvectorize_shape_2d(obs)
-    obs = np.reshape(obs, unvectorized_shape)
-    batch_size = unvectorized_shape[0]
-
-    def per_component_fun(j):
-        log_prob_x_zj = np.sum(
-            dist.Normal(mus[j], sigs[j]).log_prob(obs), axis=1
-        ).flatten()
-        assert(np.atleast_1d(log_prob_x_zj).shape == (batch_size,))
-        log_prob_zj = dist.Categorical(pis_prior).log_prob(j)
-        log_prob = log_prob_x_zj + log_prob_zj
-        assert(np.atleast_1d(log_prob).shape == (batch_size,))
-        return log_prob
-
-    z_log_post = jax.vmap(per_component_fun)(np.arange(k))
-    return z_log_post.T
-
-@jit
-def estimate_pis(assignment_log_posterior):
-    # essentially: pis = |E[p(z)], so we set pis = p(z)
-
-    # We need to get to probabilities from log-probabilities but we
-    #   cannot exponentiate directly due to numerical inaccuracy.
-    # We exploit that log p(z_i) - log p(z_j) = log (p(z_i)/p(z_j))
-    #   ~= log (pi_i/pi_j) and sum(pis) = 1 to solve for the pis.
-    # Dealing with the ratios also solves the problem that the incoming
-    #   posterior probabilities are unnormalized.
-    # Note that we exponentiate the log-ratios, which could still lead to
-    #   numerical inaccuracies. However, we can safely clip the ratio here
-    #   without losing information (which wouldn't work for the posteriors).
-    N, k = np.atleast_2d(assignment_log_posterior).shape
-    z_log_post = assignment_log_posterior.T
-
-    def per_component_fun(j):
-        log_r = z_log_post - z_log_post[j]
-        assert(np.atleast_2d(log_r).shape == (k, N))
-        r = np.clip(np.exp(log_r), 1e-5, 1e5)
-        pis_post_j = 1./np.sum(r, axis=0)
-        return pis_post_j
-
-    pis_post = jax.vmap(per_component_fun, out_axes=1)(np.arange(k))
-
-    return pis_post
-
-
-def guide(k, obs, num_obs_total=None):
-    """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
-
-    :param k: number of components in the mixture
-    :param obs: observed samples to condition the model with
-    """
+def model(k, obs, num_obs_total=None):
+    # this is our model function using the MixGaus distribution defined above
+    # with prior belief
     assert(obs is not None)
     assert(np.ndim(obs) <= 2)
     batch_size, d = unvectorize_shape_2d(obs)
 
-    a0, b0 = param('a0', np.ones((k, 1))*.5), param('b0', np.ones((k, 1))*.5)
-    alpha = param('alpha', np.ones(k)*0.3)
-    mus_loc = param('mus_loc', np.zeros((k, d)))
-    mus_std = np.exp(param('mus_std_log', np.zeros((k, d))))
-
-    mus = sample('mus', dist.Normal(mus_loc, mus_std))
-    sigs = sample('sigmas', dist.Gamma(a0, b0))
-
-    pis_prior = sample('pis', dist.Dirichlet(alpha))
-
-    # compute posterior probabilities of latent mixture assignment z
-    #   after seeing the data
-    z_log_post = compute_assignment_log_posterior(k, obs, mus, sigs, pis_prior)
-
-    # from z posterior probabilities to pis
-    pis_post = estimate_pis(z_log_post)
-    # we require a z for each example. ensure that pis is of correct shape
-    assert(np.atleast_2d(pis_post).shape == (batch_size, k))
-
+    pis = sample('pis', dist.Dirichlet(np.ones(k)))
+    mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
+    sigs = np.ones((k, d))
     with minibatch(batch_size, num_obs_total=num_obs_total):
-        z = sample('z', dist.Categorical(pis_post)).flatten()
-    return pis_post, z, mus, sigs
+        return sample('obs', MixGaus(mus, sigs, pis), obs=obs)
+
+def guide(k, obs, num_obs_total=None):
+    # the latent MixGaus distribution which learns the parameters
+    assert(obs is not None)
+    _, d = unvectorize_shape_2d(obs)
+
+    mus_loc = param('mus_loc', np.zeros((k, d)))
+    mus = sample('mus', dist.Normal(mus_loc, 1.))
+    sigs = np.ones((k, d))
+    alpha = param('alpha', np.ones(k))
+    pis = sample('pis', dist.Dirichlet(alpha))
+    return pis, mus, sigs
 
 def create_toy_data(N, k, d):
-    ## Create some toy data
+    """Creates some toy data (for training and testing)"""
     onp.random.seed(122)
 
     # We create some toy data. To spice things up, it is imbalanced:
     #   The last component has twice as many samples as the others.
     z = onp.random.randint(0, k+1, 2*N)
-    
     z[z == k] = k - 1
     X = onp.zeros((2*N, d))
 
@@ -183,13 +126,68 @@ def create_toy_data(N, k, d):
 
     z_train = z[:N]
     X_train = X[:N]
-
     z_test = z[N:]
     X_test = X[N:]
 
     latent_vals = (z_train, z_test, mus, sigs)
     return X_train, X_test, latent_vals
 
+## the following two functions are not relevant to the training but will
+#   assign test data to the learned posterior components of the model to
+#   check the quality of the learned model
+def compute_assignment_log_posterior(k, obs, mus, sigs, pis_prior):
+    """computes the unnormalized log-posterior for each value of assignment z
+       for each data point
+    """
+    N = np.atleast_1d(obs).shape[0]
+
+    def per_component_fun(j):
+        log_prob_x_zj = np.sum(dist.Normal(mus[j], sigs[j]).log_prob(obs), axis=1).flatten()
+        assert(np.atleast_1d(log_prob_x_zj).shape == (N,))
+        log_prob_zj = dist.Categorical(pis_prior).log_prob(j)
+        log_prob = log_prob_x_zj + log_prob_zj
+        assert(np.atleast_1d(log_prob).shape == (N,))
+        return log_prob
+
+    z_log_post = jax.vmap(per_component_fun)(np.arange(k))
+    return z_log_post.T
+
+def compute_assignment_accuracy(
+    X_test, original_assignment, original_modes, posterior_modes, posterior_pis):
+    """computes the accuracy score for attributing data to the mixture
+    components based on the learned model
+    """
+    k, d = np.shape(original_modes)
+    # we first map our true modes to the ones learned in the model using the
+    # log posterior for z
+    mode_assignment_posterior = compute_assignment_log_posterior(
+        k, original_modes, posterior_modes, np.ones((k, d)), posterior_pis
+    )
+    mode_map = np.argmax(mode_assignment_posterior, axis=1)._value
+    # a potential problem could be that mode_map might not be bijective, skewing
+    # the results of the mapping. we build the inverse map and use identity
+    # mapping as a base to counter that
+    inv_mode_map = {j:j for j in range(k)}
+    inv_mode_map.update({mode_map[j]:j for j in range(k)})
+    
+    # we next obtain the assignments for the data according to the model and
+    # pass them through the inverse map we just build
+    post_data_assignment = compute_assignment_log_posterior(
+        k, X_test, posterior_modes, np.ones((k, d)), posterior_pis
+    )
+    post_data_assignment = np.argmax(post_data_assignment, axis=1)
+    remapped_data_assignment = np.array(
+        [inv_mode_map[j] for j in post_data_assignment._value]
+    )
+
+    # finally, we can compare the results with the original assigments and compute
+    # the accuracy
+    acc = np.mean(original_assignment == remapped_data_assignment)
+    return acc
+
+
+## main function: inference setup and main loop as well as subsequent
+#   model quality check
 def main(args):
     N = args.num_samples
     k = args.num_components
@@ -201,12 +199,12 @@ def main(args):
     test_init, test_fetch = batchify_data((X_test,), args.batch_size)
 
     ## Init optimizer and training algorithms
-    opt_init, opt_update, get_params = optimizers.adam(args.learning_rate)
+    optimizer = optimizers.Adam(args.learning_rate)
 
     # note(lumip): fix the parameters in the models
     def fix_params(model_fn, k):
-        def fixed_params_fn(obs, num_obs_total=None):
-            return model_fn(k, obs, num_obs_total=num_obs_total)
+        def fixed_params_fn(obs, **kwargs):
+            return model_fn(k, obs, **kwargs)
         return fixed_params_fn
 
     model_fixed = fix_params(model, k)
@@ -217,44 +215,38 @@ def main(args):
 
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
-    svi_init, svi_update, svi_eval = dpsvi(
-        model_fixed, guide_fixed, elbo, opt_init, opt_update, get_params,
-        rng=dp_rng, dp_scale=0.01, num_obs_total=args.num_samples,
-        clipping_threshold=np.inf
+    svi = DPSVI(
+        model_fixed, guide_fixed, optimizer, ELBO(), 
+        rng=dp_rng, dp_scale=0.01,  clipping_threshold=20.,
+        num_obs_total=args.num_samples
     )
-
-    svi_update = jit(svi_update)
 
     rng, svi_init_rng = random.split(rng, 2)
     batch = train_fetch(0)
-    opt_state, _ = svi_init(svi_init_rng, batch, batch)
+    svi_state = svi.init(svi_init_rng, *batch)
 
     @jit
-    def epoch_train(rng, opt_state, data_idx, num_batch):
+    def epoch_train(svi_state, data_idx, num_batch):
         def body_fn(i, val):
-            loss, opt_state, rng = val
-            rng, update_rng = random.split(rng, 2)
+            svi_state, loss = val
             batch = train_fetch(i, data_idx)
-            batch_loss, opt_state, rng = svi_update(
-                i, update_rng, opt_state, batch, batch
+            svi_state, batch_loss = svi.update(
+                svi_state, *batch
             )
             loss += batch_loss / (args.num_samples * num_batch)
-            return loss, opt_state, rng
+            return svi_state, loss
 
-        return lax.fori_loop(0, num_batch, body_fn, (0., opt_state, rng))
-
-
+        return lax.fori_loop(0, num_batch, body_fn, (svi_state, 0.))
+    
     @jit
-    def eval_test(rng, opt_state, data_idx, num_batch):
-        def body_fn(i, val):
-            loss_sum, rng = val
+    def eval_test(svi_state, data_idx, num_batch):
+        def body_fn(i, loss_sum):
             batch = test_fetch(i, data_idx)
-            loss = svi_eval(rng, opt_state, batch, batch)
+            loss = svi.evaluate(svi_state, *batch)
             loss_sum += loss / (args.num_samples * num_batch)
-            return loss_sum, rng
+            return loss_sum
 
-        loss, _ = lax.fori_loop(0, num_batch, body_fn, (0., rng))
-        return loss
+        return lax.fori_loop(0, num_batch, body_fn, 0.)
 
     smoothed_loss_window = onp.empty(5)
     smoothed_loss_window.fill(onp.nan)
@@ -263,18 +255,18 @@ def main(args):
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng, data_fetch_rng, test_rng = random.split(rng, 3)
+        rng, data_fetch_rng = random.split(rng, 2)
 
         num_train_batches, train_idx = train_init(rng=data_fetch_rng)
-        train_loss, opt_state, rng = epoch_train(
-            rng, opt_state, train_idx, num_train_batches
+        svi_state, train_loss = epoch_train(
+            svi_state, train_idx, num_train_batches
         )
 
         if i % 100 == 0:
-            rng, test_rng, test_fetch_rng = random.split(rng, 3)
+            rng, test_fetch_rng = random.split(rng, 2)
             num_test_batches, test_idx = test_init(rng=test_fetch_rng)
             test_loss = eval_test(
-                test_rng, opt_state, test_idx, num_test_batches
+                svi_state, test_idx, num_test_batches
             )
             smoothed_loss_window[window_idx] = test_loss
             smoothed_loss = onp.nanmean(smoothed_loss_window)
@@ -284,40 +276,22 @@ def main(args):
                     i, test_loss, smoothed_loss, train_loss, time.time() - t_start
                 ))
 
-    params = get_params(opt_state)
+    params = svi.get_params(svi_state)
     print(params)
-    print("MAP estimate of mixture weights: {}".format(dist.Dirichlet(params['alpha']).mean))
-    print("MAP estimate of mixture modes  : {} (stdev: {})".format(params['mus_loc'], np.exp(params['mus_std_log'])))
-    print("MAP estimate of mixture std    : {}".format(dist.Gamma(params['a0'], params['b0']).mean))
+    posterior_modes = params['mus_loc']
+    posterior_pis = dist.Dirichlet(params['alpha']).mean
+    print("MAP estimate of mixture weights: {}".format(posterior_pis))
+    print("MAP estimate of mixture modes  : {}".format(posterior_modes))
 
-    # getting accuracy score for attributing data to the mixture components
-    # based on the learned model
-    original_assignment = latent_vals[1]
-    original_modes = latent_vals[2]
-    # we first map our true modes to the ones learned in the model using the
-    # log posterior for z
-    mode_assignment_posterior = compute_assignment_log_posterior(k, original_modes, params['mus_loc'], np.ones((k, d)), dist.Dirichlet(params['alpha']).mean)
-    mode_map = np.argmax(mode_assignment_posterior, axis=1)._value
-    # a potential problem could be that mode_map might not be bijective, skewing
-    # the results of the mapping. we build the inverse map and use identity
-    # mapping as a base to counter that
-    inv_mode_map = {j:j for j in range(k)}
-    inv_mode_map.update({mode_map[j]:j for j in range(k)})
-    
-    # we next obtain the assignments for the data according to the model and
-    # pass them through the inverse map we just build
-    post_data_assignment = compute_assignment_log_posterior(k, X_test, params['mus_loc'], np.ones((k, d)), dist.Dirichlet(params['alpha']).mean)
-    post_data_assignment = np.argmax(post_data_assignment, axis=1)
-    remapped_data_assignment = np.array([inv_mode_map[j] for j in post_data_assignment._value])
-
-    # finally, we can compare the results with the original assigments and compute
-    # the accuracy
-    acc = np.sum(original_assignment == remapped_data_assignment)/X_test.shape[0]
+    acc = compute_assignment_accuracy(
+        X_test, latent_vals[1], latent_vals[2], posterior_modes, posterior_pis
+    )
     print("assignment accuracy: {}".format(acc))
-    
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', default=10000, type=int, help='number of training epochs')
+    parser.add_argument('-n', '--num-epochs', default=2000, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
     parser.add_argument('-batch-size', default=32, type=int, help='batch size')
     parser.add_argument('-d', '--dimensions', default=2, type=int, help='data dimension')
