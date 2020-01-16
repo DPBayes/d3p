@@ -14,6 +14,7 @@ setup(
     packages=find_packages(include=['dppp', 'dppp.*']),
     author='PADS @ Helsinki University and Aalto University',
     install_requires=[
+        'numpy < 1.18', # required as long as numpyro 0.2.4 is not available yet
         'numpyro >= 0.2.0'
     ],
     extras_require={
