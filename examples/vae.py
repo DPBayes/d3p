@@ -183,7 +183,7 @@ def main(args):
     svi_state = svi.init(svi_init_rng, sample_batch)
 
     # functions for training tasks
-    # @jit
+    @jit
     def epoch_train(svi_state, train_idx, num_batch, rng):
         """Trains one epoch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
 

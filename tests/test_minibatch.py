@@ -8,12 +8,12 @@ import jax
 import numpy as onp
 
 import numpyro.distributions as dist
-from numpyro.svi import elbo
-from numpyro.infer_util import log_density
+from numpyro.infer import ELBO
+from numpyro.infer.util import log_density
 from numpyro.handlers import seed
 from numpyro.primitives import sample
 
-from dppp.svi import minibatch
+from dppp.minibatch import minibatch
 
 class MinibatchTests(unittest.TestCase):
 
@@ -85,15 +85,6 @@ class MinibatchTests(unittest.TestCase):
         result = minibatch(X)
 
         self.assertAlmostEqual(expected_scale, result.scale)
-
-    def test_minibatch_reject_fixed_batch_size_under_jit(self):
-        minibatch_jitted = jax.jit(minibatch, static_argnums=1)
-
-        batch_size = 10
-        num_obs_total = 100
-
-        with self.assertRaises(ValueError):
-            minibatch_jitted(batch_size, num_obs_total)
 
     def test_minibatch_fixed_batch_size_scale_correct_with_static_argnums_under_jit(self):
         minibatch_jitted = jax.jit(minibatch, static_argnums=(0, 1))

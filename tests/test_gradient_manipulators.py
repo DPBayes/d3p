@@ -79,7 +79,7 @@ class GradientManipulatorsTests(unittest.TestCase):
         normalized_gradient_parts = normalize_gradient(self.gradient_parts)
         self.assert_gradient_direction(self.gradient_parts, normalized_gradient_parts)
         normalized_norm = full_norm(normalized_gradient_parts)
-        self.assertAlmostEqual(1., normalized_norm)
+        self.assertTrue(np.allclose(1., normalized_norm))
 
 if __name__ == '__main__':
     unittest.main()
