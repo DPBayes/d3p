@@ -50,6 +50,19 @@ class GradientManipulatorsTests(unittest.TestCase):
         self.assertEqual(0, norm)
         norm = full_norm([])
         self.assertEqual(0, norm)
+        norm = full_norm(())
+        self.assertEqual(0, norm)
+
+    def test_full_norm_on_jax_tree(self):
+        gradient_tree = (
+            np.ones(shape=(17, 2, 3)), 
+            np.ones(shape=(2, 54)),
+            (np.ones(shape=(2,3)), np.ones(shape=(3,4,5))),
+            ()
+        )
+        norm = full_norm(gradient_tree)
+        expectedNorm = 16.613247
+        self.assertTrue(np.allclose(expectedNorm, norm))
 
     def test_clip_gradient_gives_input_when_threshold_equals_norm(self):
         clip_threshold = full_norm(self.gradient_parts)

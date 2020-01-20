@@ -157,16 +157,21 @@ class TunableSVI(SVI):
         return SVIState(optim_state, rng_key), loss_val
 
 
-def full_norm(list_of_parts, ord=2):
-    """Computes the total norm over a list of values (of any shape) by treating
-    them as a single large vector.
+def full_norm(list_of_parts_or_tree, ord=2):
+    """Computes the total norm over a list of values (of any shape) or a jax
+    tree by treating them as a single large vector.
 
-    :param list_of_parts: The list of values that make up the vector to compute
-        the norm over.
+    :param list_of_parts_or_tree: The list or jax tree of values that make up
+        the vector to compute the norm over.
     :param ord: Order of the norm. May take any value possible for
     `numpy.linalg.norm`.
     :return: The indicated norm over the full vector.
     """
+    if isinstance(list_of_parts_or_tree, list):
+        list_of_parts = list_of_parts_or_tree
+    else:
+        list_of_parts = jax.tree_leaves(list_of_parts_or_tree)
+    
     if list_of_parts is None or len(list_of_parts) == 0:
         return 0.
 
