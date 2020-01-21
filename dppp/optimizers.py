@@ -13,7 +13,11 @@ def adadp(
         alpha_max=1.1
     ):
     """Construct optimizer triple for the adaptive learning rate optimizer of
-    Koskela and Honkela (https://arxiv.org/abs/1809.03832).
+    Koskela and Honkela.
+
+    Reference:
+    A. Koskela, A. Honkela: Learning Rate Adaptation for Federated and
+    Differentially Private Learning (https://arxiv.org/abs/1809.03832).
 
     Args:
     step_size: the initial step size
