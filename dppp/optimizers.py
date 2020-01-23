@@ -79,8 +79,8 @@ def adadp(
 class ADADP(_NumpyroOptim):
 
     def __init__(self,
-                 step_size,
-                 tol,
+                 step_size=1e-3,
+                 tol=1.0,
                  stability_check=True,
                  alpha_min=0.9,
                  alpha_max=1.1) -> None:
