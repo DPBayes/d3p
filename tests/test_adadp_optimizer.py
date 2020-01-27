@@ -18,6 +18,12 @@ class ADADPTests(unittest.TestCase):
             map(compare_fn, jax.tree_leaves(expected), jax.tree_leaves(actual))
         )
 
+    def assertTreeStructure(self, expected, actual):
+        self.assertEqual(
+            jax.tree_structure(expected),
+            jax.tree_structure(actual)
+        )
+
     def assertTreeAllClose(self, expected, actual):
         self.assertTrue(self.tree_compare(expected, actual, np.allclose))
 
@@ -46,7 +52,7 @@ class ADADPTests(unittest.TestCase):
         self.assertTreeAllClose(value, x)
         self.assertEqual(learning_rate, lr)
         self.assertTreeAllClose(0., x_stepped)
-        self.assertTreeAllClose(value, x_prev)
+        self.assertTreeStructure(self.template, x_prev)
 
     def test_update_step_1(self):
         learning_rate = 1.
@@ -59,8 +65,8 @@ class ADADPTests(unittest.TestCase):
         )
         i, (x, lr, x_stepped, x_prev) = adadp.update(gradient, opt_state)
 
-        step_result = self.same_tree_with_value(value, -1.)
-        half_step_result = self.same_tree_with_value(value, -0.5)
+        step_result = self.same_tree_with_value(self.template, -1.)
+        half_step_result = self.same_tree_with_value(self.template, -0.5)
 
         self.assertEqual(1, i)
         self.assertTreeAllClose(half_step_result, x)
@@ -86,8 +92,8 @@ class ADADPTests(unittest.TestCase):
         
         i, (x, lr, x_stepped, x_prev) = adadp.update(gradient, opt_state)
 
-        step_result = self.same_tree_with_value(value, -1.)
-        two_half_step_results = self.same_tree_with_value(value, -1.5)
+        step_result = self.same_tree_with_value(self.template, -1.)
+        two_half_step_results = self.same_tree_with_value(self.template, -1.5)
 
         expected_lr = 1.018308251
 
@@ -113,8 +119,8 @@ class ADADPTests(unittest.TestCase):
         
         i, (x, lr, x_stepped, x_prev) = adadp.update(gradient, opt_state)
 
-        step_result = self.same_tree_with_value(value, -1.)
-        two_half_step_results = self.same_tree_with_value(value, -2.)
+        step_result = self.same_tree_with_value(self.template, -1.)
+        two_half_step_results = self.same_tree_with_value(self.template, -2.)
 
         expected_lr = .9 # 0.72005267 clipped by alpha_min
 
@@ -132,7 +138,7 @@ class ADADPTests(unittest.TestCase):
         self.assertTreeAllClose(value, x)
         self.assertEqual(learning_rate, lr)
         self.assertTreeAllClose(0., x_stepped)
-        self.assertTreeAllClose(value, x_prev)
+        self.assertTreeStructure(self.template, x_prev)
 
     def test_update_step_1_with_jit(self):
         learning_rate = 1.
@@ -145,8 +151,8 @@ class ADADPTests(unittest.TestCase):
         )
         i, (x, lr, x_stepped, x_prev) = jax.jit(adadp.update)(gradient, opt_state)
 
-        step_result = self.same_tree_with_value(value, -1.)
-        half_step_result = self.same_tree_with_value(value, -0.5)
+        step_result = self.same_tree_with_value(self.template, -1.)
+        half_step_result = self.same_tree_with_value(self.template, -0.5)
 
         self.assertEqual(1, i)
         self.assertTreeAllClose(half_step_result, x)
@@ -172,8 +178,8 @@ class ADADPTests(unittest.TestCase):
         
         i, (x, lr, x_stepped, x_prev) = jax.jit(adadp.update)(gradient, opt_state)
 
-        step_result = self.same_tree_with_value(value, -1.)
-        two_half_step_results = self.same_tree_with_value(value, -1.5)
+        step_result = self.same_tree_with_value(self.template, -1.)
+        two_half_step_results = self.same_tree_with_value(self.template, -1.5)
 
         expected_lr = 1.018308251
 
@@ -199,8 +205,8 @@ class ADADPTests(unittest.TestCase):
         
         i, (x, lr, x_stepped, x_prev) = jax.jit(adadp.update)(gradient, opt_state)
 
-        step_result = self.same_tree_with_value(value, -1.)
-        two_half_step_results = self.same_tree_with_value(value, -2.)
+        step_result = self.same_tree_with_value(self.template, -1.)
+        two_half_step_results = self.same_tree_with_value(self.template, -2.)
 
         expected_lr = .9 # 0.72005267 clipped by alpha_min
 
