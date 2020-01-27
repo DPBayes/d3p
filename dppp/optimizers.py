@@ -1,7 +1,7 @@
 from numpyro.optim import _NumpyroOptim, _add_doc
 from jax.experimental.optimizers import optimizer, make_schedule
 import jax.numpy as np
-from jax import tree_map, tree_multimap, tree_leaves
+from jax import tree_map, tree_multimap, tree_leaves, lax
 
 from .svi import full_norm
 
@@ -36,39 +36,59 @@ def adadp(
         x_stepped = tree_map(lambda n: np.zeros_like(n), x0)
         return x0, lr, x_stepped, x0
 
+    def _compute_update_step(x, g, step_size_):
+            return tree_multimap(lambda x_, g_: x_ - step_size_ * g_, x, g)
+
+    def _update_even_step(args):
+        g, state, new_x = args
+        x, lr, x_stepped, x_prev = state
+
+        x_prev = x
+        x_stepped = _compute_update_step(x, g, lr)
+
+        return new_x, lr, x_stepped, x_prev
+
+    def _update_odd_step(args):
+        g, state, new_x = args
+        x, lr, x_stepped, x_prev = state
+
+        x_stepped_parts = tree_leaves(x_stepped)
+        new_x_parts = tree_leaves(new_x)
+
+        err_e = [
+            np.sum(((x_full - x_halfs)/np.maximum(1., x_full)) ** 2)
+            for x_full, x_halfs in zip(x_stepped_parts, new_x_parts)
+        ]
+        # note(lumip): paper specifies the approximate error function as
+        #   using absolute values, but since we square anyways, those are
+        #   not required here; the resulting array is partial squared sums
+        #   of the l2-norm over all gradient elements (per gradient site)
+
+        err_e = np.sqrt(np.sum(err_e)) # summing partial gradient norm
+        
+        new_lr = lr * np.minimum(
+            np.maximum(np.sqrt(tol/err_e), 0.9), 1.1
+        )
+
+        new_x = lax.cond(
+            stability_check and err_e > tol,
+            x_prev, lambda nx: nx,
+            new_x, lambda nx: nx
+        )
+
+        return new_x, new_lr, x_stepped, x_prev
+
     def update(i, g, state):
         x, lr, x_stepped, x_prev = state
 
-        def compute_update_step(x, g, step_size_):
-            return tree_multimap(lambda x_, g_: x_ - step_size_ * g_, x, g)
-
-        new_x = compute_update_step(x, g, 0.5 * lr)
-        if i % 2 == 0:
-            x_prev = x
-            x_stepped = compute_update_step(x, g, lr)
-            return new_x, lr, x_stepped, x_prev
-        else:
-            x_stepped_parts = tree_leaves(x_stepped)
-            new_x_parts = tree_leaves(new_x)
-
-            err_e = [
-                np.sum(((x_full - x_halfs)/np.maximum(1., x_full)) ** 2)
-                for x_full, x_halfs in zip(x_stepped_parts, new_x_parts)
-            ]
-            # note(lumip): paper specifies the approximate error function as
-            #   using absolute values, but since we square anyways, those are
-            #   not required here; the resulting array is partial squared sums
-            #   of the l2-norm over all gradient elements (per gradient site)
-
-            err_e = np.sqrt(np.sum(err_e)) # summing partial gradient norm
-            
-            new_lr = lr * np.minimum(
-                np.maximum(np.sqrt(tol/err_e), 0.9), 1.1
-            )
-
-            if stability_check and err_e > tol:
-                new_x = x_prev
-            return new_x, new_lr, x_stepped, x_prev
+        new_x = _compute_update_step(x, g, 0.5 * lr)
+        return lax.cond(
+            i % 2 == 0,
+            (g, state, new_x),
+            _update_even_step,
+            (g, state, new_x),
+            _update_odd_step
+        )
 
     def get_params(state):
         x = state[0]
