@@ -13,7 +13,7 @@ import jax.numpy as np
 from numpyro.infer.svi import SVI, SVIState
 import numpyro.distributions as dist
 
-from dppp.util import map_over_secondary_dims
+from dppp.util import map_over_secondary_dims, example_count
 
 
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
@@ -99,6 +99,8 @@ class TunableSVI(SVI):
             wrapped_px_loss
         )(params, args)
 
+        batch_size = example_count(per_example_loss)
+
         # get total loss and loss combiner vjp func
         loss_val, loss_combine_vjp = jax.vjp(self.loss.combiner_fn, per_example_loss)
         
@@ -146,7 +148,7 @@ class TunableSVI(SVI):
 
         # apply batch gradient modification (e.g., DP noise perturbation) (if any)
         if self.batch_grad_manipulation_fn:
-            grads_list = self.batch_grad_manipulation_fn(grads_list)
+            grads_list = self.batch_grad_manipulation_fn(grads_list, batch_size)
 
         # reassemble the jax tree used by optimizer for the final gradients
         grads = jax.tree_unflatten(
@@ -279,13 +281,10 @@ class DPSVI(TunableSVI):
 
         _, perturbation_rng = jax.random.split(rng, 2)
 
-        # todo(lumip): this might not be correct. think about how splitting
-        #   over the gradient influences the noise level. currently, dp_scale
-        #   noise is applied to each parameter over all gradient components
         @jax.jit
-        def grad_perturbation_fn(list_of_grads):
+        def grad_perturbation_fn(list_of_grads, batch_size):
             def perturb_one(grad):
-                noise = dist.Normal(0, dp_scale).sample(
+                noise = dist.Normal(0, dp_scale / batch_size).sample(
                     perturbation_rng, sample_shape=grad.shape
                 )
                 return grad + noise
