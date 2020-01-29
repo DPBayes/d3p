@@ -85,7 +85,18 @@ class TunableSVI(SVI):
 
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
 
-    def update(self, svi_state, *args, **kwargs):
+    def _compute_per_example_gradients(self, svi_state, *args, **kwargs):
+        """ Computes the raw per-example gradients of the model.
+
+        This is the first step in a full update iteration.
+
+        :param svi_state: The current state of the SVI algorithm.
+        :param args: Arguments to the loss function.
+        :param kwargs: All keyword arguments to model or guide.
+        :returns: tuple consisting of the updated svi state, an array of loss
+            values per example, and a jax tuple tree of per-example gradients
+            per parameter site (each site's gradients have shape (batch_size, *parameter_shape))
+        """
         rng_key, rng_key_step = random.split(svi_state.rng_key, 2)
         params = self.optim.get_params(svi_state.optim_state)
 
@@ -98,31 +109,27 @@ class TunableSVI(SVI):
         per_example_loss, per_example_grads = per_example_value_and_grad(
             wrapped_px_loss
         )(params, args)
+        return SVIState(svi_state.optim_state, rng_key), per_example_loss, per_example_grads
 
-        batch_size = example_count(per_example_loss)
+    def _apply_per_example_gradient_transformations(self, svi_state, px_gradients):
+        """ Applies per-example gradient transformations by applying
+            `per_example_grad_manipulation_fn` (e.g., clipping) to each per-example
+            gradient.
 
-        # get total loss and loss combiner vjp func
-        loss_val, loss_combine_vjp = jax.vjp(self.loss.combiner_fn, per_example_loss)
-        
-        # loss_combine_vjp gives us the backward differentiation function
-        #   from combined loss to per-example losses. we use it to get the
-        #   (1xbatch_size) Jacobian and construct a function that takes
-        #   per-example gradients and left-multiplies them with that jacobian
-        #   to get the final combined gradient
-        loss_jacobian = np.reshape(loss_combine_vjp(np.array(1.))[0], (1, -1))
-        # loss_vjp = lambda px_grads: np.sum(np.multiply(loss_jacobian, px_grads))
-        loss_vjp = lambda px_grads: np.matmul(loss_jacobian, px_grads)
+        This is the second step in a full update iteration.
 
-        # we map the loss combination vjp func over all secondary dimensions
-        #   of gradient sites. This is necessary since some gradient
-        #   sites might be matrices in itself (e.g., for NN layers), so a stack
-        #   of those would be 3-dimensional and not admittable to np.matmul
-        loss_vjp = map_over_secondary_dims(loss_vjp)
-
-        # per_example_grads will be jax tree of jax np.arrays of shape
+        :param svi_state: The current state of the SVI algorithm.
+        :param px_gradients: Jax tuple tree of per-example gradients as returned
+            by `_compute_per_example_gradients`
+        :returns: tuple consisting of the updated svi state, a list of
+            transformed per-example gradients per site and the jax tree structure
+            definition. The list is a flattened representation of the jax tree,
+            the shape of per-example gradients per parameter is unaffected.
+        """
+        # px_gradients is a jax tree of jax np.arrays of shape
         #   [batch_size, (param_shape)] for each parameter. flatten it out!
         px_grads_list, px_grads_tree_def = jax.tree_flatten(
-            per_example_grads
+            px_gradients
         )
 
         # if per-sample gradient manipulation is present, we apply it to
@@ -142,9 +149,48 @@ class TunableSVI(SVI):
             #   should just get the whole tree per sample to get all available
             #   information
 
+        return svi_state, px_grads_list, px_grads_tree_def
+
+    def _combine_and_transform_gradient(self, svi_state, px_grads_list, px_loss, px_grads_tree_def):
+        """ Combines the per-example gradients into the batch gradient and
+            applies the batch gradient transformation given as
+            `batch_grad_manipulation_fn`.
+
+        This is the third step of a full update iteration.
+
+        :param svi_state: The current state of the SVI algorithm.
+        :param px_grads_list: List of transformed per-example gradients as returned
+            by `_apply_per_example_gradient_transformations`
+        :param px_loss: Array of per-example loss values as output by
+            `_compute_per_example_gradients`.
+        :param px_grads_tree_def: Jax tree definition for the gradient tree as
+            returned by `_apply_per_example_gradient_transformations`.
+        :returns: tuple consisting of the updated svi state, the loss value for
+            the batch and a jax tree of batch gradients per parameter site.
+        """
+        # get total loss and loss combiner vjp func
+        loss_val, loss_combine_vjp = jax.vjp(self.loss.combiner_fn, px_loss)
+        
+        # loss_combine_vjp gives us the backward differentiation function
+        #   from combined loss to per-example losses. we use it to get the
+        #   (1xbatch_size) Jacobian and construct a function that takes
+        #   per-example gradients and left-multiplies them with that jacobian
+        #   to get the final combined gradient
+        loss_jacobian = np.reshape(loss_combine_vjp(np.array(1.))[0], (1, -1))
+        # loss_vjp = lambda px_grads: np.sum(np.multiply(loss_jacobian, px_grads))
+        loss_vjp = lambda px_grads: np.matmul(loss_jacobian, px_grads)
+
+        # we map the loss combination vjp func over all secondary dimensions
+        #   of gradient sites. This is necessary since some gradient
+        #   sites might be matrices in itself (e.g., for NN layers), so a stack
+        #   of those would be 3-dimensional and not admittable to np.matmul
+        loss_vjp = map_over_secondary_dims(loss_vjp)
+
         # combine gradients for all parameters in the gradient jax tree
         #   according to the loss combination vjp func
         grads_list = tuple(map(loss_vjp, px_grads_list))
+
+        batch_size = example_count(px_loss)
 
         # apply batch gradient modification (e.g., DP noise perturbation) (if any)
         if self.batch_grad_manipulation_fn:
@@ -155,8 +201,36 @@ class TunableSVI(SVI):
             px_grads_tree_def, grads_list
         )
 
-        optim_state = self.optim.update(grads, svi_state.optim_state)
-        return SVIState(optim_state, rng_key), loss_val
+        return svi_state, loss_val, grads
+        
+
+    def _apply_gradient(self, svi_state, batch_gradient):
+        """ Takes a (batch) gradient step in parameter space using the specified
+            optimizer.
+
+        This is the fourth and last step of a full update iteration.
+        :param svi_state: The current state of the SVI algorithm.
+        :param batch_gradient: Jax tree of batch gradients per parameter site,
+            as returned by `_combine_and_transform_gradient`.
+        :returns: tuple consisting of the updated svi state.
+        """
+        optim_state = self.optim.update(batch_gradient, svi_state.optim_state)
+        return SVIState(optim_state, svi_state.rng_key)
+
+    def update(self, svi_state, *args, **kwargs):
+        svi_state, per_example_loss, per_example_grads = \
+            self._compute_per_example_gradients(svi_state, *args, **kwargs)
+
+        svi_state, per_example_grads, tree_def = \
+            self._apply_per_example_gradient_transformations(
+                svi_state, per_example_grads
+            )
+
+        svi_state, loss, gradient = self._combine_and_transform_gradient(
+            svi_state, per_example_grads, per_example_loss, tree_def
+        )
+        
+        return self._apply_gradient(svi_state, gradient), loss
 
 
 def full_norm(list_of_parts_or_tree, ord=2):
