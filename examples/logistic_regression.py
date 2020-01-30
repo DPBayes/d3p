@@ -145,17 +145,13 @@ def main(args):
     ## Init optimizer and training algorithms
     optimizer = optimizers.Adam(args.learning_rate)
 
-    rng = PRNGKey(123)
-
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
-    rng, dp_rng = random.split(rng, 2)
-
     svi = DPSVI(model, guide, optimizer, ELBO(),
-        rng=dp_rng, dp_scale=0.01, clipping_threshold=20.,
-        num_obs_total=args.num_samples
+        dp_scale=0.01, clipping_threshold=20., num_obs_total=args.num_samples
     )
 
+    rng = PRNGKey(123)
     rng, svi_init_rng, data_fetch_rng = random.split(rng, 3)
     _, train_idx = train_init(rng=data_fetch_rng)
     sample_batch = train_fetch(0, train_idx)

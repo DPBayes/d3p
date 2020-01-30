@@ -194,7 +194,11 @@ class TunableSVI(SVI):
 
         # apply batch gradient modification (e.g., DP noise perturbation) (if any)
         if self.batch_grad_manipulation_fn:
-            grads_list = self.batch_grad_manipulation_fn(grads_list, batch_size)
+            rng_key, rng_key_step = random.split(svi_state.rng_key, 2)
+            svi_state = SVIState(svi_state.optim_state, rng_key)
+            grads_list = self.batch_grad_manipulation_fn(
+                grads_list, batch_size, rng=rng_key_step
+            )
 
         # reassemble the jax tree used by optimizer for the final gradients
         grads = jax.tree_unflatten(
@@ -346,28 +350,28 @@ class DPSVI(TunableSVI):
     """
 
     def __init__(self, model, guide, optim, per_example_loss,
-            clipping_threshold, dp_scale, rng, **static_kwargs):
+            clipping_threshold, dp_scale, **static_kwargs):
 
 
         gradients_clipping_fn = get_gradients_clipping_function(
             clipping_threshold
         )
 
-        _, perturbation_rng = jax.random.split(rng, 2)
-
         @jax.jit
-        def grad_perturbation_fn(list_of_grads, batch_size):
-            def perturb_one(grad):
+        def grad_perturbation_fn(list_of_grads, batch_size, rng):
+            def perturb_one(grad, site_rng):
                 noise = dist.Normal(0, dp_scale / batch_size).sample(
-                    perturbation_rng, sample_shape=grad.shape
+                    site_rng, sample_shape=grad.shape
                 )
                 return grad + noise
 
-            #list_of_grads = jax.vmap(perturb_one, in_axes=0)(list_of_grads)
-
+            per_site_rngs = jax.random.split(rng, len(list_of_grads))
             # todo(lumip): somehow parallelizing/vmapping this would be great
             #   but current vmap will instead vmap over each position in it
-            list_of_grads = tuple(perturb_one(grad) for grad in list_of_grads)
+            list_of_grads = tuple(
+                perturb_one(grad, site_rng) 
+                for grad, site_rng in zip(list_of_grads, per_site_rngs)
+            )
             return list_of_grads
 
         super().__init__(

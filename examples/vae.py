@@ -163,20 +163,18 @@ def main(args):
     decoder_nn = decoder(args.hidden_dim, out_dim)
     optimizer = optimizers.Adam(args.learning_rate)
 
-    # preparing random number generators
-    rng = PRNGKey(0)
-    rng, dp_rng = random.split(rng, 2)
-
     # note(lumip): choice of c is somewhat arbitrary at the moment.
     #   in early iterations gradient norm values are typically
     #   between 100 and 200 but in epoch 20 usually at 280 to 290.
     #   value for dp_scale completely made up currently.
     svi = DPSVI(
         model, guide, optimizer, ELBO(),                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
-        rng=dp_rng, dp_scale=0.01, clipping_threshold=300.,
+        dp_scale=0.01, clipping_threshold=300.,
         num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim
     )
 
+    # preparing random number generators and initializing svi
+    rng = PRNGKey(0)
     rng, binarize_rng, svi_init_rng = random.split(rng, 3)
     _, train_idx = train_init()
     sample_batch = train_fetch(0, train_idx, binarize_rng)[0]
