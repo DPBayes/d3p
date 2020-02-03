@@ -348,6 +348,81 @@ class UtilityTests(unittest.TestCase):
         res = util.expand_shape(a, 2)
         self.assertEqual(expected, res)
 
+    #### do_trees_have_same_structure ####
+
+    def test_do_trees_have_same_structure(self):
+        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        b = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        self.assertTrue(util.do_trees_have_same_structure(a, b))
+
+    def test_do_trees_have_same_structure_empty(self):
+        a = ()
+        b = ()
+        self.assertTrue(util.do_trees_have_same_structure(a, b))
+
+    def test_do_trees_have_same_structure_different_shape_dimensions(self):
+        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        b = ((np.ones((8, 4)), np.ones((7, 6, 3))), np.ones(7))
+        self.assertTrue(util.do_trees_have_same_structure(a, b))
+
+    def test_do_trees_have_same_structure_different_shape_lengths(self):
+        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        b = ((np.ones((3)), np.ones((7, 6))), np.ones(7))
+        self.assertTrue(util.do_trees_have_same_structure(a, b))
+
+    def test_do_trees_have_same_structure_different_values(self):
+        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        b = ((np.zeros((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        self.assertTrue(util.do_trees_have_same_structure(a, b))
+
+    #### do_trees_have_same_shape ####
+
+    def test_do_trees_have_same_shape(self):
+        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        b = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        self.assertTrue(util.do_trees_have_same_shape(a, b))
+
+    def test_do_trees_have_same_shape_empty(self):
+        a = ()
+        b = ()
+        self.assertTrue(util.do_trees_have_same_shape(a, b))
+
+    def test_do_trees_have_same_shape_different_shape_dimensions(self):
+        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        b = ((np.ones((8, 4)), np.ones((7, 6, 3))), np.ones(7))
+        self.assertFalse(util.do_trees_have_same_shape(a, b))
+
+    def test_do_trees_have_same_shape_different_shape_lengths(self):
+        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        b = ((np.ones((3)), np.ones((7, 6))), np.ones(7))
+        self.assertFalse(util.do_trees_have_same_shape(a, b))
+
+    def test_do_trees_have_same_shape_different_values(self):
+        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        b = ((np.zeros((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        self.assertTrue(util.do_trees_have_same_shape(a, b))
+
+    #### are_trees_close ####
+
+    def test_are_trees_close(self):
+        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        b = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        self.assertTrue(util.are_trees_close(a, b))
+
+    def test_are_trees_close_empty(self):
+        a = ()
+        b = ()
+        self.assertTrue(util.are_trees_close(a, b))
+
+    def test_are_trees_close_different_shape_dimensions(self):
+        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        b = ((np.ones((8, 4)), np.ones((7, 6, 3))), np.ones(7))
+        self.assertFalse(util.are_trees_close(a, b))
+
+    def test_are_trees_close_different_shape_lengths(self):
+        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        b = ((np.ones((3)), np.ones((7, 6))), np.ones(7))
+        self.assertFalse(util.are_trees_close(a, b))
 
 if __name__ == '__main__':
     unittest.main()

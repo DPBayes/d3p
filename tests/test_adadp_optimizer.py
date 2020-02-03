@@ -9,23 +9,15 @@ import numpy as onp
 from functools import reduce
 
 from dppp.optimizers import ADADP
+import dppp.util
 
 class ADADPTests(unittest.TestCase):
 
-    def tree_compare(self, expected, actual, compare_fn):
-        return reduce(
-            lambda x, y: x and y,
-            map(compare_fn, jax.tree_leaves(expected), jax.tree_leaves(actual))
-        )
-
     def assertTreeStructure(self, expected, actual):
-        self.assertEqual(
-            jax.tree_structure(expected),
-            jax.tree_structure(actual)
-        )
+        self.assertTrue(dppp.util.do_trees_have_same_structure(expected, actual))
 
     def assertTreeAllClose(self, expected, actual):
-        self.assertTrue(self.tree_compare(expected, actual, np.allclose))
+        self.assertTrue(dppp.util.are_trees_close(expected, actual))
 
     def same_tree_with_value(self, tree, value):
         return jax.tree_map(
@@ -51,7 +43,9 @@ class ADADPTests(unittest.TestCase):
         self.assertEqual(0, i)
         self.assertTreeAllClose(value, x)
         self.assertEqual(learning_rate, lr)
-        self.assertTreeAllClose(0., x_stepped)
+        self.assertTreeAllClose(
+            self.same_tree_with_value(self.template, 0.), x_stepped
+        )
         self.assertTreeStructure(self.template, x_prev)
 
     def test_update_step_1(self):
@@ -137,7 +131,9 @@ class ADADPTests(unittest.TestCase):
         self.assertEqual(0, i)
         self.assertTreeAllClose(value, x)
         self.assertEqual(learning_rate, lr)
-        self.assertTreeAllClose(0., x_stepped)
+        self.assertTreeAllClose(
+            self.same_tree_with_value(self.template, 0.), x_stepped
+        )
         self.assertTreeStructure(self.template, x_prev)
 
     def test_update_step_1_with_jit(self):

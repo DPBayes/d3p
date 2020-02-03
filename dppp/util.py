@@ -248,3 +248,30 @@ def expand_shape_3d(a):
     :param a: The vectorized/vmapped array.
     """
     return expand_shape(a, 3)
+
+def _and_reduce(l):
+    return reduce(lambda x, y: x and y, l, True)
+
+def do_trees_have_same_structure(a, b):
+    """Returns True if two jax trees have the same structure.
+    """
+    return jax.tree_structure(a) == jax.tree_structure(b)
+
+def do_trees_have_same_shape(a, b):
+    """Returns True if two jax trees have the same structure and the shapes of
+        all corresponding leaves are identical.
+    """
+    return do_trees_have_same_structure(a, b) and _and_reduce(
+        np.shape(x) == np.shape(y)
+        for x, y, in zip(jax.tree_leaves(a), jax.tree_leaves(b))
+    )
+
+
+def are_trees_close(a, b):
+    """Returns True if two jax trees have the same structure and all values are
+    close.
+    """
+    return do_trees_have_same_shape(a,b) and _and_reduce(
+        np.allclose(x, y)
+        for x, y, in zip(jax.tree_leaves(a), jax.tree_leaves(b))
+    )
