@@ -20,6 +20,8 @@ from jax.interpreters.xla import DeviceArray
 import jax.numpy as jnp
 import jax.random
 
+from dppp.minibatch import split_batchify_data
+
 if 'CI' in os.environ:
     DATA_DIR = os.path.expanduser('~/.data')
 else:
@@ -169,63 +171,11 @@ def _load(dset):
         return _load_ucbadmit()
     raise ValueError('Dataset - {} not found.'.format(dset.name))
 
-
-def iter_dataset(dset, batch_size=None, split='train', rng=None):
-    arrays = _load(dset)[split]
-    num_records = len(arrays[0])
-    idxs = np.arange(num_records)
-    if not batch_size:
-        batch_size = num_records
-    if rng is not None:
-        idxs = jax.random.shuffle(rng, idxs)
-    for i in range(num_records // batch_size):
-        start_idx = i * batch_size
-        end_idx = min((i + 1) * batch_size, num_records)
-        yield tuple(a[idxs[start_idx:end_idx]] for a in arrays)
-
-
-def load_dataset(dset, batch_size=None, split='train'):
-    """Loads a given dataset and essentially provides a batch iterator function.
-
-    The batches are guaranteed to always be of size batch_size. If the number of
-    items in the data set is not evenly divisible by batch_size, some elements
-    are left out of the batchification.
-    
-    :return: tuple (init_fn: () -> (num_batches, dataset_sample_indices), get_batch: (i, dataset_sample_indices) -> batch
-        init_fn() computes the number of batches and a list of (shuffled) indices of the data set
-        get_batch() returns the next batch_size amount of items from the data set as specified in dataset_sample_indices
+def load_dataset(dset, batch_size=None, split='train', batchifier=split_batchify_data):
+    """Loads a given dataset batchifies it with the given batchifier.
     """
     arrays = _load(dset)[split]
     size = len(arrays[0])
     if not batch_size:
         batch_size = size
-    return batchify_data(arrays, batch_size) + (size,)
-
-def batchify_data(arrays, batch_size):
-    """Returns functions to fetch (randomized) batches of a given dataset
-
-    The batches are guaranteed to always be of size batch_size. If the number of
-    items in the data set is not evenly divisible by batch_size, some elements
-    are left out of the batchification.
-
-    :param arrays: Tuple of arrays to be batchified. All arrays must have the
-        same length on the first axis.
-    :param batch_size: Size of the batches
-    :return: tuple (init_fn: () -> (num_batches, dataset_sample_indices), get_batch: (i, dataset_sample_indices) -> batch
-        init_fn() computes the number of batches and a list of (shuffled) indices of the data set
-        get_batch() returns the next batch_size amount of items from the data set as specified in dataset_sample_indices
-    """
-    num_records = len(arrays[0])
-    idxs = np.arange(num_records)
-    if not batch_size:
-        batch_size = num_records
-
-    def init(rng=None):
-        return num_records // batch_size, jax.random.shuffle(rng, idxs) if rng is not None else idxs
-
-    def get_batch(i=0, idxs=idxs):
-        ret_idx = lax.dynamic_slice_in_dim(idxs, i * batch_size, batch_size)
-        return tuple(lax.index_take(a, (ret_idx,), axes=(0,)) if isinstance(a, DeviceArray)
-                     else jnp.take(a, ret_idx, axis=0) for a in arrays)
-
-    return init, get_batch
+    return batchifier(arrays, batch_size), size

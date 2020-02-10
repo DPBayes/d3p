@@ -43,9 +43,7 @@ from numpyro.distributions import constraints
 
 from dppp.svi import DPSVI
 from dppp.util import unvectorize_shape_2d
-from dppp.minibatch import minibatch
-
-from datasets import batchify_data
+from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
 # we define a Distribution subclass for the gaussian mixture model
 class MixGaus(Distribution):
@@ -195,8 +193,8 @@ def main(args):
     d = args.dimensions
 
     X_train, X_test, latent_vals = create_toy_data(N, k_gen, d)
-    train_init, train_fetch = batchify_data((X_train,), args.batch_size)
-    test_init, test_fetch = batchify_data((X_test,), args.batch_size)
+    train_init, train_fetch = subsample_batchify_data((X_train,), batch_size=args.batch_size)
+    test_init, test_fetch = split_batchify_data((X_test,), batch_size=args.batch_size)
 
     ## Init optimizer and training algorithms
     optimizer = optimizers.Adam(args.learning_rate)
@@ -218,15 +216,16 @@ def main(args):
     )
 
     rng = PRNGKey(123)
-    rng, svi_init_rng = random.split(rng, 2)
-    batch = train_fetch(0)
+    rng, svi_init_rng, fetch_rng = random.split(rng, 3)
+    _, batchifier_state = train_init(fetch_rng)
+    batch = train_fetch(0, batchifier_state)
     svi_state = svi.init(svi_init_rng, *batch)
 
     @jit
     def epoch_train(svi_state, data_idx, num_batch):
         def body_fn(i, val):
             svi_state, loss = val
-            batch = train_fetch(i, data_idx)
+            batch = train_fetch(i, batchifier_state)
             svi_state, batch_loss = svi.update(
                 svi_state, *batch
             )
@@ -236,41 +235,36 @@ def main(args):
         return lax.fori_loop(0, num_batch, body_fn, (svi_state, 0.))
     
     @jit
-    def eval_test(svi_state, data_idx, num_batch):
+    def eval_test(svi_state, batchifier_state, num_batch):
         def body_fn(i, loss_sum):
-            batch = test_fetch(i, data_idx)
+            batch = test_fetch(i, batchifier_state)
             loss = svi.evaluate(svi_state, *batch)
             loss_sum += loss / (args.num_samples * num_batch)
             return loss_sum
 
         return lax.fori_loop(0, num_batch, body_fn, 0.)
 
-    smoothed_loss_window = onp.empty(5)
-    smoothed_loss_window.fill(onp.nan)
-    window_idx = 0
-
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
         rng, data_fetch_rng = random.split(rng, 2)
 
-        num_train_batches, train_idx = train_init(rng=data_fetch_rng)
+        num_train_batches, train_batchifier_state = train_init(rng_key=data_fetch_rng)
         svi_state, train_loss = epoch_train(
-            svi_state, train_idx, num_train_batches
+            svi_state, train_batchifier_state, num_train_batches
         )
+        train_loss.block_until_ready() # todo: blocking on loss will probabyl ignore rest of optimization
+        t_end = time.time()
 
         if i % 100 == 0:
             rng, test_fetch_rng = random.split(rng, 2)
-            num_test_batches, test_idx = test_init(rng=test_fetch_rng)
+            num_test_batches, test_batchifier_state = test_init(rng_key=test_fetch_rng)
             test_loss = eval_test(
-                svi_state, test_idx, num_test_batches
+                svi_state, test_batchifier_state, num_test_batches
             )
-            smoothed_loss_window[window_idx] = test_loss
-            smoothed_loss = onp.nanmean(smoothed_loss_window)
-            window_idx = (window_idx + 1) % 5
 
-            print("Epoch {}: loss = {} (smoothed = {}) (on training set = {}) ({:.2f} s.)".format(
-                    i, test_loss, smoothed_loss, train_loss, time.time() - t_start
+            print("Epoch {}: loss = {} (on training set = {}) ({:.2f} s.)".format(
+                    i, test_loss, train_loss, t_end - t_start
                 ))
 
     params = svi.get_params(svi_state)

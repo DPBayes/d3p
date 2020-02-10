@@ -28,7 +28,7 @@ from numpyro.infer import ELBO
 
 from dppp.svi import DPSVI
 from dppp.util import example_count, unvectorize_shape_3d
-from dppp.minibatch import minibatch
+from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
 from datasets import MNIST, load_dataset
 
@@ -145,14 +145,15 @@ def binarize(rng, batch):
 
 def main(args):
     # loading data
-    train_init, train_fetch_plain, num_samples = load_dataset(MNIST, batch_size=args.batch_size, split='train')
-    test_init, test_fetch_plain, _ = load_dataset(MNIST, batch_size=args.batch_size, split='test')
+    (train_init, train_fetch_plain), num_samples = load_dataset(MNIST, batch_size=args.batch_size, split='train', batchifier=subsample_batchify_data)
+    (test_init, test_fetch_plain), _ = load_dataset(MNIST, batch_size=args.batch_size, split='test', batchifier=split_batchify_data)
 
     def binarize_fetch(fetch_fn):
-        def fetch_binarized(batch_nr, idxs, binarize_rng):
-            batch = fetch_fn(batch_nr, idxs)
+        @jit
+        def fetch_binarized(batch_nr, batchifier_state, binarize_rng):
+            batch = fetch_fn(batch_nr, batchifier_state)
             return binarize(binarize_rng, batch[0]), batch[1]
-        return jit(fetch_binarized)
+        return fetch_binarized
 
     train_fetch = binarize_fetch(train_fetch_plain)
     test_fetch = binarize_fetch(test_fetch_plain)
@@ -175,14 +176,14 @@ def main(args):
 
     # preparing random number generators and initializing svi
     rng = PRNGKey(0)
-    rng, binarize_rng, svi_init_rng = random.split(rng, 3)
-    _, train_idx = train_init()
-    sample_batch = train_fetch(0, train_idx, binarize_rng)[0]
+    rng, binarize_rng, svi_init_rng, batchifier_rng = random.split(rng, 4)
+    _, batchifier_state = train_init(rng_key=batchifier_rng)
+    sample_batch = train_fetch(0, batchifier_state, binarize_rng)[0]
     svi_state = svi.init(svi_init_rng, sample_batch)
 
     # functions for training tasks
     @jit
-    def epoch_train(svi_state, train_idx, num_batch, rng):
+    def epoch_train(svi_state, batchifier_state, num_batch, rng):
         """Trains one epoch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
 
         :param svi_state: current state of the optimizer
@@ -194,7 +195,7 @@ def main(args):
         def body_fn(i, val):
             svi_state, loss = val
             binarize_rng = random.fold_in(rng, i)
-            batch = train_fetch(i, train_idx, binarize_rng)[0]
+            batch = train_fetch(i, batchifier_state, binarize_rng)[0]
             svi_state, batch_loss = svi.update(
                 svi_state, batch,
             )
@@ -205,7 +206,7 @@ def main(args):
         return svi_state, loss
 
     @jit
-    def eval_test(svi_state, test_idx, num_batch, rng):
+    def eval_test(svi_state, batchifier_state, num_batch, rng):
         """Evaluates current model state on test data.
 
         :param svi_state: current state of the optimizer
@@ -215,14 +216,14 @@ def main(args):
         """
         def body_fn(i, loss_sum):
             binarize_rng = random.fold_in(rng, i)
-            batch = test_fetch(i, test_idx, binarize_rng)[0]
+            batch = test_fetch(i, batchifier_state, binarize_rng)[0]
             loss = svi.evaluate(svi_state, batch)
             loss_sum += loss / (num_samples * num_batch)
             return loss_sum
 
         return lax.fori_loop(0, num_batch, body_fn, 0.)
 
-    def reconstruct_img(epoch, num_epochs, svi_state, rng):
+    def reconstruct_img(epoch, num_epochs, batchifier_state, svi_state, rng):
         """Reconstructs an image for the given epoch
 
         Obtains a sample from the testing data set and passes it through the
@@ -235,7 +236,7 @@ def main(args):
         :param rng: rng key
         """
         assert(num_epochs > 0)
-        img = test_fetch_plain(0, test_idx)[0][0]
+        img = test_fetch_plain(0, batchifier_state)[0][0]
         plt.imsave(
             os.path.join(RESULTS_DIR, "epoch_{:0{}d}_original.png".format(
                 epoch, (int(np.log10(num_epochs))+1))
@@ -263,16 +264,16 @@ def main(args):
         rng, data_fetch_rng, train_rng = random.split(
             rng, 3
         )
-        num_train_batches, train_idx = train_init(rng=data_fetch_rng)
+        num_train_batches, train_batchifier_state, = train_init(rng_key=data_fetch_rng)
         svi_state, train_loss = epoch_train(
-            svi_state, train_idx, num_train_batches, train_rng
+            svi_state, train_batchifier_state, num_train_batches, train_rng
         )
 
         rng, test_fetch_rng, test_rng, recons_rng = random.split(rng, 4)
-        num_test_batches, test_idx = test_init(rng=test_fetch_rng)
-        test_loss = eval_test(svi_state, test_idx, num_test_batches, test_rng)
+        num_test_batches, test_batchifier_state = test_init(rng_key=test_fetch_rng)
+        test_loss = eval_test(svi_state, test_batchifier_state, num_test_batches, test_rng)
 
-        reconstruct_img(i, args.num_epochs, svi_state, recons_rng)
+        reconstruct_img(i, args.num_epochs, test_batchifier_state, svi_state, recons_rng)
         print("Epoch {}: loss = {} (on training set: {}) ({:.2f} s.)".format(
             i, test_loss, train_loss, time.time() - t_start
         ))

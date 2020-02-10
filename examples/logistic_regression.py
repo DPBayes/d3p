@@ -26,9 +26,8 @@ import numpyro.optim as optimizers
 
 from dppp.util import example_count, normalize, unvectorize_shape_2d
 from dppp.svi import TunableSVI, DPSVI
-from dppp.minibatch import minibatch
+from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
-from datasets import batchify_data
 from example_util import sigmoid
 
 
@@ -139,8 +138,8 @@ def main(args):
         args.num_samples, args.dimensions
     )
 
-    train_init, train_fetch = batchify_data(train_data, args.batch_size)
-    test_init, test_fetch = batchify_data(test_data, args.batch_size)
+    train_init, train_fetch = subsample_batchify_data(train_data, batch_size=args.batch_size)
+    test_init, test_fetch = split_batchify_data(test_data, batch_size=args.batch_size)
 
     ## Init optimizer and training algorithms
     optimizer = optimizers.Adam(args.learning_rate)
@@ -153,16 +152,16 @@ def main(args):
 
     rng = PRNGKey(123)
     rng, svi_init_rng, data_fetch_rng = random.split(rng, 3)
-    _, train_idx = train_init(rng=data_fetch_rng)
-    sample_batch = train_fetch(0, train_idx)
+    _, batchifier_state = train_init(rng_key=data_fetch_rng)
+    sample_batch = train_fetch(0, batchifier_state)
 
     svi_state = svi.init(svi_init_rng, *sample_batch)
 
     @jit
-    def epoch_train(svi_state, data_idx, num_batch):
+    def epoch_train(svi_state, batchifier_state, num_batch):
         def body_fn(i, val):
             svi_state, loss = val
-            batch = train_fetch(i, data_idx)
+            batch = train_fetch(i, batchifier_state)
             batch_X, batch_Y = batch
 
             svi_state, batch_loss = svi.update(svi_state, batch_X, batch_Y)
@@ -172,13 +171,13 @@ def main(args):
         return lax.fori_loop(0, num_batch, body_fn, (svi_state, 0.))
 
     @jit
-    def eval_test(svi_state, data_idx, num_batch, rng):
+    def eval_test(svi_state, batchifier_state, num_batch, rng):
         params = svi.get_params(svi_state)
 
         def body_fn(i, val):
             loss_sum, acc_sum = val
 
-            batch = test_fetch(i, data_idx)
+            batch = test_fetch(i, batchifier_state)
             batch_X, batch_Y = batch
 
             loss = svi.evaluate(svi_state, batch_X, batch_Y)
@@ -197,19 +196,21 @@ def main(args):
         t_start = time.time()
         rng, data_fetch_rng = random.split(rng, 2)
 
-        num_train_batches, train_idx = train_init(rng=data_fetch_rng)
+        num_train_batches, train_batchifier_state = train_init(rng_key=data_fetch_rng)
         svi_state, train_loss = epoch_train(
-            svi_state, train_idx, num_train_batches
+            svi_state, train_batchifier_state, num_train_batches
         )
+        train_loss.block_until_ready() # todo: blocking on loss will probabyl ignore rest of optimization
+        t_end = time.time()
 
         if (i % (args.num_epochs//10)) == 0:
             rng, test_rng, test_fetch_rng = random.split(rng, 3)
-            num_test_batches, test_idx = test_init(rng=test_fetch_rng)
+            num_test_batches, test_batchifier_state = test_init(rng_key=test_fetch_rng)
             test_loss, test_acc = eval_test(
-                svi_state, test_idx, num_test_batches, test_rng
+                svi_state, test_batchifier_state, num_test_batches, test_rng
             )
             print("Epoch {}: loss = {}, acc = {} (loss on training set: {}) ({:.2f} s.)".format(
-                i, test_loss, test_acc, train_loss, time.time() - t_start
+                i, test_loss, test_acc, train_loss, t_end - t_start
             ))
 
     # parameters for logistic regression may be scaled arbitrarily. normalize
