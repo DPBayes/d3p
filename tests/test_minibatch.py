@@ -13,7 +13,7 @@ from numpyro.infer.util import log_density
 from numpyro.handlers import seed
 from numpyro.primitives import sample
 
-from dppp.minibatch import minibatch
+from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
 class MinibatchTests(unittest.TestCase):
 
@@ -151,6 +151,125 @@ class MinibatchIntegrationTests(unittest.TestCase):
     def test_minibatch_scale_correct_for_true_minibatch(self):
         batch_size = int(0.1 * self.num_samples)
         self.run_minibatch_test_for_batch_size(batch_size)
+
+
+class SplitBatchifierTests(unittest.TestCase):
+
+    def test_split_batchify_init(self):
+        data = np.arange(0, 100)
+        init, fetch = split_batchify_data((data,), 10)
+
+        rng_key = jax.random.PRNGKey(0)
+        num_batches, batchifier_state = init(rng_key)
+
+        self.assertEqual(10, num_batches)
+        self.assertEqual(np.size(data), np.size(batchifier_state))
+        self.assertTrue(onp.allclose(onp.unique(batchifier_state), data))
+
+    def test_split_batchify_init_non_divisiable_size(self):
+        data = np.arange(0, 105)
+        init, fetch = split_batchify_data((data,), 10)
+
+        rng_key = jax.random.PRNGKey(0)
+        num_batches, batchifier_state = init(rng_key)
+
+        self.assertEqual(10, num_batches)
+        self.assertTrue(onp.alltrue(onp.unique(batchifier_state, return_counts=True)[1] < 2))
+
+    def test_split_batchify_fetch(self):
+        data = onp.arange(105) + 100
+        init, fetch = split_batchify_data((data,), 10)
+        batchifier_state = jax.random.shuffle(jax.random.PRNGKey(0), np.arange(0, 105))
+        num_batches = 10
+
+        counts = onp.zeros(105)
+        for i in range(num_batches):
+            batch = fetch(i, batchifier_state)
+            batch = batch[0]
+            unq_idxs, unq_counts = onp.unique(batch, return_counts=True)
+            counts[unq_idxs - 100] = unq_counts
+            self.assertTrue(onp.alltrue(unq_counts <= 1)) # ensure each item occurs at most once in the batch
+            self.assertTrue(onp.alltrue(batch >= 100) and onp.alltrue(batch < 205)) # ensure batch was plausibly drawn from data
+
+        self.assertTrue(onp.alltrue(counts <= 1)) # ensure each item occurs at most once in the epoch
+        self.assertEqual(100, onp.sum(counts)) # ensure that amount of elements in batches cover an epoch worth of data
+
+    
+    def test_split_batchify_fetch_correct_shape(self):
+        data = onp.random.normal(size=(105, 3))
+        init, fetch = split_batchify_data((data,), 10)
+        batchifier_state = jax.random.shuffle(jax.random.PRNGKey(0), np.arange(0, 105))
+
+        batch = fetch(6, batchifier_state)
+        batch = batch[0]
+        self.assertEqual((10,3), np.shape(batch))
+
+class SubsamplingBatchifierTests(unittest.TestCase):
+
+    def test_subsample_batchify_init(self):
+        data = np.arange(0, 100)
+        init, fetch = subsample_batchify_data((data,), 10)
+
+        rng_key = jax.random.PRNGKey(0)
+        num_batches, batchifier_state = init(rng_key)
+
+        self.assertEqual(10, num_batches)
+        self.assertTrue(np.allclose(rng_key, batchifier_state))
+
+    def test_subsample_batchify_init_non_divisiable_size(self):
+        data = np.arange(0, 105)
+        init, fetch = subsample_batchify_data((data,), 10)
+
+        rng_key = jax.random.PRNGKey(0)
+        num_batches, batchifier_state = init(rng_key)
+
+        self.assertEqual(10, num_batches)
+        self.assertTrue(np.allclose(rng_key, batchifier_state))
+
+    def test_subsample_batchify_fetch_without_replacement(self):
+        data = onp.arange(105) + 100
+        init, fetch = subsample_batchify_data((data,), 10)
+        batchifier_state = jax.random.PRNGKey(2)
+        num_batches = 10
+
+        for i in range(num_batches):
+            batch = fetch(i, batchifier_state)
+            batch = batch[0]
+            _, unq_counts = onp.unique(batch, return_counts=True)
+            self.assertTrue(onp.alltrue(unq_counts <= 1)) # ensure each item occurs at most once in the batch
+            self.assertTrue(onp.alltrue(batch >= 100) and onp.alltrue(batch < 205)) # ensure batch was plausibly drawn from data
+
+    def test_subsample_batchify_fetch_correct_shape_without_replacement(self):
+        data = onp.random.normal(size=(105, 3))
+        init, fetch = subsample_batchify_data((data,), 10)
+        batchifier_state = jax.random.PRNGKey(2)
+        num_batches = 10
+
+        batch = fetch(6, batchifier_state)
+        batch = batch[0]
+        self.assertEqual((10,3), np.shape(batch))
+
+    
+    def test_subsample_batchify_fetch_with_replacement(self):
+        data = onp.arange(105) + 100
+        init, fetch = subsample_batchify_data((data,), 10, with_replacement=True)
+        batchifier_state = jax.random.PRNGKey(2)
+        num_batches = 10
+
+        for i in range(num_batches):
+            batch = fetch(i, batchifier_state)
+            batch = batch[0]
+            self.assertTrue(onp.alltrue(batch >= 100) and onp.alltrue(batch < 205)) # ensure batch was plausibly drawn from data
+
+    def test_subsample_batchify_fetch_correct_shape_with_replacement(self):
+        data = onp.random.normal(size=(105, 3))
+        init, fetch = subsample_batchify_data((data,), 10, with_replacement=True)
+        batchifier_state = jax.random.PRNGKey(2)
+        num_batches = 10
+
+        batch = fetch(6, batchifier_state)
+        batch = batch[0]
+        self.assertEqual((10,3), np.shape(batch))
 
 
 if __name__ == '__main__':
