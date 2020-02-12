@@ -424,5 +424,51 @@ class UtilityTests(unittest.TestCase):
         b = ((np.ones((3)), np.ones((7, 6))), np.ones(7))
         self.assertFalse(util.are_trees_close(a, b))
 
+    ### shuffle
+
+    def test_sample_from_array(self):
+        x = np.arange(0, 1000000) + 100
+        rng_key = jax.random.PRNGKey(0)
+        n_vals = 978
+        shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
+        unq_vals = onp.unique(shuffled)
+        self.assertEqual(n_vals, onp.size(unq_vals))
+        self.assertTrue(np.alltrue(shuffled >= 100))
+
+    def test_sample_from_array_correct_shape(self):
+        x = jax.random.uniform(jax.random.PRNGKey(124), shape=(1000, 200))
+        rng_key = jax.random.PRNGKey(0)
+        n_vals = 38
+        shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
+        self.assertEqual((n_vals, 200), np.shape(shuffled))
+
+        shuffled = util.sample_from_array(rng_key, x, n_vals, 1)
+        self.assertEqual((1000, n_vals), np.shape(shuffled))
+
+    def test_sample_from_array_full_shuffle(self):
+        x = np.arange(0, 100) + 100
+        rng_key = jax.random.PRNGKey(0)
+        n_vals = 100
+        shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
+        unq_vals = onp.unique(shuffled)
+        self.assertEqual(n_vals, onp.size(unq_vals))
+        self.assertTrue(np.alltrue(shuffled >= 100))
+
+    def test_sample_from_array_almost_full_shuffle(self):
+        x = np.arange(0, 100) + 100
+        rng_key = jax.random.PRNGKey(0)
+        n_vals = 99
+        shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
+        unq_vals = onp.unique(shuffled)
+        self.assertEqual(n_vals, onp.size(unq_vals))
+        self.assertTrue(np.alltrue(shuffled >= 100))
+
+    def test_sample_from_array_single_sample(self):
+        x = np.arange(0, 100) + 100
+        rng_key = jax.random.PRNGKey(0)
+        n_vals = 1
+        shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
+        self.assertTrue(np.alltrue(shuffled >= 100))
+
 if __name__ == '__main__':
     unittest.main()

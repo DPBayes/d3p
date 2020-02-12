@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as np
-from functools import reduce, wraps
+from functools import reduce, wraps, partial
 
 __all__ = ["map_over_secondary_dims", "has_shape", "is_array", "is_scalar",
     "is_integer", "is_int_scalar", "example_count",
@@ -275,3 +275,41 @@ def are_trees_close(a, b):
         np.allclose(x, y)
         for x, y, in zip(jax.tree_leaves(a), jax.tree_leaves(b))
     )
+
+@partial(jax.jit, static_argnums=(2,3))
+def sample_from_array(rng_key, x, n, axis):
+    """ Samples n elements from a given array without replacement.
+
+    Uses n iterations of the Fisher-Yates shuffling algorithm to uniformly draw
+    n unique elements from x along the given axis.
+
+    :param rng_key: jax prng key used for sampling.
+    :param x: the array from which elements are sampled
+    :param n: how many elements to return
+    :param axis: axis along which samples are drawn
+    """
+    if axis >= np.ndim(x):
+        raise IndexError("The axis along which to sample does not exist in the array")
+    n_aval = np.shape(x)[axis]
+    if n > n_aval:
+        raise ValueError("Cannot draw more elements than present in the array!")
+
+    upper_loop_bound = np.minimum(n, n_aval - 1)
+    idxs = jax.random.randint(
+        rng_key, shape=(upper_loop_bound,),
+        minval=np.arange(0, upper_loop_bound), maxval=n_aval
+    )
+
+    def loop_body(i, vals):
+        # fisher-yates iteration: swap element at i with the one indicated
+        # by random draw from the (n-i) not-yet-iterated-over elements
+        idx = jax.lax.dynamic_index_in_dim(idxs, i, axis=0, keepdims=False)
+        val = jax.lax.dynamic_index_in_dim(vals, idx, axis=axis)
+        old_val = jax.lax.dynamic_index_in_dim(vals, i, axis=axis)
+        vals = jax.lax.dynamic_update_index_in_dim(vals, val, i, axis=axis)
+        vals = jax.lax.dynamic_update_index_in_dim(vals, old_val, idx, axis=axis)
+        return vals
+    
+    shuffled = jax.lax.fori_loop(0, upper_loop_bound, loop_body, x)
+    shuffled = jax.lax.dynamic_slice_in_dim(shuffled, 0, n, axis=axis)
+    return shuffled
