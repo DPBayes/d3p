@@ -215,7 +215,7 @@ def main(args):
         dp_scale=0.01,  clipping_threshold=20., num_obs_total=args.num_samples
     )
 
-    rng = PRNGKey(123)
+    rng = PRNGKey(1234)
     rng, svi_init_rng, fetch_rng = random.split(rng, 3)
     _, batchifier_state = train_init(fetch_rng)
     batch = train_fetch(0, batchifier_state)
