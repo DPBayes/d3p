@@ -1,9 +1,8 @@
 
-from dppp.util import is_int_scalar, is_array, example_count
+from dppp.util import is_int_scalar, is_array, example_count, sample_from_array
 from numpyro.handlers import scale
 import jax.numpy as np
 import jax
-from functools import partial
 
 __all__ = [
     'minibatch', 'subsample_batchify_data', 'split_batchify_data',
@@ -114,8 +113,7 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
         :return: the batch
         """
         batch_rng_key = jax.random.fold_in(rng_key, i)
-        ret_idx = jax.random.shuffle(batch_rng_key, np.arange(num_records))
-        ret_idx = jax.lax.dynamic_slice_in_dim(ret_idx, 0, batch_size)
+        ret_idx = sample_from_array(batch_rng_key, np.arange(num_records), batch_size, 0)
         return tuple(np.take(a, ret_idx, axis=0) for a in dataset)
 
     return init, get_batch_with_replacement if with_replacement else get_batch_without_replacement
