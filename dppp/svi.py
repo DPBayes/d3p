@@ -12,6 +12,8 @@ import jax.numpy as np
 
 from numpyro.infer.svi import SVI, SVIState
 import numpyro.distributions as dist
+from numpyro.primitives import sample, param
+from numpyro.handlers import seed, trace, substitute
 
 from dppp.util import map_over_secondary_dims, example_count
 
@@ -378,3 +380,136 @@ class DPSVI(TunableSVI):
             model, guide, optim, per_example_loss,
             gradients_clipping_fn, grad_perturbation_fn, **static_kwargs
         )
+
+def get_samples_from_trace(trace):
+    """ Extracts all sample values from a numpyro trace.
+
+    :param trace: trace object obtained from `numpyro.handlers.trace().get_trace()`
+    :return: dictionary of sampled values associated with the names given
+        to the sample since via `sample()` in the model
+    """
+    return {k: v['value'] for k, v in trace.items() if v['type'] == 'sample'}
+
+def sample_prior_predictive(rng_key, model, model_args, substitutes=None):
+    """ Samples once from the prior predictive distribution.
+
+    Individual sample sites, as designated by `sample`, can be frozen to
+    pre-determined values given in `substitutes`. In that case, values for these
+    sites are not actually sampled but the value provided in `substitutes` is
+    returned as the sample. This facilitates conditional sampling.
+
+    Note that if the model function is written in such a way that it returns, e.g.,
+    multiple observations from a single prior draw, the same is true for the
+    values returned by this function.
+
+    :param rng_key: Jax PRNG key
+    :param model: Function representing the model using numpyro distributions
+        and the `sample` primitive
+    :param model_args: Arguments to the model function
+    :param substitutes: An optional dictionary of frozen substitutes for
+        sample sites.
+    :return: Values for all sample sites, identified by `sample` calls in the
+        model function.
+    """
+    if substitutes is None: substitutes = dict()
+    model = seed(substitute(model, param_map=substitutes), rng_key)
+    t = trace(model).get_trace(*model_args)
+    return get_samples_from_trace(t)
+
+def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args, params):
+    """ Samples once from the posterior predictive distribution.
+
+    Note that if the model function is written in such a way that it returns, e.g.,
+    multiple observations from a single posterior draw, the same is true for the
+    values returned by this function.
+
+    :param rng_key: Jax PRNG key
+    :param model: Function representing the model using numpyro distributions
+        and the `sample` primitive
+    :param model_args: Arguments to the model function
+    :param guide: Function representing the variational distribution (the guide)
+        using numpyro distributions as well as the `sample` and `param` primitives
+    :param guide_args: Arguments to the guide function
+    :param params: A dictionary providing values for the parameters
+        designated by call to `param` in the guide
+    :return: Values for all sample sites, identified by `sample` calls in the
+        model function.
+    """
+    model_rng_key, guide_rng_key = jax.random.split(rng_key)
+
+    guide = seed(substitute(guide, param_map=params), guide_rng_key)
+    guide_samples = get_samples_from_trace(trace(guide).get_trace(*guide_args))
+
+    model = seed(substitute(model, param_map=guide_samples), model_rng_key)
+    model_samples = get_samples_from_trace(trace(model).get_trace(*model_args))
+
+    guide_samples.update(model_samples)
+    return guide_samples
+
+def _sample_a_lot(rng_key, n, single_sample_fn):
+    rng_keys = jax.random.split(rng_key, n)
+    return jax.vmap(single_sample_fn)(rng_keys)
+
+def sample_multi_prior_predictive(rng_key, n, model, model_args, substitutes=None):
+    """ Samples n times from the prior predictive distribution.
+
+    Individual sample sites, as designated by `sample`, can be frozen to
+    pre-determined values given in `substitutes`. In that case, values for these
+    sites are not actually sampled but the value provided in `substitutes` is
+    returned as the sample. This facilitates conditional sampling.
+
+    Note that if the model function is written in such a way that it returns, e.g.,
+    multiple observations, say n_model many, from a single prior draw, the same is
+    true for the values returned by this function, i.e., this function will
+    output n x n_model observations.
+
+    :param rng_key: Jax PRNG key
+    :param n: Number of draws from the prior predictive.
+    :param model: Function representing the model using numpyro distributions
+        and the `sample` primitive
+    :param model_args: Arguments to the model function
+    :param substitutes: An optional dictionary of frozen substitutes for
+        sample sites.
+    :return: Values for all sample sites, identified by `sample` calls in the
+        model function.
+    """
+    single_sample_fn = lambda rng: sample_prior_predictive(
+        rng, model, model_args, substitutes=substitutes
+    )
+    return _sample_a_lot(rng_key, n, single_sample_fn)
+
+def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide, guide_args, params):
+    """ Samples n times from the posterior predictive distribution.
+
+    Note that if the model function is written in such a way that it returns, e.g.,
+    multiple observations, say n_model many, from a single posterior draw, the same is
+    true for the values returned by this function, i.e., this function will
+    output n x n_model observations.
+
+    :param rng_key: Jax PRNG key
+    :param model: Function representing the model using numpyro distributions
+        and the `sample` primitive
+    :param model_args: Arguments to the model function
+    :param guide: Function representing the variational distribution (the guide)
+        using numpyro distributions as well as the `sample` and `param` primitives
+    :param guide_args: Arguments to the guide function
+    :param params: A dictionary providing values for the parameters
+        designated by call to `param` in the guide
+    :return: Values for all sample sites, identified by `sample` calls in the
+        model function.
+    """
+    single_sample_fn = lambda rng: sample_posterior_predictive(
+        rng, model, model_args, guide, guide_args, params
+    )
+    return _sample_a_lot(rng_key, n, single_sample_fn)
+
+def fix_observations(model, observations):
+    """ Fixes observations in a model function for likelihood evaluation.
+
+    :param model: Function representing the model using numpyro distributions
+        and the `sample` primitive
+    :param: Dictionary of observations associated with the sample sites in the
+        model function as designated by calls to `param`
+    :return: Model function with fixed observations
+    """
+    return substitute(model, param_map=observations)
