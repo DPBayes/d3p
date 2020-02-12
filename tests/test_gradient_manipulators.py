@@ -3,7 +3,6 @@
 import unittest
 
 import jax.numpy as np
-import jax
 import numpy as onp
 
 from dppp.svi import clip_gradient, full_norm, normalize_gradient

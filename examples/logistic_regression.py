@@ -25,7 +25,7 @@ from numpyro.infer import ELBO
 import numpyro.optim as optimizers
 
 from dppp.util import example_count, normalize, unvectorize_shape_2d
-from dppp.svi import TunableSVI, DPSVI
+from dppp.svi import DPSVI
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
 from example_util import sigmoid

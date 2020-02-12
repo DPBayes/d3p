@@ -4,9 +4,6 @@ import unittest
 
 import jax.numpy as np
 import jax
-import numpy as onp
-
-from functools import reduce
 
 from dppp.optimizers import ADADP
 import dppp.util
@@ -86,7 +83,6 @@ class ADADPTests(unittest.TestCase):
         
         i, (x, lr, x_stepped, x_prev) = adadp.update(gradient, opt_state)
 
-        step_result = self.same_tree_with_value(self.template, -1.)
         two_half_step_results = self.same_tree_with_value(self.template, -1.5)
 
         expected_lr = 1.018308251
@@ -112,9 +108,6 @@ class ADADPTests(unittest.TestCase):
         )        
         
         i, (x, lr, x_stepped, x_prev) = adadp.update(gradient, opt_state)
-
-        step_result = self.same_tree_with_value(self.template, -1.)
-        two_half_step_results = self.same_tree_with_value(self.template, -2.)
 
         expected_lr = .9 # 0.72005267 clipped by alpha_min
 
@@ -174,7 +167,6 @@ class ADADPTests(unittest.TestCase):
         
         i, (x, lr, x_stepped, x_prev) = jax.jit(adadp.update)(gradient, opt_state)
 
-        step_result = self.same_tree_with_value(self.template, -1.)
         two_half_step_results = self.same_tree_with_value(self.template, -1.5)
 
         expected_lr = 1.018308251
@@ -200,9 +192,6 @@ class ADADPTests(unittest.TestCase):
         )        
         
         i, (x, lr, x_stepped, x_prev) = jax.jit(adadp.update)(gradient, opt_state)
-
-        step_result = self.same_tree_with_value(self.template, -1.)
-        two_half_step_results = self.same_tree_with_value(self.template, -2.)
 
         expected_lr = .9 # 0.72005267 clipped by alpha_min
 

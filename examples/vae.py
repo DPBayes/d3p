@@ -17,17 +17,17 @@ import matplotlib.pyplot as plt
 
 import jax.numpy as np
 from jax import jit, lax, random
-from jax.experimental import optimizers, stax
+from jax.experimental import stax
 from jax.random import PRNGKey
 
 import numpyro
 import numpyro.optim as optimizers
 import numpyro.distributions as dist
-from numpyro.primitives import param, sample
+from numpyro.primitives import sample
 from numpyro.infer import ELBO
 
 from dppp.svi import DPSVI
-from dppp.util import example_count, unvectorize_shape_3d
+from dppp.util import unvectorize_shape_3d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
 from datasets import MNIST, load_dataset

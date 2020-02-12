@@ -8,7 +8,6 @@ import jax
 import numpy as onp
 
 import numpyro.distributions as dist
-from numpyro.infer import ELBO
 from numpyro.infer.util import log_density
 from numpyro.handlers import seed
 from numpyro.primitives import sample
@@ -251,7 +250,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
         data = onp.arange(105) + 100
         init, fetch = subsample_batchify_data((data,), 10)
         batchifier_state = jax.random.PRNGKey(2)
-        num_batches = 10
+        # num_batches = 10
 
         batch_0 = fetch(3, batchifier_state)
         batch_1 = fetch(8, batchifier_state)
@@ -262,7 +261,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
         data = onp.random.normal(size=(105, 3))
         init, fetch = subsample_batchify_data((data,), 10)
         batchifier_state = jax.random.PRNGKey(2)
-        num_batches = 10
+        # num_batches = 10
 
         batch = fetch(6, batchifier_state)
         batch = batch[0]
@@ -284,7 +283,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
         data = onp.arange(105) + 100
         init, fetch = subsample_batchify_data((data,), 10, with_replacement=True)
         batchifier_state = jax.random.PRNGKey(2)
-        num_batches = 10
+        # num_batches = 10
 
         batch_0 = fetch(3, batchifier_state)
         batch_1 = fetch(8, batchifier_state)
@@ -294,7 +293,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
         data = onp.random.normal(size=(105, 3))
         init, fetch = subsample_batchify_data((data,), 10, with_replacement=True)
         batchifier_state = jax.random.PRNGKey(2)
-        num_batches = 10
+        # num_batches = 10
 
         batch = fetch(6, batchifier_state)
         batch = batch[0]

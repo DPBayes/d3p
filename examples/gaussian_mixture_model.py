@@ -35,7 +35,6 @@ from jax.scipy.special import logsumexp
 
 import numpyro.distributions as dist
 import numpyro.optim as optimizers
-from numpyro.handlers import seed
 from numpyro.primitives import sample, param
 from numpyro.infer import ELBO
 from numpyro.distributions.distribution import Distribution

@@ -6,10 +6,9 @@ from functools import reduce
 
 import jax.numpy as np
 import jax
-import numpy as onp
 from numpyro.infer.svi import SVIState
 
-from dppp.svi import DPSVI, TunableSVI
+from dppp.svi import DPSVI
 
 class DPSVITest(unittest.TestCase):
 

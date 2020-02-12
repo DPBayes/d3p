@@ -2,7 +2,7 @@
 
 original: https://github.com/pyro-ppl/numpyro/blob/master/numpyro/examples/datasets.py
 
-slightly revised to use jax.random to provide randomness wherever needed
+slightly revised
 """
 
 import csv
@@ -15,10 +15,7 @@ from urllib.request import urlretrieve
 
 import numpy as np
 
-from jax import device_put, lax
-from jax.interpreters.xla import DeviceArray
-import jax.numpy as jnp
-import jax.random
+from jax import device_put
 
 from dppp.minibatch import split_batchify_data
 

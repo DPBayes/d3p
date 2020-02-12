@@ -1,9 +1,7 @@
 from numpyro.optim import _NumpyroOptim, _add_doc
-from jax.experimental.optimizers import optimizer, make_schedule
+from jax.experimental.optimizers import make_schedule
 import jax.numpy as np
 from jax import tree_map, tree_multimap, tree_leaves, lax
-
-from .svi import full_norm
 
 def adadp(
         step_size=1e-3,

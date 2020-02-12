@@ -12,8 +12,6 @@ sys.path.append(os.path.dirname(sys.path[0]))
 import argparse
 import time
 
-import numpy as onp
-
 import jax
 import jax.numpy as np
 from jax import jit, lax, random
@@ -27,7 +25,7 @@ import numpyro.optim as optimizers
 
 from dppp.svi import DPSVI
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
-from dppp.util import example_count, unvectorize_shape_2d
+from dppp.util import unvectorize_shape_2d
 
 def model(obs=None, num_obs_total=None, d=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
