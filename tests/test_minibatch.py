@@ -194,6 +194,14 @@ class SplitBatchifierTests(unittest.TestCase):
         self.assertTrue(onp.alltrue(counts <= 1)) # ensure each item occurs at most once in the epoch
         self.assertEqual(100, onp.sum(counts)) # ensure that amount of elements in batches cover an epoch worth of data
 
+    def test_split_batchify_batches_differ(self):
+        data = onp.arange(105) + 100
+        init, fetch = split_batchify_data((data,), 10)
+        num_batches, batchifier_state = init(jax.random.PRNGKey(10))
+
+        batch_0 = fetch(3, batchifier_state)
+        batch_1 = fetch(8, batchifier_state)
+        self.assertFalse(np.allclose(batch_0, batch_1)) # ensure batches are different
     
     def test_split_batchify_fetch_correct_shape(self):
         data = onp.random.normal(size=(105, 3))
@@ -239,6 +247,17 @@ class SubsamplingBatchifierTests(unittest.TestCase):
             self.assertTrue(onp.alltrue(unq_counts <= 1)) # ensure each item occurs at most once in the batch
             self.assertTrue(onp.alltrue(batch >= 100) and onp.alltrue(batch < 205)) # ensure batch was plausibly drawn from data
 
+    def test_subsample_batchify_fetch_batches_differ_without_replacement(self):
+        data = onp.arange(105) + 100
+        init, fetch = subsample_batchify_data((data,), 10)
+        batchifier_state = jax.random.PRNGKey(2)
+        num_batches = 10
+
+        batch_0 = fetch(3, batchifier_state)
+        batch_1 = fetch(8, batchifier_state)
+        self.assertFalse(np.allclose(batch_0, batch_1)) # ensure batches are different
+
+
     def test_subsample_batchify_fetch_correct_shape_without_replacement(self):
         data = onp.random.normal(size=(105, 3))
         init, fetch = subsample_batchify_data((data,), 10)
@@ -260,6 +279,16 @@ class SubsamplingBatchifierTests(unittest.TestCase):
             batch = fetch(i, batchifier_state)
             batch = batch[0]
             self.assertTrue(onp.alltrue(batch >= 100) and onp.alltrue(batch < 205)) # ensure batch was plausibly drawn from data
+
+    def test_subsample_batchify_fetch_batches_differ_with_replacement(self):
+        data = onp.arange(105) + 100
+        init, fetch = subsample_batchify_data((data,), 10, with_replacement=True)
+        batchifier_state = jax.random.PRNGKey(2)
+        num_batches = 10
+
+        batch_0 = fetch(3, batchifier_state)
+        batch_1 = fetch(8, batchifier_state)
+        self.assertFalse(np.allclose(batch_0, batch_1)) # ensure batches are different
 
     def test_subsample_batchify_fetch_correct_shape_with_replacement(self):
         data = onp.random.normal(size=(105, 3))

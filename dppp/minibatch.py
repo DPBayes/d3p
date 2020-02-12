@@ -102,7 +102,7 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
         """
         rng_key = batchifier_state
         batch_rng_key = jax.random.fold_in(rng_key, i)
-        ret_idx = jax.random.randint(rng_key, (batch_size,), 0, num_records)
+        ret_idx = jax.random.randint(batch_rng_key, (batch_size,), 0, num_records)
         return tuple(np.take(a, ret_idx, axis=0) for a in dataset)
 
     @jax.jit
@@ -114,7 +114,7 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
         :return: the batch
         """
         batch_rng_key = jax.random.fold_in(rng_key, i)
-        ret_idx = jax.random.shuffle(rng_key, np.arange(num_records))
+        ret_idx = jax.random.shuffle(batch_rng_key, np.arange(num_records))
         ret_idx = jax.lax.dynamic_slice_in_dim(ret_idx, 0, batch_size)
         return tuple(np.take(a, ret_idx, axis=0) for a in dataset)
 
