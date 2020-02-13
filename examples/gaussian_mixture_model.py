@@ -1,18 +1,12 @@
-"""Gaussian mixture model example 2.
+"""Gaussian mixture model example
 
-This example also demonstrates the gaussian mixture model but instead
-of composing it from primitive distributions in the model and guide
-respectively, we define a MixGaus distribution class to compute the probability
-function for a Gaussian mixture, which we then directly use in the model.
+This example demonstrates inferring a Gaussian mixture model.
 
-note(lumip): Currently infers fewer priors than the other example and seems to
-be unable to learn learn empty clusters (if the model is configured with more
-components than there are in the data. This is (was) possible in the alternative
-implementation). Somewhat prone to producing NaN values in certain conditions.
-
-note(lumip): The reported loss from svi_update (training set) is roughly 1/2 of
-that returned by svi_eval (on test or training set). Something seems not right
-there..
+note(lumip): Currently infers seems to
+be unable to learn empty clusters (if the model is configured with more
+components than there are in the data. This is (was) possible in the old (removed)
+alternative implementation which had other issues).
+Somewhat prone to producing NaN values in certain conditions.
 """
 
 import os
@@ -31,52 +25,20 @@ import jax
 import jax.numpy as np
 from jax import jit, lax, random
 from jax.random import PRNGKey
-from jax.scipy.special import logsumexp
 
 import numpyro.distributions as dist
 import numpyro.optim as optimizers
 from numpyro.primitives import sample, param
 from numpyro.infer import ELBO
-from numpyro.distributions.distribution import Distribution
-from numpyro.distributions import constraints
 
 from dppp.svi import DPSVI
 from dppp.util import unvectorize_shape_2d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
+from dppp.gmm import GaussianMixture
 
-# we define a Distribution subclass for the gaussian mixture model
-class MixGaus(Distribution):
-    arg_constraints = {
-        'locs': constraints.real, 
-        'scales': constraints.positive, 
-        'pis' : constraints.simplex
-    }
-    support = constraints.real
-
-    def __init__(self, locs=0., scales=1., pis=1.0, validate_args=None):
-        self.locs, self.scales, self.pis = locs, scales, pis
-        batch_shape = np.shape(locs[0])
-        super(MixGaus, self).__init__(
-            batch_shape=batch_shape, validate_args=validate_args
-        )
-
-    def log_prob(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
-        log_pis = np.log(self.pis)
-        log_phis = np.array([
-            dist.Normal(loc, scale).log_prob(value).sum(-1)
-            for loc, scale
-            in zip(self.locs, self.scales)
-        ]).T
-        return logsumexp(log_pis + log_phis, axis=-1)
-
-    def sample(self, *args):
-        # ignoring this for now as we only care to compute the log_probability
-        raise NotImplementedError()
 
 def model(k, obs, num_obs_total=None):
-    # this is our model function using the MixGaus distribution defined above
+    # this is our model function using the GaussianMixture distribution
     # with prior belief
     assert(obs is not None)
     assert(np.ndim(obs) <= 2)
@@ -86,7 +48,7 @@ def model(k, obs, num_obs_total=None):
     mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
     sigs = np.ones((k, d))
     with minibatch(batch_size, num_obs_total=num_obs_total):
-        return sample('obs', MixGaus(mus, sigs, pis), obs=obs)
+        return sample('obs', GaussianMixture(mus, sigs, pis), obs=obs)
 
 def guide(k, obs, num_obs_total=None):
     # the latent MixGaus distribution which learns the parameters
