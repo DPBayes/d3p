@@ -25,10 +25,8 @@ from numpyro.infer import ELBO
 import numpyro.optim as optimizers
 
 from dppp.util import example_count, normalize, unvectorize_shape_2d
-from dppp.svi import DPSVI
+from dppp.svi import DPSVI, sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
-
-from example_util import sigmoid
 
 
 def model(batch_X, batch_y=None, num_obs_total=None):
@@ -39,15 +37,15 @@ def model(batch_X, batch_y=None, num_obs_total=None):
     :param batch_y: a batch of observations
     """
     assert(np.ndim(batch_X) <= 2)
-    batch_size, z_dim = unvectorize_shape_2d(batch_X)
+    batch_size, d = unvectorize_shape_2d(batch_X)
     assert(batch_y is None or example_count(batch_y) == batch_size)
 
-    z_w = sample('w', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior is N(0,I)
+    z_w = sample('w', dist.Normal(np.zeros((d,)), np.ones((d,)))) # prior is N(0,I)
     z_intercept = sample('intercept', dist.Normal(0,1)) # prior is N(0,1)
     logits = batch_X.dot(z_w)+z_intercept
 
     with minibatch(batch_size, num_obs_total=num_obs_total):
-        return sample('obs', dist.Bernoulli(logits=logits), obs=batch_y)#, sample_shape=(batch_size,))
+        return sample('obs', dist.Bernoulli(logits=logits), obs=batch_y)
 
 
 def guide(batch_X, batch_y=None, num_obs_total=None):
@@ -56,10 +54,10 @@ def guide(batch_X, batch_y=None, num_obs_total=None):
     # we are interested in the posterior of w and intercept
     # since this is a fairly simple model, we just initialize them according
     # to our prior believe and let the optimization handle the rest
-    z_dim = np.atleast_2d(batch_X).shape[1]
+    d = np.atleast_2d(batch_X).shape[1]
 
-    z_w_loc = param("w_loc", np.zeros((z_dim,)))
-    z_w_std = np.exp(param("w_std_log", np.zeros((z_dim,))))
+    z_w_loc = param("w_loc", np.zeros((d,)))
+    z_w_std = np.exp(param("w_std_log", np.zeros((d,))))
     z_w = sample('w', dist.Normal(z_w_loc, z_w_std))
 
     z_intercept_loc = param("intercept_loc", 0.)
@@ -68,31 +66,16 @@ def guide(batch_X, batch_y=None, num_obs_total=None):
 
     return (z_w, z_intercept)
 
-
-def create_toy_data(N, d):
+def create_toy_data(rng_key, N, d):
     ## Create some toy data
-    onp.random.seed(123)
+    X_rng_key, prior_pred_rng_key = jax.random.split(rng_key)
 
-    w_true = normalize(np.array(onp.random.randn(d)))
-    intercept_true = np.array(onp.random.randn())
+    X = jax.random.normal(X_rng_key, shape=(2*N, d))
 
-    X = np.array(onp.random.randn(2*N, d))
-
-    logits_true = X.dot(w_true)+intercept_true
-    y = 1.*(sigmoid(logits_true)>onp.random.rand(2*N))
-    # y = 1.*(logits_true > 0.)
-
-    # note(lumip): workaround! np.array( ) of jax 0.1.37 does not necessarily
-    #   transform incoming numpy arrays into its
-    #   internal representation, which can lead to an exception being thrown
-    #   if any of these arrays find their way into a jit'ed function.
-    #   This is fixed in the current master branch of jax but due to numpyro
-    #   we cannot currently benefit from that.
-    # todo: remove device_put once sufficiently high version number of jax is
-    #   present
-    X = jax.device_put(X)
-    w_true = jax.device_put(w_true)
-    intercept_true = jax.device_put(intercept_true)
+    sampled_data = sample_prior_predictive(prior_pred_rng_key, model, (X,))
+    y = sampled_data['obs']
+    w_true = sampled_data['w']
+    intercept_true = sampled_data['intercept']
 
     X_train = X[:N]
     y_train = y[:N]
@@ -101,41 +84,24 @@ def create_toy_data(N, d):
 
     return (X_train, y_train), (X_test, y_test), (w_true, intercept_true)
 
-
 def estimate_accuracy_fixed_params(X, y, w, intercept, rng, num_iterations=1):
-    rngs = jax.random.split(rng, num_iterations)
-    fixed_model = substitute(model, {'w': w, 'intercept': intercept})
-
-    def body_fn(rng):
-        y_test = seed(fixed_model, rng)(X)
-        hits = (y_test == y)
-        accuracy = np.average(hits)
-        return accuracy
-
-    accuracies = jax.vmap(body_fn)(rngs)
-    return np.average(accuracies)
-
+    samples = sample_multi_prior_predictive(rng, num_iterations, model, (X,), {'w': w, 'intercept': intercept})
+    return np.average(samples['obs'] == y)
 
 def estimate_accuracy(X, y, params, rng, num_iterations=1):
 
-    rngs = jax.random.split(rng, num_iterations)
+    samples = sample_multi_posterior_predictive(
+        rng, num_iterations, model, (X,), guide, (X,), params
+    )
 
-    def body_fn(rng):
-        w_rng, b_rng, acc_rng = jax.random.split(rng, 3)
-
-        w = dist.Normal(params['w_loc'], np.exp(params['w_std_log'])).sample(w_rng)
-        b = dist.Normal(params['intercept_loc'], np.exp(params['intercept_std_log'])).sample(b_rng)
-        y_test = substitute(seed(model, acc_rng), {'w': w, 'intercept': b})(X)
-        hits = (y_test == y)
-        accuracy = np.average(hits)
-        return accuracy
-
-    accuracies = jax.vmap(body_fn)(rngs)
-    return np.average(accuracies)
+    return np.average(samples['obs'] == y)
 
 def main(args):
+    rng = PRNGKey(123)
+    rng, toy_data_rng = jax.random.split(rng)
+
     train_data, test_data, true_params = create_toy_data(
-        args.num_samples, args.dimensions
+        toy_data_rng, args.num_samples, args.dimensions
     )
 
     train_init, train_fetch = subsample_batchify_data(train_data, batch_size=args.batch_size)
@@ -150,7 +116,6 @@ def main(args):
         dp_scale=0.01, clipping_threshold=20., num_obs_total=args.num_samples
     )
 
-    rng = PRNGKey(123)
     rng, svi_init_rng, data_fetch_rng = random.split(rng, 3)
     _, batchifier_state = train_init(rng_key=data_fetch_rng)
     sample_batch = train_fetch(0, batchifier_state)

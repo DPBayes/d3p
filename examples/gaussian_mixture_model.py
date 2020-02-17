@@ -31,57 +31,60 @@ import numpyro.optim as optimizers
 from numpyro.primitives import sample, param
 from numpyro.infer import ELBO
 
-from dppp.svi import DPSVI
+from dppp.svi import DPSVI, sample_prior_predictive
 from dppp.util import unvectorize_shape_2d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.gmm import GaussianMixture
 
 
-def model(k, obs, num_obs_total=None):
+def model(k, obs=None, num_obs_total=None, d=None):
     # this is our model function using the GaussianMixture distribution
     # with prior belief
-    assert(obs is not None)
-    assert(np.ndim(obs) <= 2)
-    batch_size, d = unvectorize_shape_2d(obs)
+    if obs is not None:
+        assert(np.ndim(obs) <= 2)
+        batch_size, d = unvectorize_shape_2d(obs)
+    else:
+        assert(num_obs_total is not None)
+        batch_size = num_obs_total
+        assert(d is not None)
 
     pis = sample('pis', dist.Dirichlet(np.ones(k)))
     mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
-    sigs = np.ones((k, d))
+    sigs = sample('sigs', dist.InverseGamma(1., 1.), sample_shape=np.shape(mus))
     with minibatch(batch_size, num_obs_total=num_obs_total):
-        return sample('obs', GaussianMixture(mus, sigs, pis), obs=obs)
+        return sample('obs', GaussianMixture(mus, sigs, pis), obs=obs, sample_shape=(batch_size,))
 
-def guide(k, obs, num_obs_total=None):
+def guide(k, obs=None, num_obs_total=None, d=None):
     # the latent MixGaus distribution which learns the parameters
-    assert(obs is not None)
-    _, d = unvectorize_shape_2d(obs)
+    if obs is not None:
+        assert(np.ndim(obs) <= 2)
+        _, d = unvectorize_shape_2d(obs)
+    else:
+        assert(num_obs_total is not None)
+        batch_size = num_obs_total
+        assert(d is not None)
 
     mus_loc = param('mus_loc', np.zeros((k, d)))
     mus = sample('mus', dist.Normal(mus_loc, 1.))
-    sigs = np.ones((k, d))
+    sigs = sample('sigs', dist.InverseGamma(1., 1.), obs=np.ones_like(mus))
     alpha = param('alpha', np.ones(k))
     pis = sample('pis', dist.Dirichlet(alpha))
     return pis, mus, sigs
 
-def create_toy_data(N, k, d):
+def create_toy_data(rng_key, N, d):
     """Creates some toy data (for training and testing)"""
-    onp.random.seed(122)
+    # To spice things up, it is imbalanced:
+    # The last component has twice as many samples as the others.
+    mus = np.array([-10. * np.ones(d), 10. * np.ones(d), -2. * np.ones(d)])
+    sigs = np.reshape(np.array([0.1, 1., 0.1]), (3,1))
+    pis = np.array([1/4, 1/4, 2/4])
 
-    # We create some toy data. To spice things up, it is imbalanced:
-    #   The last component has twice as many samples as the others.
-    z = onp.random.randint(0, k+1, 2*N)
-    z[z == k] = k - 1
-    X = onp.zeros((2*N, d))
+    samples = sample_prior_predictive(rng_key, model, (3, None, 2*N, d), substitutes={
+        'pis': pis, 'mus': mus, 'sigs': sigs
+    }, with_intermediates=True)
 
-    assert(k < 4)
-    mus = [-10. * onp.ones(d), 10. * onp.ones(d), -2. * onp.ones(d)]
-    sigs = [onp.sqrt(0.1), 1., onp.sqrt(0.1)]
-    for i in range(k):
-        N_i = onp.sum(z == i)
-        X_i = mus[i] + sigs[i] * onp.random.randn(N_i, d)
-        X[z == i] = X_i
-
-    mus = np.array(mus)
-    sigs = np.array(sigs)
+    X = samples['obs'][0]
+    z = samples['obs'][1][0]
 
     z_train = z[:N]
     X_train = X[:N]
@@ -150,10 +153,12 @@ def compute_assignment_accuracy(
 def main(args):
     N = args.num_samples
     k = args.num_components
-    k_gen = args.num_components_generated
     d = args.dimensions
 
-    X_train, X_test, latent_vals = create_toy_data(N, k_gen, d)
+    rng = PRNGKey(1234)
+    rng, toy_data_rng = jax.random.split(rng, 2)
+
+    X_train, X_test, latent_vals = create_toy_data(toy_data_rng, N, d)
     train_init, train_fetch = subsample_batchify_data((X_train,), batch_size=args.batch_size)
     test_init, test_fetch = split_batchify_data((X_test,), batch_size=args.batch_size)
 
@@ -176,7 +181,6 @@ def main(args):
         dp_scale=0.01,  clipping_threshold=20., num_obs_total=args.num_samples
     )
 
-    rng = PRNGKey(1234)
     rng, svi_init_rng, fetch_rng = random.split(rng, 3)
     _, batchifier_state = train_init(fetch_rng)
     batch = train_fetch(0, batchifier_state)
@@ -249,6 +253,5 @@ if __name__ == "__main__":
     parser.add_argument('-d', '--dimensions', default=2, type=int, help='data dimension')
     parser.add_argument('-N', '--num-samples', default=2048, type=int, help='data samples count')
     parser.add_argument('-k', '--num-components', default=3, type=int, help='number of components in the mixture model')
-    parser.add_argument('-K', '--num-components-generated', default=3, type=int, help='number of components in generated data')
     args = parser.parse_args()
     main(args)

@@ -18,7 +18,6 @@ from jax import jit, lax, random
 from jax.random import PRNGKey
 
 import numpyro.distributions as dist
-from numpyro.handlers import seed, substitute
 from numpyro.primitives import param, sample
 from numpyro.infer import ELBO
 import numpyro.optim as optimizers
@@ -26,6 +25,7 @@ import numpyro.optim as optimizers
 from dppp.svi import DPSVI
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.util import unvectorize_shape_2d
+from dppp.svi import sample_prior_predictive
 
 def model(obs=None, num_obs_total=None, d=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
@@ -36,7 +36,7 @@ def model(obs=None, num_obs_total=None, d=None):
     else:
         assert(num_obs_total is not None)
         batch_size = num_obs_total
-        assert(d is not None)
+        assert(d != None)
 
     z_mu = sample('mu', dist.Normal(np.zeros((d,)), 1.))
     x_var = .1
@@ -44,15 +44,17 @@ def model(obs=None, num_obs_total=None, d=None):
         x = sample('obs', dist.Normal(z_mu, x_var), obs=obs, sample_shape=(batch_size,))
     return x
 
-def guide(obs, num_obs_total=None, d=None):
+def guide(obs=None, num_obs_total=None, d=None):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
     """
     # # very smart guide: starts with analytical solution
+    # assert(obs != None)
     # mu_loc, mu_std = analytical_solution(obs)
     # mu_loc = param('mu_loc', mu_loc)
     # mu_std = np.exp(param('mu_std_log', np.log(mu_std)))
 
     # not so smart guide: starts from prior for mu
+    assert(d != None)
     mu_loc = param('mu_loc', np.zeros(d))
     mu_std = np.exp(param('mu_std_log', np.zeros(d)))
 
@@ -77,12 +79,11 @@ def ml_estimate(obs):
 
     return mu_loc, mu_std
 
-def create_toy_data(N, d):
+def create_toy_data(rng_key, N, d):
     ## Create some toy data
     mu_true = np.ones(d)
-    X = substitute(seed(model, jax.random.PRNGKey(54795)), {'mu': mu_true})(
-        num_obs_total=2*N, d=d
-    )
+    samples = sample_prior_predictive(rng_key, model, (None, 2*N, d), {'mu': mu_true})
+    X = samples['obs']
 
     X_train = X[:N]
     X_test = X[N:]
@@ -90,7 +91,10 @@ def create_toy_data(N, d):
     return X_train, X_test, mu_true
 
 def main(args):
-    X_train, X_test, mu_true = create_toy_data(args.num_samples, args.dimensions)
+    rng = PRNGKey(1234)
+    rng, toy_data_rng = jax.random.split(rng, 2)
+    X_train, X_test, mu_true = create_toy_data(toy_data_rng, args.num_samples, args.dimensions)
+
     train_init, train_fetch = subsample_batchify_data((X_train,), batch_size=args.batch_size)
     test_init, test_fetch = split_batchify_data((X_test,), batch_size=args.batch_size)
 
@@ -102,10 +106,9 @@ def main(args):
     svi = DPSVI(
         model, guide, optimizer, ELBO(), 
         dp_scale=0.01, clipping_threshold=20.,
-        d=args.dimensions, num_obs_total=args.num_samples,
+        d=args.dimensions, num_obs_total=args.num_samples
     )
 
-    rng = PRNGKey(1234)
     rng, svi_init_rng, batchifier_rng = random.split(rng, 3)
     _, batchifier_state = train_init(rng_key=batchifier_rng)
     batch = train_fetch(0, batchifier_state)
