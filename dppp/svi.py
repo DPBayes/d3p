@@ -381,16 +381,23 @@ class DPSVI(TunableSVI):
             gradients_clipping_fn, grad_perturbation_fn, **static_kwargs
         )
 
-def get_samples_from_trace(trace):
+def get_samples_from_trace(trace, with_intermediates=False):
     """ Extracts all sample values from a numpyro trace.
 
     :param trace: trace object obtained from `numpyro.handlers.trace().get_trace()`
-    :return: dictionary of sampled values associated with the names given
-        to the sample since via `sample()` in the model
+    :param with_intermediates: If True, intermediate(/latent) samples from
+        sample site distributions are included in the result.
+    :return: Dictionary of sampled values associated with the names given
+        via `sample()` in the model. If with_intermediates is True,
+        dictionary values are tuples where the first element is the final
+        sample values and the second element is a list of intermediate values.
     """
-    return {k: v['value'] for k, v in trace.items() if v['type'] == 'sample'}
+    samples = {k: (v['value'], v['intermediates']) if with_intermediates else v['value']
+        for k, v in trace.items() if v['type'] == 'sample'
+    }
+    return samples
 
-def sample_prior_predictive(rng_key, model, model_args, substitutes=None):
+def sample_prior_predictive(rng_key, model, model_args, substitutes=None, with_intermediates=False):
     """ Samples once from the prior predictive distribution.
 
     Individual sample sites, as designated by `sample`, can be frozen to
@@ -408,15 +415,19 @@ def sample_prior_predictive(rng_key, model, model_args, substitutes=None):
     :param model_args: Arguments to the model function
     :param substitutes: An optional dictionary of frozen substitutes for
         sample sites.
-    :return: Values for all sample sites, identified by `sample` calls in the
-        model function.
+    :param with_intermediates: If True, intermediate(/latent) samples from
+        sample site distributions are included in the result.
+    :return: Dictionary of sampled values associated with the names given
+        via `sample()` in the model. If with_intermediates is True,
+        dictionary values are tuples where the first element is the final
+        sample values and the second element is a list of intermediate values.
     """
     if substitutes is None: substitutes = dict()
     model = seed(substitute(model, param_map=substitutes), rng_key)
     t = trace(model).get_trace(*model_args)
-    return get_samples_from_trace(t)
+    return get_samples_from_trace(t, with_intermediates)
 
-def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args, params):
+def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args, params, with_intermediates=False):
     """ Samples once from the posterior predictive distribution.
 
     Note that if the model function is written in such a way that it returns, e.g.,
@@ -432,16 +443,24 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args, p
     :param guide_args: Arguments to the guide function
     :param params: A dictionary providing values for the parameters
         designated by call to `param` in the guide
-    :return: Values for all sample sites, identified by `sample` calls in the
-        model function.
+    :param with_intermediates: If True, intermediate(/latent) samples from
+        sample site distributions are included in the result.
+    :return: Dictionary of sampled values associated with the names given
+        via `sample()` in the model. If with_intermediates is True,
+        dictionary values are tuples where the first element is the final
+        sample values and the second element is a list of intermediate values.
     """
     model_rng_key, guide_rng_key = jax.random.split(rng_key)
 
     guide = seed(substitute(guide, param_map=params), guide_rng_key)
-    guide_samples = get_samples_from_trace(trace(guide).get_trace(*guide_args))
+    guide_samples = get_samples_from_trace(trace(guide).get_trace(*guide_args), with_intermediates)
 
-    model = seed(substitute(model, param_map=guide_samples), model_rng_key)
-    model_samples = get_samples_from_trace(trace(model).get_trace(*model_args))
+    model_params = guide_samples
+    if with_intermediates:
+        model_params = {k: v[0] for k, v in model_params.items()}
+
+    model = seed(substitute(model, param_map=model_params), model_rng_key)
+    model_samples = get_samples_from_trace(trace(model).get_trace(*model_args), with_intermediates)
 
     guide_samples.update(model_samples)
     return guide_samples
@@ -450,7 +469,7 @@ def _sample_a_lot(rng_key, n, single_sample_fn):
     rng_keys = jax.random.split(rng_key, n)
     return jax.vmap(single_sample_fn)(rng_keys)
 
-def sample_multi_prior_predictive(rng_key, n, model, model_args, substitutes=None):
+def sample_multi_prior_predictive(rng_key, n, model, model_args, substitutes=None, with_intermediates=False):
     """ Samples n times from the prior predictive distribution.
 
     Individual sample sites, as designated by `sample`, can be frozen to
@@ -470,15 +489,19 @@ def sample_multi_prior_predictive(rng_key, n, model, model_args, substitutes=Non
     :param model_args: Arguments to the model function
     :param substitutes: An optional dictionary of frozen substitutes for
         sample sites.
-    :return: Values for all sample sites, identified by `sample` calls in the
-        model function.
+    :param with_intermediates: If True, intermediate(/latent) samples from
+        sample site distributions are included in the result.
+    :return: Dictionary of sampled values associated with the names given
+        via `sample()` in the model. If with_intermediates is True,
+        dictionary values are tuples where the first element is the final
+        sample values and the second element is a list of intermediate values.
     """
     single_sample_fn = lambda rng: sample_prior_predictive(
-        rng, model, model_args, substitutes=substitutes
+        rng, model, model_args, substitutes=substitutes, with_intermediates=with_intermediates
     )
     return _sample_a_lot(rng_key, n, single_sample_fn)
 
-def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide, guide_args, params):
+def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide, guide_args, params, with_intermediates=False):
     """ Samples n times from the posterior predictive distribution.
 
     Note that if the model function is written in such a way that it returns, e.g.,
@@ -495,11 +518,15 @@ def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide, guid
     :param guide_args: Arguments to the guide function
     :param params: A dictionary providing values for the parameters
         designated by call to `param` in the guide
-    :return: Values for all sample sites, identified by `sample` calls in the
-        model function.
+    :param with_intermediates: If True, intermediate(/latent) samples from
+        sample site distributions are included in the result.
+    :return: Dictionary of sampled values associated with the names given
+        via `sample()` in the model. If with_intermediates is True,
+        dictionary values are tuples where the first element is the final
+        sample values and the second element is a list of intermediate values.
     """
     single_sample_fn = lambda rng: sample_posterior_predictive(
-        rng, model, model_args, guide, guide_args, params
+        rng, model, model_args, guide, guide_args, params, with_intermediates=with_intermediates
     )
     return _sample_a_lot(rng_key, n, single_sample_fn)
 
