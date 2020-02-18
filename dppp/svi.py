@@ -12,7 +12,6 @@ import jax.numpy as np
 
 from numpyro.infer.svi import SVI, SVIState
 import numpyro.distributions as dist
-from numpyro.primitives import sample, param
 from numpyro.handlers import seed, trace, substitute
 
 from dppp.util import map_over_secondary_dims, example_count

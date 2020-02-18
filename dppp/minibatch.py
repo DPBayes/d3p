@@ -24,14 +24,14 @@ def minibatch(batch_or_batchsize, num_obs_total=None):
     """
     if is_int_scalar(batch_or_batchsize):
         if not np.isscalar(batch_or_batchsize):
-            raise ValueError("if a scalar is given for batch_or_batchsize, it "
+            raise TypeError("if a scalar is given for batch_or_batchsize, it "
                 "can't be traced through jit. consider using static_argnums "
                 "for the jit invocation.")
         batch_size = batch_or_batchsize
     elif is_array(batch_or_batchsize):
         batch_size = example_count(batch_or_batchsize)
     else:
-        raise ValueError("batch_or_batchsize must be an array or an integer")
+        raise TypeError("batch_or_batchsize must be an array or an integer")
     if num_obs_total is None:
         num_obs_total = batch_size
     return scale(scale_factor = num_obs_total / batch_size)

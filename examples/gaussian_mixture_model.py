@@ -19,8 +19,6 @@ sys.path.append(os.path.dirname(sys.path[0]))
 import argparse
 import time
 
-import numpy as onp
-
 import jax
 import jax.numpy as np
 from jax import jit, lax, random
@@ -61,7 +59,6 @@ def guide(k, obs=None, num_obs_total=None, d=None):
         _, d = unvectorize_shape_2d(obs)
     else:
         assert(num_obs_total is not None)
-        batch_size = num_obs_total
         assert(d is not None)
 
     mus_loc = param('mus_loc', np.zeros((k, d)))

@@ -11,15 +11,12 @@ sys.path.append(os.path.dirname(sys.path[0]))
 import argparse
 import time
 
-import numpy as onp
-
 import jax
 import jax.numpy as np
 from jax import jit, lax, random
 from jax.random import PRNGKey
 
 import numpyro.distributions as dist
-from numpyro.handlers import seed, substitute
 from numpyro.primitives import param, sample
 from numpyro.infer import ELBO
 import numpyro.optim as optimizers

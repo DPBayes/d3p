@@ -94,7 +94,6 @@ def model(batch, z_dim, hidden_dim, num_obs_total=None):
     batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
     out_dim = np.shape(batch)[1]
 
-    #decoder_params = param('decoder', None) # advertise/register decoder parameters
     decode = numpyro.module('decoder', decoder(hidden_dim, out_dim), (batch_size, z_dim))
     with minibatch(batch_size, num_obs_total=num_obs_total):
         z = sample('z', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior on z is N(0,I)
@@ -158,10 +157,7 @@ def main(args):
     train_fetch = binarize_fetch(train_fetch_plain)
     test_fetch = binarize_fetch(test_fetch_plain)
 
-    # obtaining model and training algorithms
-    out_dim = 28*28
-    encoder_nn = encoder(args.hidden_dim, args.z_dim)
-    decoder_nn = decoder(args.hidden_dim, out_dim)
+    # setting up optimizer
     optimizer = optimizers.Adam(args.learning_rate)
 
     # note(lumip): choice of c is somewhat arbitrary at the moment.
