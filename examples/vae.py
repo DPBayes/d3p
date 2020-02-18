@@ -26,7 +26,7 @@ import numpyro.distributions as dist
 from numpyro.primitives import sample
 from numpyro.infer import ELBO
 
-from dppp.svi import DPSVI
+from dppp.svi import DPSVI, sample_posterior_predictive
 from dppp.util import unvectorize_shape_3d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
@@ -247,9 +247,11 @@ def main(args):
         rng, rng_binarize = random.split(rng, 2)
         test_sample = binarize(rng_binarize, img)
         params = svi.get_params(svi_state)
-        z_mean, z_var = encoder_nn[1](params['encoder$params'], test_sample.reshape([1, -1]))
-        z = dist.Normal(z_mean, z_var).sample(rng)
-        img_loc = decoder_nn[1](params['decoder$params'], z).reshape([28, 28])
+        samples = sample_posterior_predictive(
+            rng, model, (test_sample, args.z_dim, args.hidden_dim),
+            guide, (test_sample, args.z_dim, args.hidden_dim), params
+        )
+        img_loc = samples['obs'].reshape([28, 28])
         plt.imsave(
             os.path.join(RESULTS_DIR, "epoch_{:0{}d}_recons.png".format(
                 epoch, (int(np.log10(num_epochs))+1))
