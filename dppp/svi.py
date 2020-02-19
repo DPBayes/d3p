@@ -454,9 +454,11 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args, p
     guide = seed(substitute(guide, param_map=params), guide_rng_key)
     guide_samples = get_samples_from_trace(trace(guide).get_trace(*guide_args), with_intermediates)
 
-    model_params = guide_samples
+    model_params = dict(**params)
     if with_intermediates:
-        model_params = {k: v[0] for k, v in model_params.items()}
+        model_params.update({k: v[0] for k, v in guide_samples.items()})
+    else:
+        model_params.update({k: v for k, v in guide_samples.items()})
 
     model = seed(substitute(model, param_map=model_params), model_rng_key)
     model_samples = get_samples_from_trace(trace(model).get_trace(*model_args), with_intermediates)

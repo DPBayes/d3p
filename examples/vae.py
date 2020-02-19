@@ -26,7 +26,7 @@ import numpyro.distributions as dist
 from numpyro.primitives import sample
 from numpyro.infer import ELBO
 
-from dppp.svi import DPSVI, sample_posterior_predictive
+from dppp.svi import DPSVI, sample_multi_posterior_predictive
 from dppp.util import unvectorize_shape_3d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
@@ -243,16 +243,28 @@ def main(args):
         rng, rng_binarize = random.split(rng, 2)
         test_sample = binarize(rng_binarize, img)
         params = svi.get_params(svi_state)
-        samples = sample_posterior_predictive(
-            rng, model, (test_sample, args.z_dim, args.hidden_dim),
+        # todo(lumip): fix this. with how stuff currently works, this call
+        #   to sample_multi_posterior will always return test_sample instead
+        #   of an actual posterior sample, giving a wrong impression on how good
+        #   the model performs!
+        samples = sample_multi_posterior_predictive(
+            rng, 10, model, (test_sample, args.z_dim, args.hidden_dim),
             guide, (test_sample, args.z_dim, args.hidden_dim), params
         )
-        img_loc = samples['obs'].reshape([28, 28])
+        img_loc = samples['obs'][0].reshape([28, 28])
+        avg_img_loc = np.mean(samples['obs'], axis=0).reshape([28, 28])
         plt.imsave(
-            os.path.join(RESULTS_DIR, "epoch_{:0{}d}_recons.png".format(
+            os.path.join(RESULTS_DIR, "epoch_{:0{}d}_recons_single.png".format(
                 epoch, (int(np.log10(num_epochs))+1))
             ),
             img_loc,
+            cmap='gray'
+        )
+        plt.imsave(
+            os.path.join(RESULTS_DIR, "epoch_{:0{}d}_recons_avg.png".format(
+                epoch, (int(np.log10(num_epochs))+1))
+            ),
+            avg_img_loc,
             cmap='gray'
         )
 
