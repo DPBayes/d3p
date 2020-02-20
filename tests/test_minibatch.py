@@ -45,17 +45,17 @@ class MinibatchTests(unittest.TestCase):
 
     def test_minibatch_rejects_batch_size_none(self):
         batch_size = None
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             minibatch(batch_size)
 
     def test_minibatch_rejects_tuple_batch_size_argument(self):
         batch_size = (2, 3)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             minibatch(batch_size)
 
     def test_minibatch_rejects_float_batch_size_argument(self):
         batch_size = 10.
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             minibatch(batch_size)
 
     def test_minibatch_batch_size_deduced_from_array(self):
