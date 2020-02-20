@@ -22,44 +22,49 @@ from numpyro.primitives import param, sample
 from numpyro.infer import ELBO
 import numpyro.optim as optimizers
 
-from dppp.svi import DPSVI
+from dppp.svi import DPSVI, make_observed_model, map_args_obs_to_shape
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.util import unvectorize_shape_2d
 from dppp.svi import sample_prior_predictive
 
-def model(obs=None, num_obs_total=None, d=None):
+def model(N, d, num_obs_total=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
     """
-    if obs is not None:
-        assert(np.ndim(obs) <= 2)
-        batch_size, d = unvectorize_shape_2d(obs)
-    else:
-        assert(num_obs_total is not None)
-        batch_size = num_obs_total
-        assert(d != None)
+    assert(N is not None)
+    assert(d is not None)
 
     z_mu = sample('mu', dist.Normal(np.zeros((d,)), 1.))
     x_var = .1
-    with minibatch(batch_size, num_obs_total):
-        x = sample('obs', dist.Normal(z_mu, x_var), obs=obs, sample_shape=(batch_size,))
+    with minibatch(N, num_obs_total):
+        x = sample('obs', dist.Normal(z_mu, x_var), sample_shape=(N,))
     return x
 
-def guide(obs=None, num_obs_total=None, d=None):
+def map_model_args(obs, num_obs_total=None):
+    """Maps arguments from batch model likelihood call to model function."""
+    assert(np.ndim(obs) <= 2)
+    N, d = unvectorize_shape_2d(obs)
+    return (N,d), {'num_obs_total': num_obs_total}, {'obs': obs}
+
+model_obs = make_observed_model(model, map_model_args)
+
+def guide(d):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
     """
-    # # very smart guide: starts with analytical solution
-    # assert(obs != None)
-    # mu_loc, mu_std = analytical_solution(obs)
-    # mu_loc = param('mu_loc', mu_loc)
-    # mu_std = np.exp(param('mu_std_log', np.log(mu_std)))
-
-    # not so smart guide: starts from prior for mu
-    assert(d != None)
+    # guide starts from prior for mu
+    assert(d is not None)
     mu_loc = param('mu_loc', np.zeros(d))
     mu_std = np.exp(param('mu_std_log', np.zeros(d)))
 
     z_mu = sample('mu', dist.Normal(mu_loc, mu_std))
     return z_mu, mu_loc, mu_std
+
+def map_guide_args(obs, num_obs_total):
+    """Maps arguments from batch guide call to guide function."""
+    assert(np.ndim(obs) <= 2)
+    _, d = unvectorize_shape_2d(obs)
+    return (d,), {}, {}
+
+guide_obs = make_observed_model(guide, map_guide_args)
 
 def analytical_solution(obs):
     N = np.atleast_1d(obs).shape[0]
@@ -82,7 +87,7 @@ def ml_estimate(obs):
 def create_toy_data(rng_key, N, d):
     ## Create some toy data
     mu_true = np.ones(d)
-    samples = sample_prior_predictive(rng_key, model, (None, 2*N, d), {'mu': mu_true})
+    samples = sample_prior_predictive(rng_key, model, (2*N, d), {'mu': mu_true})
     X = samples['obs']
 
     X_train = X[:N]
@@ -104,9 +109,9 @@ def main(args):
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
     svi = DPSVI(
-        model, guide, optimizer, ELBO(), 
+        model_obs, guide_obs, optimizer, ELBO(), 
         dp_scale=0.01, clipping_threshold=20.,
-        d=args.dimensions, num_obs_total=args.num_samples
+        num_obs_total=args.num_samples
     )
 
     rng, svi_init_rng, batchifier_rng = random.split(rng, 3)

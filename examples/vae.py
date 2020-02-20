@@ -26,7 +26,7 @@ import numpyro.distributions as dist
 from numpyro.primitives import sample
 from numpyro.infer import ELBO
 
-from dppp.svi import DPSVI, sample_multi_posterior_predictive
+from dppp.svi import DPSVI, sample_multi_posterior_predictive, make_observed_model
 from dppp.util import unvectorize_shape_3d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
@@ -78,7 +78,7 @@ def decoder(hidden_dim, out_dim):
     )
 
 
-def model(batch, z_dim, hidden_dim, num_obs_total=None):
+def model(N, z_dim, hidden_dim, out_dim, num_obs_total=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
 
     The model is conditioned on the observed data
@@ -89,18 +89,21 @@ def model(batch, z_dim, hidden_dim, num_obs_total=None):
 
     :return: (named) sample x from the model observation distribution p(x|z)p(z)
     """
+    decode = numpyro.module('decoder', decoder(hidden_dim, out_dim), (N, z_dim))
+    with minibatch(N, num_obs_total=num_obs_total):
+        z = sample('z', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior on z is N(0,I)
+        img_loc = decode(z) # evaluate decoder (p(x|z)) on sampled z to get means for output bernoulli distribution
+        x = sample('obs', dist.Bernoulli(img_loc)) # outputs x are sampled from bernoulli distribution depending on z and conditioned on the observed data
+        return x
+
+def model_args_map(batch, z_dim, hidden_dim, num_obs_total=None):
     assert(np.ndim(batch) == 3 or np.ndim(batch) == 2)
     batch_size = unvectorize_shape_3d(batch)[0]
     batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
     out_dim = np.shape(batch)[1]
+    return (batch_size, z_dim, hidden_dim, out_dim), {'num_obs_total': num_obs_total}, {'obs': batch}
 
-    decode = numpyro.module('decoder', decoder(hidden_dim, out_dim), (batch_size, z_dim))
-    with minibatch(batch_size, num_obs_total=num_obs_total):
-        z = sample('z', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior on z is N(0,I)
-        img_loc = decode(z) # evaluate decoder (p(x|z)) on sampled z to get means for output bernoulli distribution
-        x = sample('obs', dist.Bernoulli(img_loc), obs=batch) # outputs x are sampled from bernoulli distribution depending on z and conditioned on the observed data
-        return x
-
+model_obs = make_observed_model(model, model_args_map)
 
 def guide(batch, z_dim, hidden_dim, num_obs_total=None):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|q)
@@ -118,6 +121,7 @@ def guide(batch, z_dim, hidden_dim, num_obs_total=None):
         z = sample('z', dist.Normal(z_loc, z_std)) # z follows q(z)
         return z
 
+guide_obs = guide
 
 @jit
 def binarize(rng, batch):
@@ -165,7 +169,7 @@ def main(args):
     #   between 100 and 200 but in epoch 20 usually at 280 to 290.
     #   value for dp_scale completely made up currently.
     svi = DPSVI(
-        model, guide, optimizer, ELBO(),                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
+        model_obs, guide_obs, optimizer, ELBO(),                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
         dp_scale=0.01, clipping_threshold=300.,
         num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim
     )
@@ -243,12 +247,8 @@ def main(args):
         rng, rng_binarize = random.split(rng, 2)
         test_sample = binarize(rng_binarize, img)
         params = svi.get_params(svi_state)
-        # todo(lumip): fix this. with how stuff currently works, this call
-        #   to sample_multi_posterior will always return test_sample instead
-        #   of an actual posterior sample, giving a wrong impression on how good
-        #   the model performs!
         samples = sample_multi_posterior_predictive(
-            rng, 10, model, (test_sample, args.z_dim, args.hidden_dim),
+            rng, 10, model, (1, args.z_dim, args.hidden_dim, 28*28),
             guide, (test_sample, args.z_dim, args.hidden_dim), params
         )
         img_loc = samples['obs'][0].reshape([28, 28])

@@ -22,37 +22,37 @@ from numpyro.infer import ELBO
 import numpyro.optim as optimizers
 
 from dppp.util import example_count, normalize, unvectorize_shape_2d
-from dppp.svi import DPSVI, sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive
+from dppp.svi import DPSVI, sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive, make_observed_model
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
 
-def model(batch_X, batch_y=None, num_obs_total=None):
+def model(X, num_obs_total=None):
     """Defines the generative probabilistic model: p(y|z,X)p(z)
 
     The model is conditioned on the observed data
-    :param batch_X: a batch of predictors
-    :param batch_y: a batch of observations
+    :param X: a batch of predictors
     """
-    assert(np.ndim(batch_X) <= 2)
-    batch_size, d = unvectorize_shape_2d(batch_X)
-    assert(batch_y is None or example_count(batch_y) == batch_size)
+    assert(np.ndim(X) <= 2)
+    batch_size, d = unvectorize_shape_2d(X)
 
     z_w = sample('w', dist.Normal(np.zeros((d,)), np.ones((d,)))) # prior is N(0,I)
     z_intercept = sample('intercept', dist.Normal(0,1)) # prior is N(0,1)
-    logits = batch_X.dot(z_w)+z_intercept
+    logits = X.dot(z_w)+z_intercept
 
     with minibatch(batch_size, num_obs_total=num_obs_total):
-        return sample('obs', dist.Bernoulli(logits=logits), obs=batch_y)
+        return sample('obs', dist.Bernoulli(logits=logits))
 
+def map_model_args(batch_X, batch_y, num_obs_total=None):
+    return (batch_X,), {'num_obs_total': num_obs_total}, {'obs': batch_y}
 
-def guide(batch_X, batch_y=None, num_obs_total=None):
+model_obs = make_observed_model(model, map_model_args)
+
+def guide(d):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
     """
     # we are interested in the posterior of w and intercept
     # since this is a fairly simple model, we just initialize them according
-    # to our prior believe and let the optimization handle the rest
-    d = np.atleast_2d(batch_X).shape[1]
-
+    # to our prior belief and let the optimization handle the rest
     z_w_loc = param("w_loc", np.zeros((d,)))
     z_w_std = np.exp(param("w_std_log", np.zeros((d,))))
     z_w = sample('w', dist.Normal(z_w_loc, z_w_std))
@@ -62,6 +62,12 @@ def guide(batch_X, batch_y=None, num_obs_total=None):
     z_intercept = sample('intercept', dist.Normal(z_intercept_loc, z_interpet_std))
 
     return (z_w, z_intercept)
+
+def map_guide_args(batch_X, batch_y, num_obs_total=None):
+    _, d = unvectorize_shape_2d(batch_X)
+    return (d,), {}, {}
+
+guide_obs = make_observed_model(guide, map_guide_args)
 
 def create_toy_data(rng_key, N, d):
     ## Create some toy data
@@ -88,7 +94,7 @@ def estimate_accuracy_fixed_params(X, y, w, intercept, rng, num_iterations=1):
 def estimate_accuracy(X, y, params, rng, num_iterations=1):
 
     samples = sample_multi_posterior_predictive(
-        rng, num_iterations, model, (X,), guide, (X,), params
+        rng, num_iterations, model, (X,), guide, (np.shape(X)[1],), params
     )
 
     return np.average(samples['obs'] == y)
@@ -109,7 +115,7 @@ def main(args):
 
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
-    svi = DPSVI(model, guide, optimizer, ELBO(),
+    svi = DPSVI(model_obs, guide_obs, optimizer, ELBO(),
         dp_scale=0.01, clipping_threshold=20., num_obs_total=args.num_samples
     )
 

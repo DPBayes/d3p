@@ -14,7 +14,7 @@ from numpyro.infer.svi import SVI, SVIState
 import numpyro.distributions as dist
 from numpyro.handlers import seed, trace, substitute
 
-from dppp.util import map_over_secondary_dims, example_count
+from dppp.util import map_over_secondary_dims, example_count, unvectorize_shape_2d
 
 
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
@@ -544,13 +544,16 @@ def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide, guid
     )
     return _sample_a_lot(rng_key, n, single_sample_fn)
 
-def fix_observations(model, observations):
-    """ Fixes observations in a model function for likelihood evaluation.
+def map_args_obs_to_shape(obs, *args, **kwargs):
+    return unvectorize_shape_2d(obs), kwargs, {'obs': obs}
 
-    :param model: Function representing the model using numpyro distributions
-        and the `sample` primitive
-    :param: Dictionary of observations associated with the sample sites in the
-        model function as designated by calls to `param`
-    :return: Model function with fixed observations
-    """
-    return substitute(model, param_map=observations)
+def make_observed_model(model, obs_to_model_args_fn=None):
+    if obs_to_model_args_fn is None:
+        def map_args_identity(*args, **kwargs):
+            return args, kwargs, dict()
+        obs_to_model_args_fn = map_args_identity
+
+    def transformed_model_fn(*args, **kwargs):
+        mapped_args, mapped_kwargs, fixed_obs = obs_to_model_args_fn(*args, **kwargs)
+        return substitute(model, param_map=fixed_obs)(*mapped_args, **mapped_kwargs)
+    return transformed_model_fn

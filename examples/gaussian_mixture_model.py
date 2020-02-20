@@ -23,38 +23,30 @@ import numpyro.optim as optimizers
 from numpyro.primitives import sample, param
 from numpyro.infer import ELBO
 
-from dppp.svi import DPSVI, sample_prior_predictive
+from dppp.svi import DPSVI, sample_prior_predictive, make_observed_model
 from dppp.util import unvectorize_shape_2d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.gmm import GaussianMixture
 
 
-def model(k, obs=None, num_obs_total=None, d=None):
+def model(k, N, d, num_obs_total=None):
     # this is our model function using the GaussianMixture distribution
     # with prior belief
-    if obs is not None:
-        assert(np.ndim(obs) <= 2)
-        batch_size, d = unvectorize_shape_2d(obs)
-    else:
-        assert(num_obs_total is not None)
-        batch_size = num_obs_total
-        assert(d is not None)
-
     pis = sample('pis', dist.Dirichlet(np.ones(k)))
     mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
     sigs = sample('sigs', dist.InverseGamma(1., 1.), sample_shape=np.shape(mus))
-    with minibatch(batch_size, num_obs_total=num_obs_total):
-        return sample('obs', GaussianMixture(mus, sigs, pis), obs=obs, sample_shape=(batch_size,))
+    with minibatch(N, num_obs_total=num_obs_total):
+        return sample('obs', GaussianMixture(mus, sigs, pis), sample_shape=(N,))
 
-def guide(k, obs=None, num_obs_total=None, d=None):
+def map_model_args(obs, k, num_obs_total=None):
+    assert(np.ndim(obs) <= 2)
+    batch_size, d = unvectorize_shape_2d(obs)
+    return (k, batch_size, d), {'num_obs_total': num_obs_total}, {'obs': obs}
+
+model_obs = make_observed_model(model, map_model_args)
+
+def guide(k, d):
     # the latent MixGaus distribution which learns the parameters
-    if obs is not None:
-        assert(np.ndim(obs) <= 2)
-        _, d = unvectorize_shape_2d(obs)
-    else:
-        assert(num_obs_total is not None)
-        assert(d is not None)
-
     mus_loc = param('mus_loc', np.zeros((k, d)))
     mus = sample('mus', dist.Normal(mus_loc, 1.))
     sigs = sample('sigs', dist.InverseGamma(1., 1.), obs=np.ones_like(mus))
@@ -62,6 +54,13 @@ def guide(k, obs=None, num_obs_total=None, d=None):
     alpha = np.exp(alpha_log)
     pis = sample('pis', dist.Dirichlet(alpha))
     return pis, mus, sigs
+
+def map_guide_args(obs, k, num_obs_total=None):
+    assert(np.ndim(obs) <= 2)
+    _, d = unvectorize_shape_2d(obs)
+    return (k, d), {}, {}
+
+guide_obs = make_observed_model(guide, map_guide_args)
 
 def create_toy_data(rng_key, N, d):
     """Creates some toy data (for training and testing)"""
@@ -71,7 +70,7 @@ def create_toy_data(rng_key, N, d):
     sigs = np.reshape(np.array([0.1, 1., 0.1]), (3,1))
     pis = np.array([1/4, 1/4, 2/4])
 
-    samples = sample_prior_predictive(rng_key, model, (3, None, 2*N, d), substitutes={
+    samples = sample_prior_predictive(rng_key, model, (3, 2*N, d), substitutes={
         'pis': pis, 'mus': mus, 'sigs': sigs
     }, with_intermediates=True)
 
@@ -157,20 +156,12 @@ def main(args):
     ## Init optimizer and training algorithms
     optimizer = optimizers.Adam(args.learning_rate)
 
-    # note(lumip): fix the parameters in the models
-    def fix_params(model_fn, k):
-        def fixed_params_fn(obs, **kwargs):
-            return model_fn(k, obs, **kwargs)
-        return fixed_params_fn
-
-    model_fixed = fix_params(model, k)
-    guide_fixed = fix_params(guide, k)
-
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
     svi = DPSVI(
-        model_fixed, guide_fixed, optimizer, ELBO(),
-        dp_scale=0.01,  clipping_threshold=20., num_obs_total=args.num_samples
+        model_obs, guide_obs, optimizer, ELBO(),
+        dp_scale=0.01,  clipping_threshold=20., num_obs_total=args.num_samples,
+        k = k
     )
 
     rng, svi_init_rng, fetch_rng = random.split(rng, 3)
