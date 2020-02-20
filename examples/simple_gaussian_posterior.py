@@ -45,8 +45,6 @@ def map_model_args(obs, num_obs_total=None):
     N, d = unvectorize_shape_2d(obs)
     return (N,d), {'num_obs_total': num_obs_total}, {'obs': obs}
 
-model_obs = make_observed_model(model, map_model_args)
-
 def guide(d):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
     """
@@ -63,8 +61,6 @@ def map_guide_args(obs, num_obs_total):
     assert(np.ndim(obs) <= 2)
     _, d = unvectorize_shape_2d(obs)
     return (d,), {}, {}
-
-guide_obs = make_observed_model(guide, map_guide_args)
 
 def analytical_solution(obs):
     N = np.atleast_1d(obs).shape[0]
@@ -109,9 +105,11 @@ def main(args):
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
     svi = DPSVI(
-        model_obs, guide_obs, optimizer, ELBO(), 
+        model, guide, optimizer, ELBO(), 
         dp_scale=0.01, clipping_threshold=20.,
-        num_obs_total=args.num_samples
+        num_obs_total=args.num_samples,
+        map_model_args_fn=map_model_args,
+        map_guide_args_fn=map_guide_args
     )
 
     rng, svi_init_rng, batchifier_rng = random.split(rng, 3)

@@ -45,8 +45,6 @@ def model(X, num_obs_total=None):
 def map_model_args(batch_X, batch_y, num_obs_total=None):
     return (batch_X,), {'num_obs_total': num_obs_total}, {'obs': batch_y}
 
-model_obs = make_observed_model(model, map_model_args)
-
 def guide(d):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|x)
     """
@@ -66,8 +64,6 @@ def guide(d):
 def map_guide_args(batch_X, batch_y, num_obs_total=None):
     _, d = unvectorize_shape_2d(batch_X)
     return (d,), {}, {}
-
-guide_obs = make_observed_model(guide, map_guide_args)
 
 def create_toy_data(rng_key, N, d):
     ## Create some toy data
@@ -115,8 +111,9 @@ def main(args):
 
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
-    svi = DPSVI(model_obs, guide_obs, optimizer, ELBO(),
-        dp_scale=0.01, clipping_threshold=20., num_obs_total=args.num_samples
+    svi = DPSVI(model, guide, optimizer, ELBO(),
+        dp_scale=0.01, clipping_threshold=20., num_obs_total=args.num_samples,
+        map_model_args_fn=map_model_args, map_guide_args_fn=map_guide_args
     )
 
     rng, svi_init_rng, data_fetch_rng = random.split(rng, 3)

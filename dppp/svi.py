@@ -71,13 +71,23 @@ class TunableSVI(SVI):
     :param batch_grad_manipulation_fn: An optional function that allows to modify
         the total gradient. This gets called after applying the
         per_example_grad_manipulation_fn and loss_combiner_fn.
+    :param map_model_args_fn: An optional function which transforms arguments for
+        `model`. See `make_observed_model` for details.
+    :param map_model_args_fn: An optional function which transforms arguments for
+        `guide`. See `make_observed_model` for details.
     :param static_kwargs: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     """
 
     def __init__(self, model, guide, optim, per_example_loss,
             per_example_grad_manipulation_fn=None,
-            batch_grad_manipulation_fn=None, **static_kwargs):
+            batch_grad_manipulation_fn=None, map_model_args_fn=None,
+            map_guide_args_fn=None, **static_kwargs):
+
+        if map_model_args_fn is not None:
+            model = make_observed_model(model, map_model_args_fn)
+        if map_guide_args_fn is not None:
+            guide = make_observed_model(guide, map_guide_args_fn)
 
         self.px_grad_manipulation_fn = per_example_grad_manipulation_fn
         self.batch_grad_manipulation_fn = batch_grad_manipulation_fn
@@ -350,13 +360,17 @@ class DPSVI(TunableSVI):
         each dimension of the batch gradients.
     :param num_obs_total: The total number of examples/observations in the
         full data set. To be used iff examples are scaled in a minibatch
+    :param map_model_args_fn: An optional function which transforms arguments for
+        `model`. See `make_observed_model` for details.
+    :param map_model_args_fn: An optional function which transforms arguments for
         `guide`. See `make_observed_model` for details.
     :param static_kwargs: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     """
 
     def __init__(self, model, guide, optim, per_example_loss,
-            clipping_threshold, dp_scale, num_obs_total = 1, **static_kwargs):
+            clipping_threshold, dp_scale, num_obs_total = 1,
+            map_model_args_fn=None, map_guide_args_fn=None, **static_kwargs):
 
 
         # Using a minibatch environment will scale up the log likelihood contribution
@@ -390,6 +404,7 @@ class DPSVI(TunableSVI):
         super().__init__(
             model, guide, optim, per_example_loss,
             gradients_clipping_fn, grad_perturbation_fn,
+            map_model_args_fn, map_guide_args_fn,
             num_obs_total=num_obs_total, **static_kwargs
         )
 
@@ -409,7 +424,8 @@ def get_samples_from_trace(trace, with_intermediates=False):
     }
     return samples
 
-def sample_prior_predictive(rng_key, model, model_args, substitutes=None, with_intermediates=False):
+def sample_prior_predictive(rng_key, model, model_args,
+        substitutes=None, with_intermediates=False):
     """ Samples once from the prior predictive distribution.
 
     Individual sample sites, as designated by `sample`, can be frozen to
@@ -439,7 +455,8 @@ def sample_prior_predictive(rng_key, model, model_args, substitutes=None, with_i
     t = trace(model).get_trace(*model_args)
     return get_samples_from_trace(t, with_intermediates)
 
-def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args, params, with_intermediates=False):
+def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args,
+        params, with_intermediates=False):
     """ Samples once from the posterior predictive distribution.
 
     Note that if the model function is written in such a way that it returns, e.g.,
@@ -483,7 +500,8 @@ def _sample_a_lot(rng_key, n, single_sample_fn):
     rng_keys = jax.random.split(rng_key, n)
     return jax.vmap(single_sample_fn)(rng_keys)
 
-def sample_multi_prior_predictive(rng_key, n, model, model_args, substitutes=None, with_intermediates=False):
+def sample_multi_prior_predictive(rng_key, n, model, model_args,
+        substitutes=None, with_intermediates=False):
     """ Samples n times from the prior predictive distribution.
 
     Individual sample sites, as designated by `sample`, can be frozen to
@@ -515,7 +533,8 @@ def sample_multi_prior_predictive(rng_key, n, model, model_args, substitutes=Non
     )
     return _sample_a_lot(rng_key, n, single_sample_fn)
 
-def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide, guide_args, params, with_intermediates=False):
+def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide,
+        guide_args, params, with_intermediates=False):
     """ Samples n times from the posterior predictive distribution.
 
     Note that if the model function is written in such a way that it returns, e.g.,
@@ -547,12 +566,20 @@ def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide, guid
 def map_args_obs_to_shape(obs, *args, **kwargs):
     return unvectorize_shape_2d(obs), kwargs, {'obs': obs}
 
-def make_observed_model(model, obs_to_model_args_fn=None):
-    if obs_to_model_args_fn is None:
-        def map_args_identity(*args, **kwargs):
-            return args, kwargs, dict()
-        obs_to_model_args_fn = map_args_identity
+def make_observed_model(model, obs_to_model_args_fn):
+    """ Transforms a generative model function into one with fixed observations
+    for likelihood evaluation in the SVI algorithm.
 
+    :param model: Any generative model function using the numpyro `sample`
+        primitive.
+    :param obs_to_model_args_fn: A function mapping from an argument list compatible
+        with SVI (i.e., accepting a batch of observations) to that of `model`. The
+        mapping function can take arbitrary arguments and must return a tuple
+        (args, kwargs, observations), where args and kwargs are passed to `model`
+        as argument and keyword arguments and observations is a dictionary of
+        observations for sample sites in `model` that will be fixed using the
+        `substitute` handler.
+    """
     def transformed_model_fn(*args, **kwargs):
         mapped_args, mapped_kwargs, fixed_obs = obs_to_model_args_fn(*args, **kwargs)
         return substitute(model, param_map=fixed_obs)(*mapped_args, **mapped_kwargs)

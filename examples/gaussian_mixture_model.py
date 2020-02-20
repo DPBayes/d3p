@@ -43,8 +43,6 @@ def map_model_args(obs, k, num_obs_total=None):
     batch_size, d = unvectorize_shape_2d(obs)
     return (k, batch_size, d), {'num_obs_total': num_obs_total}, {'obs': obs}
 
-model_obs = make_observed_model(model, map_model_args)
-
 def guide(k, d):
     # the latent MixGaus distribution which learns the parameters
     mus_loc = param('mus_loc', np.zeros((k, d)))
@@ -59,8 +57,6 @@ def map_guide_args(obs, k, num_obs_total=None):
     assert(np.ndim(obs) <= 2)
     _, d = unvectorize_shape_2d(obs)
     return (k, d), {}, {}
-
-guide_obs = make_observed_model(guide, map_guide_args)
 
 def create_toy_data(rng_key, N, d):
     """Creates some toy data (for training and testing)"""
@@ -159,9 +155,9 @@ def main(args):
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
     svi = DPSVI(
-        model_obs, guide_obs, optimizer, ELBO(),
+        model, guide, optimizer, ELBO(), k = k,
         dp_scale=0.01,  clipping_threshold=20., num_obs_total=args.num_samples,
-        k = k
+        map_model_args_fn=map_model_args, map_guide_args_fn=map_guide_args
     )
 
     rng, svi_init_rng, fetch_rng = random.split(rng, 3)

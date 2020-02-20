@@ -96,14 +96,12 @@ def model(N, z_dim, hidden_dim, out_dim, num_obs_total=None):
         x = sample('obs', dist.Bernoulli(img_loc)) # outputs x are sampled from bernoulli distribution depending on z and conditioned on the observed data
         return x
 
-def model_args_map(batch, z_dim, hidden_dim, num_obs_total=None):
+def map_model_args(batch, z_dim, hidden_dim, num_obs_total=None):
     assert(np.ndim(batch) == 3 or np.ndim(batch) == 2)
     batch_size = unvectorize_shape_3d(batch)[0]
     batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
     out_dim = np.shape(batch)[1]
     return (batch_size, z_dim, hidden_dim, out_dim), {'num_obs_total': num_obs_total}, {'obs': batch}
-
-model_obs = make_observed_model(model, model_args_map)
 
 def guide(batch, z_dim, hidden_dim, num_obs_total=None):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|q)
@@ -120,8 +118,6 @@ def guide(batch, z_dim, hidden_dim, num_obs_total=None):
         z_loc, z_std = encode(batch) # obtain mean and variance for q(z) ~ p(z|x) from encoder
         z = sample('z', dist.Normal(z_loc, z_std)) # z follows q(z)
         return z
-
-guide_obs = guide
 
 @jit
 def binarize(rng, batch):
@@ -169,9 +165,10 @@ def main(args):
     #   between 100 and 200 but in epoch 20 usually at 280 to 290.
     #   value for dp_scale completely made up currently.
     svi = DPSVI(
-        model_obs, guide_obs, optimizer, ELBO(),                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
+        model, guide, optimizer, ELBO(),                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
         dp_scale=0.01, clipping_threshold=300.,
-        num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim
+        num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim,
+        map_model_args_fn=map_model_args
     )
 
     # preparing random number generators and initializing svi
