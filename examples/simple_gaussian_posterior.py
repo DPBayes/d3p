@@ -22,10 +22,10 @@ from numpyro.primitives import param, sample
 from numpyro.infer import ELBO
 import numpyro.optim as optimizers
 
-from dppp.svi import DPSVI, make_observed_model, map_args_obs_to_shape
+from dppp.svi import DPSVI
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.util import unvectorize_shape_2d
-from dppp.svi import sample_prior_predictive
+from dppp.modelling import sample_prior_predictive
 
 def model(N, d, num_obs_total=None):
     """Defines the generative probabilistic model: p(x|z)p(z)

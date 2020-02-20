@@ -26,7 +26,8 @@ import numpyro.distributions as dist
 from numpyro.primitives import sample
 from numpyro.infer import ELBO
 
-from dppp.svi import DPSVI, sample_multi_posterior_predictive, make_observed_model
+from dppp.svi import DPSVI
+from dppp.modelling import sample_multi_posterior_predictive
 from dppp.util import unvectorize_shape_3d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 

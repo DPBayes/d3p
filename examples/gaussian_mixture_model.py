@@ -23,7 +23,8 @@ import numpyro.optim as optimizers
 from numpyro.primitives import sample, param
 from numpyro.infer import ELBO
 
-from dppp.svi import DPSVI, sample_prior_predictive, make_observed_model
+from dppp.svi import DPSVI
+from dppp.modelling import sample_prior_predictive
 from dppp.util import unvectorize_shape_2d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.gmm import GaussianMixture
