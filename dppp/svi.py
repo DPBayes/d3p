@@ -73,7 +73,7 @@ class TunableSVI(SVI):
         per_example_grad_manipulation_fn and loss_combiner_fn.
     :param map_model_args_fn: An optional function which transforms arguments for
         `model`. See `make_observed_model` for details.
-    :param map_model_args_fn: An optional function which transforms arguments for
+    :param map_guide_args_fn: An optional function which transforms arguments for
         `guide`. See `make_observed_model` for details.
     :param static_kwargs: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
@@ -362,7 +362,7 @@ class DPSVI(TunableSVI):
         full data set. To be used iff examples are scaled in a minibatch
     :param map_model_args_fn: An optional function which transforms arguments for
         `model`. See `make_observed_model` for details.
-    :param map_model_args_fn: An optional function which transforms arguments for
+    :param map_guide_args_fn: An optional function which transforms arguments for
         `guide`. See `make_observed_model` for details.
     :param static_kwargs: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
