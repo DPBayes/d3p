@@ -48,7 +48,7 @@ class TunableSVI(SVI):
     To obtain the per-example gradients, the `per_example_loss_fn` is evaluated
     for (and the gradient take wrt) each example in a vectorized manner (using
     `jax.vmap`).
-    
+
     For this to work, the following requirements are imposed upon
     `per_example_loss_fn`:
     - in per-example evaluation, the leading dimension of the batch (indicating
@@ -78,7 +78,7 @@ class TunableSVI(SVI):
     def __init__(self, model, guide, optim, per_example_loss,
             per_example_grad_manipulation_fn=None,
             batch_grad_manipulation_fn=None, **static_kwargs):
-        
+
         self.px_grad_manipulation_fn = per_example_grad_manipulation_fn
         self.batch_grad_manipulation_fn = batch_grad_manipulation_fn
 
@@ -171,7 +171,7 @@ class TunableSVI(SVI):
         """
         # get total loss and loss combiner vjp func
         loss_val, loss_combine_vjp = jax.vjp(self.loss.combiner_fn, px_loss)
-        
+
         # loss_combine_vjp gives us the backward differentiation function
         #   from combined loss to per-example losses. we use it to get the
         #   (1xbatch_size) Jacobian and construct a function that takes
@@ -207,7 +207,7 @@ class TunableSVI(SVI):
         )
 
         return svi_state, loss_val, grads
-        
+
 
     def _apply_gradient(self, svi_state, batch_gradient):
         """ Takes a (batch) gradient step in parameter space using the specified
@@ -234,7 +234,7 @@ class TunableSVI(SVI):
         svi_state, loss, gradient = self._combine_and_transform_gradient(
             svi_state, per_example_grads, per_example_loss, tree_def
         )
-        
+
         return self._apply_gradient(svi_state, gradient), loss
 
 
@@ -252,7 +252,7 @@ def full_norm(list_of_parts_or_tree, ord=2):
         list_of_parts = list_of_parts_or_tree
     else:
         list_of_parts = jax.tree_leaves(list_of_parts_or_tree)
-    
+
     if list_of_parts is None or len(list_of_parts) == 0:
         return 0.
 
@@ -311,19 +311,19 @@ def get_gradients_clipping_function(c):
         return clip_gradient(list_of_gradient_parts, c)
     return gradient_clipping_fn_inner
 
-
 class DPSVI(TunableSVI):
     """
     Differentially-Private Stochastic Variational Inference given a per-example
     loss objective and a gradient clipping threshold.
 
     This is identical to numpyro's `svi` but adds differential privacy by
-    clipping gradients per example and perturbing the batch gradient.
+    clipping gradients per example to the given clipping_threshold and
+    perturbing the batch gradient with noise determined by sigma*clipping_threshold.
 
     To obtain the per-example gradients, the `per_example_loss_fn` is evaluated
     for (and the gradient take wrt) each example in a vectorized manner (using
     `jax.vmap`).
-    
+
     For this to work, the following requirements are imposed upon
     `per_example_loss_fn`:
     - in per-example evaluation, the leading dimension of the batch (indicating
@@ -344,8 +344,6 @@ class DPSVI(TunableSVI):
         of each per-example gradient is clipped.
     :param dp_scale: Scale parameter for the Gaussian mechanism applied to
         each dimension of the batch gradients.
-    :param rng: PRNG key used in sampling the Gaussian mechanism applied to
-        batch gradients.
     :param static_kwargs: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     """
@@ -361,7 +359,7 @@ class DPSVI(TunableSVI):
         @jax.jit
         def grad_perturbation_fn(list_of_grads, batch_size, rng):
             def perturb_one(grad, site_rng):
-                noise = dist.Normal(0, dp_scale / batch_size).sample(
+                noise = dist.Normal(0, dp_scale * clipping_threshold / batch_size).sample(
                     site_rng, sample_shape=grad.shape
                 )
                 return grad + noise
@@ -370,7 +368,7 @@ class DPSVI(TunableSVI):
             # todo(lumip): somehow parallelizing/vmapping this would be great
             #   but current vmap will instead vmap over each position in it
             list_of_grads = tuple(
-                perturb_one(grad, site_rng) 
+                perturb_one(grad, site_rng)
                 for grad, site_rng in zip(list_of_grads, per_site_rngs)
             )
             return list_of_grads
