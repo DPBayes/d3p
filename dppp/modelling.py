@@ -1,7 +1,6 @@
 import jax
-from numpyro.handlers import seed, trace, substitute
+from numpyro.handlers import seed, trace, substitute, Messenger
 from dppp.util import unvectorize_shape_2d
-
 
 def get_samples_from_trace(trace, with_intermediates=False):
     """ Extracts all sample values from a numpyro trace.
@@ -21,7 +20,7 @@ def get_samples_from_trace(trace, with_intermediates=False):
     return samples
 
 def sample_prior_predictive(rng_key, model, model_args, 
-        substitutes=None, with_intermediates=False):
+        substitutes=None, with_intermediates=False, **kwargs):
     """ Samples once from the prior predictive distribution.
 
     Individual sample sites, as designated by `sample`, can be frozen to
@@ -41,6 +40,7 @@ def sample_prior_predictive(rng_key, model, model_args,
         sample sites.
     :param with_intermediates: If True, intermediate(/latent) samples from
         sample site distributions are included in the result.
+    :param **kwargs: Keyword arguments passed to the model function.
     :return: Dictionary of sampled values associated with the names given
         via `sample()` in the model. If with_intermediates is True,
         dictionary values are tuples where the first element is the final
@@ -48,11 +48,11 @@ def sample_prior_predictive(rng_key, model, model_args,
     """
     if substitutes is None: substitutes = dict()
     model = seed(substitute(model, param_map=substitutes), rng_key)
-    t = trace(model).get_trace(*model_args)
+    t = trace(model).get_trace(*model_args, **kwargs)
     return get_samples_from_trace(t, with_intermediates)
 
 def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args,
-        params, with_intermediates=False):
+        params, with_intermediates=False, **kwargs):
     """ Samples once from the posterior predictive distribution.
 
     Note that if the model function is written in such a way that it returns, e.g.,
@@ -70,6 +70,7 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args,
         designated by call to `param` in the guide
     :param with_intermediates: If True, intermediate(/latent) samples from
         sample site distributions are included in the result.
+    :param **kwargs: Keyword arguments passed to the model and guide functions.
     :return: Dictionary of sampled values associated with the names given
         via `sample()` in the model. If with_intermediates is True,
         dictionary values are tuples where the first element is the final
@@ -79,7 +80,7 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args,
 
     guide = seed(substitute(guide, param_map=params), guide_rng_key)
     guide_samples = get_samples_from_trace(
-        trace(guide).get_trace(*guide_args), with_intermediates
+        trace(guide).get_trace(*guide_args, **kwargs), with_intermediates
     )
 
     model_params = dict(**params)
@@ -90,7 +91,7 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args,
 
     model = seed(substitute(model, param_map=model_params), model_rng_key)
     model_samples = get_samples_from_trace(
-        trace(model).get_trace(*model_args), with_intermediates
+        trace(model).get_trace(*model_args, **kwargs), with_intermediates
     )
 
     guide_samples.update(model_samples)
@@ -101,7 +102,7 @@ def _sample_a_lot(rng_key, n, single_sample_fn):
     return jax.vmap(single_sample_fn)(rng_keys)
 
 def sample_multi_prior_predictive(rng_key, n, model, model_args,
-        substitutes=None, with_intermediates=False):
+        substitutes=None, with_intermediates=False, **kwargs):
     """ Samples n times from the prior predictive distribution.
 
     Individual sample sites, as designated by `sample`, can be frozen to
@@ -123,6 +124,7 @@ def sample_multi_prior_predictive(rng_key, n, model, model_args,
         sample sites.
     :param with_intermediates: If True, intermediate(/latent) samples from
         sample site distributions are included in the result.
+    :param **kwargs: Keyword arguments passed to the model function.
     :return: Dictionary of sampled values associated with the names given
         via `sample()` in the model. If with_intermediates is True,
         dictionary values are tuples where the first element is the final
@@ -130,12 +132,12 @@ def sample_multi_prior_predictive(rng_key, n, model, model_args,
     """
     single_sample_fn = lambda rng: sample_prior_predictive(
         rng, model, model_args, substitutes=substitutes,
-        with_intermediates=with_intermediates
+        with_intermediates=with_intermediates, **kwargs
     )
     return _sample_a_lot(rng_key, n, single_sample_fn)
 
 def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide,
-        guide_args, params, with_intermediates=False):
+        guide_args, params, with_intermediates=False, **kwargs):
     """ Samples n times from the posterior predictive distribution.
 
     Note that if the model function is written in such a way that it returns, e.g.,
@@ -154,6 +156,7 @@ def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide,
         designated by call to `param` in the guide
     :param with_intermediates: If True, intermediate(/latent) samples from
         sample site distributions are included in the result.
+    :param **kwargs: Keyword arguments passed to the model and guide functions.
     :return: Dictionary of sampled values associated with the names given
         via `sample()` in the model. If with_intermediates is True,
         dictionary values are tuples where the first element is the final
@@ -161,12 +164,30 @@ def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide,
     """
     single_sample_fn = lambda rng: sample_posterior_predictive(
         rng, model, model_args, guide, guide_args, params,
-        with_intermediates=with_intermediates
+        with_intermediates=with_intermediates, **kwargs
     )
     return _sample_a_lot(rng_key, n, single_sample_fn)
 
 def map_args_obs_to_shape(obs, *args, **kwargs):
     return unvectorize_shape_2d(obs), kwargs, {'obs': obs}
+
+class observe(Messenger):
+    """ Numpyro messenger injecting observations for a sample site.
+
+    This is similar to the `substitute` handler but additionally marks the
+    sample site as observed.
+    """
+    def __init__(self, fn=None, param_map=None):
+        self.param_map = param_map
+        super(observe, self).__init__(fn)
+
+    def process_message(self, msg):
+        if msg['type'] not in ('sample'):
+            return
+        if msg['name'] in self.param_map:
+            msg['value'] = self.param_map[msg['name']]
+            msg['is_observed'] = True
+
 
 def make_observed_model(model, obs_to_model_args_fn):
     """ Transforms a generative model function into one with fixed observations
@@ -180,9 +201,9 @@ def make_observed_model(model, obs_to_model_args_fn):
         (args, kwargs, observations), where args and kwargs are passed to `model`
         as argument and keyword arguments and observations is a dictionary of
         observations for sample sites in `model` that will be fixed using the
-        `substitute` handler.
+        `observe` handler.
     """
     def transformed_model_fn(*args, **kwargs):
         mapped_args, mapped_kwargs, fixed_obs = obs_to_model_args_fn(*args, **kwargs)
-        return substitute(model, param_map=fixed_obs)(*mapped_args, **mapped_kwargs)
+        return observe(model, param_map=fixed_obs)(*mapped_args, **mapped_kwargs)
     return transformed_model_fn
