@@ -2,7 +2,6 @@ absl-py==0.9.0
 astroid==2.3.3
 certifi==2020.4.5.1
 cycler==0.10.0
--e git+git@github.com:PROBIC/DP-probabilistic-programming.git@007dc6b32a2d2bf71aa07038e969e1bf9ebba8db#egg=dppp
 fastcache==1.1.0
 isort==4.3.21
 jax==0.1.57
