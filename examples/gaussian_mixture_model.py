@@ -1,12 +1,6 @@
 """Gaussian mixture model example
 
 This example demonstrates inferring a Gaussian mixture model.
-
-note(lumip): Currently infers seems to
-be unable to learn empty clusters (if the model is configured with more
-components than there are in the data. This is (was) possible in the old (removed)
-alternative implementation which had other issues).
-Somewhat prone to producing NaN values in certain conditions.
 """
 
 import os
@@ -14,7 +8,7 @@ import os
 # allow example to find dppp without installing
 import sys
 sys.path.append(os.path.dirname(sys.path[0]))
-#### 
+####
 
 import argparse
 import time
@@ -64,7 +58,8 @@ def guide(k, obs=None, num_obs_total=None, d=None):
     mus_loc = param('mus_loc', np.zeros((k, d)))
     mus = sample('mus', dist.Normal(mus_loc, 1.))
     sigs = sample('sigs', dist.InverseGamma(1., 1.), obs=np.ones_like(mus))
-    alpha = param('alpha', np.ones(k))
+    alpha_log = param('alpha_log', np.zeros(k))
+    alpha = np.exp(alpha_log)
     pis = sample('pis', dist.Dirichlet(alpha))
     return pis, mus, sigs
 
@@ -128,7 +123,7 @@ def compute_assignment_accuracy(
     # mapping as a base to counter that
     inv_mode_map = {j:j for j in range(k)}
     inv_mode_map.update({mode_map[j]:j for j in range(k)})
-    
+
     # we next obtain the assignments for the data according to the model and
     # pass them through the inverse map we just build
     post_data_assignment = compute_assignment_log_posterior(
@@ -174,7 +169,7 @@ def main(args):
     # note(lumip): value for c currently completely made up
     #   value for dp_scale completely made up currently.
     svi = DPSVI(
-        model_fixed, guide_fixed, optimizer, ELBO(), 
+        model_fixed, guide_fixed, optimizer, ELBO(),
         dp_scale=0.01,  clipping_threshold=20., num_obs_total=args.num_samples
     )
 
@@ -195,7 +190,7 @@ def main(args):
             return svi_state, loss
 
         return lax.fori_loop(0, num_batch, body_fn, (svi_state, 0.))
-    
+
     @jit
     def eval_test(svi_state, batchifier_state, num_batch):
         def body_fn(i, loss_sum):
@@ -232,7 +227,7 @@ def main(args):
     params = svi.get_params(svi_state)
     print(params)
     posterior_modes = params['mus_loc']
-    posterior_pis = dist.Dirichlet(params['alpha']).mean
+    posterior_pis = dist.Dirichlet(np.exp(params['alpha_log'])).mean
     print("MAP estimate of mixture weights: {}".format(posterior_pis))
     print("MAP estimate of mixture modes  : {}".format(posterior_modes))
 
