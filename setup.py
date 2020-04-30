@@ -14,7 +14,8 @@ setup(
     packages=find_packages(include=['dppp', 'dppp.*']),
     author='PADS @ Helsinki University and Aalto University',
     install_requires=[
-        'numpyro >= 0.2.4'
+        'numpyro >= 0.2.4',
+        'fourier-accountant >= 0.12.0'
     ],
     extras_require={
         'examples': ['matplotlib'],
