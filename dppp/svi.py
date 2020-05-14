@@ -407,22 +407,10 @@ class DPSVI(TunableSVI):
     def get_epsilon(self, target_delta, q, num_epochs=None, num_iter=None):
         num_iter = self._validate_epochs_and_iter(num_epochs, num_iter, q)
 
-        eps = get_epsilon_S(target_delta, self._dp_scale, q, ncomp=num_iter)
-        return eps
-
-    def get_epsilon_remove_relation(self, target_delta, q, num_epochs=None, num_iter=None):
-        num_iter = self._validate_epochs_and_iter(num_epochs, num_iter, q)
-
         eps = get_epsilon_R(target_delta, self._dp_scale, q, ncomp=num_iter)
         return eps
 
     def get_delta(self, target_epsilon, q, num_epochs=None, num_iter=None):
-        num_iter = self._validate_epochs_and_iter(num_epochs, num_iter, q)
-
-        eps = get_delta_S(target_epsilon, self._dp_scale, q, ncomp=num_iter)
-        return eps
-
-    def get_delta_remove_relation(self, target_epsilon, q, num_epochs=None, num_iter=None):
         num_iter = self._validate_epochs_and_iter(num_epochs, num_iter, q)
 
         eps = get_delta_R(target_epsilon, self._dp_scale, q, ncomp=num_iter)
