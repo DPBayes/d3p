@@ -29,7 +29,7 @@ class CombinedLoss(object):
         self.combiner_fn = combiner_fn
 
     def loss(self, rng_key, param_map, model, guide, *args, **kwargs):
-        return np.sum(self.px_loss.loss(
+        return self.combiner_fn(self.px_loss.loss(
             rng_key, param_map, model, guide, *args, **kwargs
         ))
 
@@ -82,7 +82,7 @@ class TunableSVI(SVI):
         self.px_grad_manipulation_fn = per_example_grad_manipulation_fn
         self.batch_grad_manipulation_fn = batch_grad_manipulation_fn
 
-        total_loss = CombinedLoss(per_example_loss)
+        total_loss = CombinedLoss(per_example_loss, combiner_fn = np.sum)
 
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
 
@@ -198,7 +198,7 @@ class TunableSVI(SVI):
             rng_key, rng_key_step = random.split(svi_state.rng_key, 2)
             svi_state = SVIState(svi_state.optim_state, rng_key)
             grads_list = self.batch_grad_manipulation_fn(
-                grads_list, batch_size, rng=rng_key_step
+                grads_list, rng=rng_key_step
             )
 
         # reassemble the jax tree used by optimizer for the final gradients
@@ -277,38 +277,42 @@ def normalize_gradient(list_of_gradient_parts, ord=2):
     normalized = [norm_inv * g for g in list_of_gradient_parts]
     return normalized
 
-def clip_gradient(list_of_gradient_parts, c):
+def clip_gradient(list_of_gradient_parts, c, rescale_factor = 1.):
     """Clips the total norm of a gradient by a given value C.
 
     The norm is computed by interpreting the given list of parts as a single
     vector (see `full_norm`). Each entry is then scaled by the factor
-    (1/max(1, norm/C)) which effectively clips the norm to C.
+    (1/max(1, norm/C)) which effectively clips the norm to C. Additionally,
+    the gradient can be scaled by a given factor before clipping.
 
     :param list_of_gradient_parts: A list of values (of any shape) that make up
         the overall gradient vector.
     :param c: The clipping threshold C.
+    :param rescale_factor: Factor to scale the gradient by before clipping.
     :return: Clipped gradients given in the same format/layout/shape as
         list_of_gradient_parts.
     """
     if c == 0.:
         raise ValueError("The clipping threshold must be greater than 0.")
-    norm = full_norm(list_of_gradient_parts)
+    norm = full_norm(list_of_gradient_parts) * rescale_factor # norm of rescale_factor * grad
     normalization_constant = 1./np.maximum(1., norm/c)
-    clipped_grads = [g*normalization_constant for g in list_of_gradient_parts]
+    f = rescale_factor * normalization_constant # to scale grad to max(rescale_factor * grad, C)
+    clipped_grads = [f * g for g in list_of_gradient_parts]
     # assert(np.all(full_gradient_norm(clipped_grads)<c)) # jax doesn't like this
     return clipped_grads
 
-def get_gradients_clipping_function(c):
+def get_gradients_clipping_function(c, rescale_factor):
     """Factory function to obtain a gradient clipping function for a fixed
     clipping threshold C.
 
     :param c: The clipping threshold C.
+    :param rescale_factor: Factor to scale the gradient by before clipping.
     :return: `clip_gradient` function with fixed threshold C. Only takes a
         list_of_gradient_parts as argument.
     """
     @functools.wraps(clip_gradient)
     def gradient_clipping_fn_inner(list_of_gradient_parts):
-        return clip_gradient(list_of_gradient_parts, c)
+        return clip_gradient(list_of_gradient_parts, c, rescale_factor)
     return gradient_clipping_fn_inner
 
 class DPSVI(TunableSVI):
@@ -344,22 +348,29 @@ class DPSVI(TunableSVI):
         of each per-example gradient is clipped.
     :param dp_scale: Scale parameter for the Gaussian mechanism applied to
         each dimension of the batch gradients.
+    :param num_obs_total: The total number of examples/observations in the
+        full data set. To be used iff examples are scaled in a minibatch
+        `guide`. See `make_observed_model` for details.
     :param static_kwargs: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     """
 
     def __init__(self, model, guide, optim, per_example_loss,
-            clipping_threshold, dp_scale, **static_kwargs):
+            clipping_threshold, dp_scale, num_obs_total = 1, **static_kwargs):
 
 
+        # Using a minibatch environment will scale up the log likelihood contribution
+        # of each example by num_obs_total to maintain relative likelihood to prior ratio.
+        # To ensure that clipping and noise are correct, we have to scale back
+        # the gradient so that example contributions are unscaled
         gradients_clipping_fn = get_gradients_clipping_function(
-            clipping_threshold
+            clipping_threshold, 1./num_obs_total
         )
 
         @jax.jit
-        def grad_perturbation_fn(list_of_grads, batch_size, rng):
+        def grad_perturbation_fn(list_of_grads, rng):
             def perturb_one(grad, site_rng):
-                noise = dist.Normal(0, dp_scale * clipping_threshold / batch_size).sample(
+                noise = dist.Normal(0, dp_scale * clipping_threshold).sample(
                     site_rng, sample_shape=grad.shape
                 )
                 return grad + noise
@@ -368,14 +379,18 @@ class DPSVI(TunableSVI):
             # todo(lumip): somehow parallelizing/vmapping this would be great
             #   but current vmap will instead vmap over each position in it
             list_of_grads = tuple(
-                perturb_one(grad, site_rng)
+                perturb_one(grad, site_rng) * num_obs_total
                 for grad, site_rng in zip(list_of_grads, per_site_rngs)
             )
+            # we multiply by num_obs_total in the above to revert the downscaling
+            # we applied before clipping, so that the final gradient is scaled
+            # as expected without DP
             return list_of_grads
 
         super().__init__(
             model, guide, optim, per_example_loss,
-            gradients_clipping_fn, grad_perturbation_fn, **static_kwargs
+            gradients_clipping_fn, grad_perturbation_fn,
+            num_obs_total=num_obs_total, **static_kwargs
         )
 
 def get_samples_from_trace(trace, with_intermediates=False):
