@@ -12,11 +12,11 @@ def map_over_secondary_dims(f):
     """
     Maps a function taking a over all secondary axes of an array.
 
-    f is assumed to take a vector of shape (a,) and output a scalar. 
+    f is assumed to take a vector of shape (a,) and output a scalar.
     Returns a function f_mapped that for an input T with shape
     (a, b_1, ..., b_k) applies f on the entries along the first axis
     over all other axes, i.e., to all T[:,i_1, ..., i_k].
-    
+
     The output of f_mapped will be an array of shape [b_1, ...., b_k] where
     each entry is the corresponding output of f applied as described above.
 
@@ -24,7 +24,7 @@ def map_over_secondary_dims(f):
     :return: function f_mapped applying f to each first axis vector in an
         arbitrary shaped input
 
-    Example: 
+    Example:
     >>> T = [
     >>>      [ [ a_1, a_2 ], [ a_3, a_4 ] ],
     >>>      [ [ b_1, b_2 ], [ b_3, b_4 ] ],
@@ -113,7 +113,7 @@ def is_int_scalar(x):
     """Returns True if the input can be interepreted as a scalar integer value.
 
     Works with jax.jit.
-    
+
     :param x: Anything that might be an integer scalar.
     """
     return is_scalar(x) and is_integer(x)
@@ -278,38 +278,51 @@ def are_trees_close(a, b):
 
 @partial(jax.jit, static_argnums=(2,3))
 def sample_from_array(rng_key, x, n, axis):
-    """ Samples n elements from a given array without replacement.
+    capacity = np.uint32(np.shape(x)[axis])
+    data = np.arange(n, dtype=np.uint32)
 
-    Uses n iterations of the Fisher-Yates shuffling algorithm to uniformly draw
-    n unique elements from x along the given axis.
+    seed = jax.random.randint(
+            rng_key, shape=(1,),
+            minval=0, maxval=capacity, dtype=np.uint32
+         ).squeeze()
 
-    :param rng_key: jax prng key used for sampling.
-    :param x: the array from which elements are sampled
-    :param n: how many elements to return
-    :param axis: axis along which samples are drawn
-    """
-    if axis >= np.ndim(x):
-        raise IndexError("The axis along which to sample does not exist in the array")
-    n_aval = np.shape(x)[axis]
-    if n > n_aval:
-        raise ValueError("Cannot draw more elements than present in the array!")
+    def permute32(vals):
+        def hash_func_in(x):
+            x = np.bitwise_xor(x, np.right_shift(x, np.uint32(16)))
+            x *= np.uint32(0x85ebca6b)
+            x = np.bitwise_xor(x, np.right_shift(x, np.uint32(13)))
+            x *= np.uint32(0xc2b2ae35)
+            x = np.bitwise_xor(x, np.right_shift(x, np.uint32(16)))
 
-    upper_loop_bound = np.minimum(n, n_aval - 1)
-    idxs = jax.random.randint(
-        rng_key, shape=(upper_loop_bound,),
-        minval=np.arange(0, upper_loop_bound), maxval=n_aval
-    )
+            return x
 
-    def loop_body(i, vals):
-        # fisher-yates iteration: swap element at i with the one indicated
-        # by random draw from the (n-i) not-yet-iterated-over elements
-        idx = jax.lax.dynamic_index_in_dim(idxs, i, axis=0, keepdims=False)
-        val = jax.lax.dynamic_index_in_dim(vals, idx, axis=axis)
-        old_val = jax.lax.dynamic_index_in_dim(vals, i, axis=axis)
-        vals = jax.lax.dynamic_update_index_in_dim(vals, val, i, axis=axis)
-        vals = jax.lax.dynamic_update_index_in_dim(vals, old_val, idx, axis=axis)
-        return vals
-    
-    shuffled = jax.lax.fori_loop(0, upper_loop_bound, loop_body, x)
-    shuffled = jax.lax.dynamic_slice_in_dim(shuffled, 0, n, axis=axis)
-    return shuffled
+        num_iters = np.uint32(8)
+
+        bits = np.uint32(len(bin(capacity)) - 2)
+        bits_lower = np.right_shift(bits, 1)
+        bits_upper = bits - bits_lower
+        mask_lower = (np.left_shift(np.uint32(1), bits_lower)) - np.uint32(1)
+
+        seed_offst = hash_func_in(seed)
+        position = vals
+
+        def iter_func(position):
+            for j in range(num_iters):
+                j = np.uint32(j)
+                upper = np.right_shift(position, bits_lower)
+                lower = np.bitwise_and(position, mask_lower)
+                mixer = hash_func_in(upper + seed_offst + j)
+
+                tmp = np.bitwise_xor(lower, mixer)
+                position = upper + (np.left_shift(np.bitwise_and(tmp, mask_lower), bits_upper))
+            return position
+
+        position = iter_func(position)
+        position = jax.lax.while_loop(lambda position: position >= capacity, iter_func, position)
+
+        return position
+
+    func = jax.vmap(permute32)
+    a = func(data)
+
+    return a
