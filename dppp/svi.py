@@ -12,10 +12,13 @@ import jax.numpy as np
 
 from numpyro.infer.svi import SVI, SVIState
 import numpyro.distributions as dist
+from numpyro.optim import _NumpyroOptim
 
 from dppp.util import map_over_secondary_dims, example_count
 from dppp.modelling import make_observed_model
 
+from fourier_accountant.compute_eps import get_epsilon_S, get_epsilon_R
+from fourier_accountant.compute_delta import get_delta_S, get_delta_R
 
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
     value_and_grad_fun = jax.value_and_grad(fun, argnums, has_aux, holomorphic)
@@ -95,6 +98,19 @@ class TunableSVI(SVI):
         total_loss = CombinedLoss(per_example_loss, combiner_fn = np.sum)
 
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
+
+    def init(self, *args, **kwargs):
+        ## note(lumip):
+        ## hotfix for numpyro issue https://github.com/pyro-ppl/numpyro/issues/602
+        ## which causes double compilation of model/guide functions.
+        ## can be removed once the corresponding numpyro fix is in a released
+        ## version we depend on.
+        svi_state = super().init(*args, **kwargs)
+        if isinstance(self.optim, _NumpyroOptim):
+            optim_state = svi_state.optim_state
+            optim_state = (np.array(optim_state[0]), *optim_state[1:])
+            svi_state = SVIState(optim_state, svi_state.rng_key)
+        return svi_state
 
     def _compute_per_example_gradients(self, svi_state, *args, **kwargs):
         """ Computes the raw per-example gradients of the model.
@@ -380,6 +396,8 @@ class DPSVI(TunableSVI):
         gradients_clipping_fn = get_gradients_clipping_function(
             clipping_threshold, 1./num_obs_total
         )
+        self._dp_scale = dp_scale
+        self._clipping_threshold = clipping_threshold
 
         @jax.jit
         def grad_perturbation_fn(list_of_grads, rng):
@@ -407,3 +425,22 @@ class DPSVI(TunableSVI):
             map_model_args_fn, map_guide_args_fn,
             num_obs_total=num_obs_total, **static_kwargs
         )
+
+    def _validate_epochs_and_iter(self, num_epochs, num_iter, q):
+        if num_epochs is not None:
+            num_iter = num_epochs / q
+        if num_iter is None:
+            raise ValueError("A value must be supplied for either num_iter or num_epochs")
+        return num_iter
+
+    def get_epsilon(self, target_delta, q, num_epochs=None, num_iter=None):
+        num_iter = self._validate_epochs_and_iter(num_epochs, num_iter, q)
+
+        eps = get_epsilon_R(target_delta, self._dp_scale, q, ncomp=num_iter)
+        return eps
+
+    def get_delta(self, target_epsilon, q, num_epochs=None, num_iter=None):
+        num_iter = self._validate_epochs_and_iter(num_epochs, num_iter, q)
+
+        eps = get_delta_R(target_epsilon, self._dp_scale, q, ncomp=num_iter)
+        return eps
