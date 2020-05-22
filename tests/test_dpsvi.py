@@ -1,4 +1,4 @@
-""" tests that the AdaDP optimizer works correctly
+""" tests that the components of DPSVI class work as expected
 """
 import unittest
 
@@ -15,14 +15,18 @@ class DPSVITest(unittest.TestCase):
     def setUp(self):
         self.rng = jax.random.PRNGKey(9782346)
         self.batch_size = 10
+        self.num_obs_total = 100
         self.px_grads = ((
-            np.zeros((self.batch_size, 1000)),
-            np.zeros((self.batch_size, 1000))
+            np.zeros((self.batch_size, 10000)),
+            np.zeros((self.batch_size, 10000))
         ))
         self.px_grads_list, self.tree_def = jax.tree_flatten(self.px_grads)
         self.px_loss = np.arange(self.batch_size, dtype=np.float32)
         self.dp_scale = 1.
-        self.svi = DPSVI(None, None, None, None, 1., self.dp_scale)
+        self.clipping_threshold = 2.
+        self.svi = DPSVI(None, None, None, None, self.clipping_threshold,
+            self.dp_scale, num_obs_total=self.num_obs_total
+        )
 
     def test_dp_noise_perturbation(self):
         svi_state = SVIState(None, self.rng)
@@ -34,14 +38,15 @@ class DPSVITest(unittest.TestCase):
 
         self.assertIs(svi_state.optim_state, new_svi_state.optim_state)
         self.assertFalse(np.allclose(svi_state.rng_key, new_svi_state.rng_key))
-        self.assertEqual(np.mean(self.px_loss), loss_val)
+        self.assertEqual(np.sum(self.px_loss), loss_val)
         self.assertEqual(self.tree_def, jax.tree_structure(grads))
 
+        expected_std = self.dp_scale * self.clipping_threshold
         for site in jax.tree_leaves(grads):
             self.assertTrue(
-                np.allclose(self.dp_scale/self.batch_size, np.std(site), atol=1e-2)
+                np.allclose(expected_std, np.std(site)/self.num_obs_total, atol=1e-1)
             )
-            self.assertTrue(np.allclose(0., np.mean(site), atol=1e-2))
+            self.assertTrue(np.allclose(0., np.mean(site)/self.num_obs_total, atol=1e-1))
 
     def test_dp_noise_perturbation_not_deterministic_over_calls(self):
         svi_state = SVIState(None, self.rng)
@@ -55,7 +60,7 @@ class DPSVITest(unittest.TestCase):
                 new_svi_state, self.px_grads_list, self.px_loss, self.tree_def
             )
 
-        some_gradient_noise_is_equal = reduce(lambda are_equal, acc: are_equal or acc, 
+        some_gradient_noise_is_equal = reduce(lambda are_equal, acc: are_equal or acc,
             jax.tree_leaves(
                 jax.tree_multimap(
                     lambda x, y: np.allclose(x, y), first_grads, second_grads
