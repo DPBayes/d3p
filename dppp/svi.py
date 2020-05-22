@@ -13,6 +13,7 @@ import jax.numpy as np
 from numpyro.infer.svi import SVI, SVIState
 import numpyro.distributions as dist
 from numpyro.handlers import seed, trace, substitute
+from numpyro.optim import _NumpyroOptim
 
 from dppp.util import map_over_secondary_dims, example_count
 
@@ -87,6 +88,19 @@ class TunableSVI(SVI):
         total_loss = CombinedLoss(per_example_loss, combiner_fn = np.sum)
 
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
+
+    def init(self, *args, **kwargs):
+        ## note(lumip):
+        ## hotfix for numpyro issue https://github.com/pyro-ppl/numpyro/issues/602
+        ## which causes double compilation of model/guide functions.
+        ## can be removed once the corresponding numpyro fix is in a released
+        ## version we depend on.
+        svi_state = super().init(*args, **kwargs)
+        if isinstance(self.optim, _NumpyroOptim):
+            optim_state = svi_state.optim_state
+            optim_state = (np.array(optim_state[0]), *optim_state[1:])
+            svi_state = SVIState(optim_state, svi_state.rng_key)
+        return svi_state
 
     def _compute_per_example_gradients(self, svi_state, *args, **kwargs):
         """ Computes the raw per-example gradients of the model.
