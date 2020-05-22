@@ -7,7 +7,7 @@ import os
 # allow example to find dppp without installing
 import sys
 sys.path.append(os.path.dirname(sys.path[0]))
-#### 
+####
 
 import argparse
 import time
@@ -101,11 +101,9 @@ def main(args):
     ## Init optimizer and training algorithms
     optimizer = optimizers.Adam(args.learning_rate)
 
-    # note(lumip): value for c currently completely made up
-    #   value for dp_scale completely made up currently.
     svi = DPSVI(
-        model, guide, optimizer, ELBO(), 
-        dp_scale=0.01, clipping_threshold=20.,
+        model, guide, optimizer, ELBO(),
+        dp_scale=args.sigma, clipping_threshold=args.clip_threshold,
         d=args.dimensions, num_obs_total=args.num_samples
     )
 
@@ -113,6 +111,12 @@ def main(args):
     _, batchifier_state = train_init(rng_key=batchifier_rng)
     batch = train_fetch(0, batchifier_state)
     svi_state = svi.init(svi_init_rng, *batch)
+
+    q = args.batch_size/args.num_samples
+    eps = svi.get_epsilon(args.delta, q, num_epochs=args.num_epochs)
+    print("Privacy epsilon {} (for sigma: {}, delta: {}, C: {}, q: {})".format(
+        eps, args.sigma, args.clip_threshold, args.delta, q
+    ))
 
     @jit
     def epoch_train(svi_state, batchifier_state, num_batch):
@@ -178,5 +182,8 @@ if __name__ == "__main__":
     parser.add_argument('-batch-size', default=100, type=int, help='batch size')
     parser.add_argument('-d', '--dimensions', default=4, type=int, help='data dimension')
     parser.add_argument('-N', '--num-samples', default=10000, type=int, help='data samples count')
+    parser.add_argument('--sigma', default=1., type=float, help='privacy scale')
+    parser.add_argument('--delta', default=1/10000, type=float, help='privacy slack parameter delta')
+    parser.add_argument('-C', '--clip-threshold', default=20, type=float, help='clipping threshold for gradients')
     args = parser.parse_args()
     main(args)

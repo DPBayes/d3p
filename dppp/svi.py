@@ -16,6 +16,8 @@ from numpyro.handlers import seed, trace, substitute
 
 from dppp.util import map_over_secondary_dims, example_count
 
+from fourier_accountant.compute_eps import get_epsilon_S, get_epsilon_R
+from fourier_accountant.compute_delta import get_delta_S, get_delta_R
 
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
     value_and_grad_fun = jax.value_and_grad(fun, argnums, has_aux, holomorphic)
@@ -366,6 +368,8 @@ class DPSVI(TunableSVI):
         gradients_clipping_fn = get_gradients_clipping_function(
             clipping_threshold, 1./num_obs_total
         )
+        self._dp_scale = dp_scale
+        self._clipping_threshold = clipping_threshold
 
         @jax.jit
         def grad_perturbation_fn(list_of_grads, rng):
@@ -392,6 +396,26 @@ class DPSVI(TunableSVI):
             gradients_clipping_fn, grad_perturbation_fn,
             num_obs_total=num_obs_total, **static_kwargs
         )
+
+    def _validate_epochs_and_iter(self, num_epochs, num_iter, q):
+        if num_epochs is not None:
+            num_iter = num_epochs / q
+        if num_iter is None:
+            raise ValueError("A value must be supplied for either num_iter or num_epochs")
+        return num_iter
+
+    def get_epsilon(self, target_delta, q, num_epochs=None, num_iter=None):
+        num_iter = self._validate_epochs_and_iter(num_epochs, num_iter, q)
+
+        eps = get_epsilon_R(target_delta, self._dp_scale, q, ncomp=num_iter)
+        return eps
+
+    def get_delta(self, target_epsilon, q, num_epochs=None, num_iter=None):
+        num_iter = self._validate_epochs_and_iter(num_epochs, num_iter, q)
+
+        eps = get_delta_R(target_epsilon, self._dp_scale, q, ncomp=num_iter)
+        return eps
+
 
 def get_samples_from_trace(trace, with_intermediates=False):
     """ Extracts all sample values from a numpyro trace.
