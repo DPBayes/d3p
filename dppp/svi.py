@@ -85,7 +85,7 @@ class TunableSVI(SVI):
         self.px_grad_manipulation_fn = per_example_grad_manipulation_fn
         self.batch_grad_manipulation_fn = batch_grad_manipulation_fn
 
-        total_loss = CombinedLoss(per_example_loss, combiner_fn = np.sum)
+        total_loss = CombinedLoss(per_example_loss, combiner_fn = np.mean)
 
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
 

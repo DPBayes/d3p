@@ -38,7 +38,7 @@ class DPSVITest(unittest.TestCase):
 
         self.assertIs(svi_state.optim_state, new_svi_state.optim_state)
         self.assertFalse(np.allclose(svi_state.rng_key, new_svi_state.rng_key))
-        self.assertEqual(np.sum(self.px_loss), loss_val)
+        self.assertEqual(np.mean(self.px_loss), loss_val)
         self.assertEqual(self.tree_def, jax.tree_structure(grads))
 
         expected_std = self.dp_scale * self.clipping_threshold
