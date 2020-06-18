@@ -1,3 +1,18 @@
+# Copyright -2019 Copyright Contributors to the Pyro project.
+# Copyright 2019- dp³ Developers and their Assignees
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """VAE example from numpyro.
 
 original: https://github.com/pyro-ppl/numpyro/blob/master/examples/vae.py
@@ -8,7 +23,7 @@ import os
 # allow example to find dppp without installing
 import sys
 sys.path.append(os.path.dirname(sys.path[0]))
-#### 
+####
 
 import argparse
 import time
@@ -38,11 +53,11 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
 def encoder(hidden_dim, z_dim):
-    """Defines the encoder, i.e., the network taking us from observations 
+    """Defines the encoder, i.e., the network taking us from observations
         to (a distribution of) latent variables.
 
     z is following a normal distribution, thus needs mean and variance.
-    
+
     Network structure:
     x -> dense layer of hidden_dim with softplus activation --> dense layer of z_dim ( = means/loc of z)
                                                             |-> dense layer of z_dim with (elementwise) exp() as activation func ( = variance of z )
@@ -63,7 +78,7 @@ def encoder(hidden_dim, z_dim):
 def decoder(hidden_dim, out_dim):
     """Defines the decoder, i.e., the network taking us from latent
         variables back to observations (or at least observation space).
-    
+
     Network structure:
     z -> dense layer of hidden_dim with softplus activation -> dense layer of out_dim with sigmoid activation
 
@@ -82,7 +97,7 @@ def model(batch, z_dim, hidden_dim, num_obs_total=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
 
     The model is conditioned on the observed data
-    
+
     :param batch: a batch of observations
     :param hidden_dim: dimensions of the hidden layers in the VAE
     :param z_dim: dimensions of the latent variable / code
@@ -123,7 +138,7 @@ def guide(batch, z_dim, hidden_dim, num_obs_total=None):
 def binarize(rng, batch):
     """Binarizes a batch of observations with values in [0,1] by sampling from
         a Bernoulli distribution and using the original observations as means.
-    
+
     Reason: This example assumes a Bernoulli distribution for the decoder output
     and thus requires inputs to be binary values as well.
 
@@ -165,7 +180,7 @@ def main(args):
     #   between 100 and 200 but in epoch 20 usually at 280 to 290.
     #   value for dp_scale completely made up currently.
     svi = DPSVI(
-        model, guide, optimizer, ELBO(),                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
+        model, guide, optimizer, ELBO(),
         dp_scale=0.01, clipping_threshold=300.,
         num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim
     )
@@ -180,7 +195,7 @@ def main(args):
     # functions for training tasks
     @jit
     def epoch_train(svi_state, batchifier_state, num_batch, rng):
-        """Trains one epoch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
+        """Trains one epoch
 
         :param svi_state: current state of the optimizer
         :param rng: rng key

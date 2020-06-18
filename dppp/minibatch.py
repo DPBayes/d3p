@@ -1,3 +1,16 @@
+# Copyright 2019- dp³ Developers and their Assignees
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from dppp.util import is_int_scalar, is_array, example_count, sample_from_array
 from numpyro.handlers import scale
@@ -37,7 +50,7 @@ def minibatch(batch_or_batchsize, num_obs_total=None):
     return scale(scale_factor = num_obs_total / batch_size)
 
 def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=False):
-    """Returns functions to fetch (randomized) batches of a given dataset by 
+    """Returns functions to fetch (randomized) batches of a given dataset by
     uniformly random subsampling.
 
     As `split_batchify_data`, takes the common epoch viewpoint to training,
@@ -46,7 +59,7 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
     every batch is drawn uniformly at random from the data set. An epoch thus
     merely refers to a number of batches that make up the same amount of data
     as the full data set.
-    
+
     While each element of the data set in expectation occurs once per epoch,
     there are no guarantees to the exact number of appearances.
 
@@ -86,7 +99,7 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
         """ Initializes the batchifier for a new epoch.
 
         :param rng_key: The base PRNG key the batchifier will use for randomness.
-        :return: tuple consisting of: number of batches in the epoch, 
+        :return: tuple consisting of: number of batches in the epoch,
             initialized state of the batchifier for the epoch
         """
         return num_records // batch_size, rng_key
@@ -120,7 +133,7 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
 
 
 def split_batchify_data(dataset, batch_size=None, q=None):
-    """Returns functions to fetch (randomized) batches of a given data set by 
+    """Returns functions to fetch (randomized) batches of a given data set by
     shuffling and splitting the data set.
 
     Takes the common epoch viewpoint to training, where an epoch is understood
@@ -160,7 +173,7 @@ def split_batchify_data(dataset, batch_size=None, q=None):
         """ Initializes the batchifier for a new epoch.
 
         :param rng_key: The base PRNG key the batchifier will use for randomness.
-        :return: tuple consisting of: number of batches in the epoch, 
+        :return: tuple consisting of: number of batches in the epoch,
             initialized state of the batchifier for the epoch
         """
         idxs = np.arange(num_records)

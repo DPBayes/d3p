@@ -1,3 +1,17 @@
+# Copyright 2019- dp³ Developers and their Assignees
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from fourier_accountant.compute_eps import get_epsilon_S, get_epsilon_R
 import numpy as np
 
@@ -18,7 +32,7 @@ def get_bracketing_bounds(compute_eps_fn, target_eps, maxeval, initial_sigma = 1
         2) bound_eps are the corresponding epsilon values;
             it holds bound_eps[0] > target_eps > bound_eps[1]
         3) num_evals is the number of function evaluations performed.
-    """    
+    """
     assert(initial_sigma > 0.)
     assert(target_eps > 0)
     assert(maxeval > 0 and isinstance(maxeval, int))
@@ -46,7 +60,7 @@ def get_bracketing_bounds(compute_eps_fn, target_eps, maxeval, initial_sigma = 1
 
     if num_evals >= maxeval:
         raise RuntimeError("Could not establish bounds in given evaluation limit")
-    
+
     sig_1 = sig
     eps_1 = eps
     if eps >= target_eps:
@@ -62,7 +76,7 @@ def get_bracketing_bounds(compute_eps_fn, target_eps, maxeval, initial_sigma = 1
 
                 if num_evals >= maxeval:
                     raise RuntimeError("Could not establish bounds in given evaluation limit")
-            
+
         return np.array([sig_1, sig]), np.array([eps_1, eps]), num_evals
     else:
         while eps < target_eps:
@@ -99,7 +113,7 @@ def update_bounds(sig, eps, target_eps, bounds, bound_eps, consecutive_updates):
     """
     assert(eps <= bound_eps[0])
     assert(eps >= bound_eps[1])
-    
+
     if eps > target_eps:
         bounds[0] = sig
         bound_eps[0] = eps
@@ -167,7 +181,7 @@ def _approximate_sigma(compute_eps_fn, target_eps, q, tol=1e-4, force_smaller=Fa
         # of consecutive updates for a bound and forcibly update the other if
         # that number exceeds a certain value.
         MAX_CONSECUTIVE_UPDATES = 2
-        if (consecutive_updates[0] > MAX_CONSECUTIVE_UPDATES or 
+        if (consecutive_updates[0] > MAX_CONSECUTIVE_UPDATES or
             consecutive_updates[1] > MAX_CONSECUTIVE_UPDATES) and num_evals < maxeval:
 
             # In this case, the optimal sigma is very close to the often
@@ -185,7 +199,7 @@ def _approximate_sigma(compute_eps_fn, target_eps, q, tol=1e-4, force_smaller=Fa
         idx = bound_eps < target_eps
         new_sig = bounds[idx][0]
         eps = bound_eps[idx][0]
-    
+
     assert(not force_smaller or eps < target_eps)
 
     return new_sig, eps, num_evals

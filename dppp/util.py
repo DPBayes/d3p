@@ -1,3 +1,17 @@
+# Copyright 2019- dp³ Developers and their Assignees
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import jax
 import jax.numpy as np
 from functools import reduce, wraps, partial
@@ -12,11 +26,11 @@ def map_over_secondary_dims(f):
     """
     Maps a function taking a over all secondary axes of an array.
 
-    f is assumed to take a vector of shape (a,) and output a scalar. 
+    f is assumed to take a vector of shape (a,) and output a scalar.
     Returns a function f_mapped that for an input T with shape
     (a, b_1, ..., b_k) applies f on the entries along the first axis
     over all other axes, i.e., to all T[:,i_1, ..., i_k].
-    
+
     The output of f_mapped will be an array of shape [b_1, ...., b_k] where
     each entry is the corresponding output of f applied as described above.
 
@@ -24,7 +38,7 @@ def map_over_secondary_dims(f):
     :return: function f_mapped applying f to each first axis vector in an
         arbitrary shaped input
 
-    Example: 
+    Example:
     >>> T = [
     >>>      [ [ a_1, a_2 ], [ a_3, a_4 ] ],
     >>>      [ [ b_1, b_2 ], [ b_3, b_4 ] ],
@@ -113,7 +127,7 @@ def is_int_scalar(x):
     """Returns True if the input can be interepreted as a scalar integer value.
 
     Works with jax.jit.
-    
+
     :param x: Anything that might be an integer scalar.
     """
     return is_scalar(x) and is_integer(x)
@@ -309,7 +323,7 @@ def sample_from_array(rng_key, x, n, axis):
         vals = jax.lax.dynamic_update_index_in_dim(vals, val, i, axis=axis)
         vals = jax.lax.dynamic_update_index_in_dim(vals, old_val, idx, axis=axis)
         return vals
-    
+
     shuffled = jax.lax.fori_loop(0, upper_loop_bound, loop_body, x)
     shuffled = jax.lax.dynamic_slice_in_dim(shuffled, 0, n, axis=axis)
     return shuffled

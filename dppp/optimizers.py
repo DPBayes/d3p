@@ -1,3 +1,17 @@
+# Copyright 2019- dp³ Developers and their Assignees
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from numpyro.optim import _NumpyroOptim, _add_doc
 from jax.experimental.optimizers import make_schedule
 import jax.numpy as np
@@ -63,7 +77,7 @@ def adadp(
         #   of the l2-norm over all gradient elements (per gradient site)
 
         err_e = np.sqrt(np.sum(err_e)) # summing partial gradient norm
-        
+
         new_lr = lr * np.minimum(
             np.maximum(np.sqrt(tol/err_e), 0.9), 1.1
         )

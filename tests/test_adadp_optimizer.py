@@ -1,3 +1,17 @@
+# Copyright 2019- dp³ Developers and their Assignees
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """ tests that the AdaDP optimizer works correctly
 """
 import unittest
@@ -72,15 +86,15 @@ class ADADPTests(unittest.TestCase):
         gradient = self.same_tree_with_value(self.template, 2.)
 
         opt_state = (
-            1, 
+            1,
             (
                 self.same_tree_with_value(value, -0.5),
                 learning_rate,
                 self.same_tree_with_value(value, -1.),
                 value
             )
-        )        
-        
+        )
+
         i, (x, lr, x_stepped, x_prev) = adadp.update(gradient, opt_state)
 
         two_half_step_results = self.same_tree_with_value(self.template, -1.5)
@@ -98,15 +112,15 @@ class ADADPTests(unittest.TestCase):
         gradient = self.same_tree_with_value(self.template, 3.)
 
         opt_state = (
-            1, 
+            1,
             (
                 self.same_tree_with_value(value, -0.5),
                 learning_rate,
                 self.same_tree_with_value(value, -1.),
                 value
             )
-        )        
-        
+        )
+
         i, (x, lr, x_stepped, x_prev) = adadp.update(gradient, opt_state)
 
         expected_lr = .9 # 0.72005267 clipped by alpha_min
@@ -156,15 +170,15 @@ class ADADPTests(unittest.TestCase):
         gradient = self.same_tree_with_value(self.template, 2.)
 
         opt_state = (
-            1, 
+            1,
             (
                 self.same_tree_with_value(value, -0.5),
                 learning_rate,
                 self.same_tree_with_value(value, -1.),
                 value
             )
-        )        
-        
+        )
+
         i, (x, lr, x_stepped, x_prev) = jax.jit(adadp.update)(gradient, opt_state)
 
         two_half_step_results = self.same_tree_with_value(self.template, -1.5)
@@ -182,15 +196,15 @@ class ADADPTests(unittest.TestCase):
         gradient = self.same_tree_with_value(self.template, 3.)
 
         opt_state = (
-            1, 
+            1,
             (
                 self.same_tree_with_value(value, -0.5),
                 learning_rate,
                 self.same_tree_with_value(value, -1.),
                 value
             )
-        )        
-        
+        )
+
         i, (x, lr, x_stepped, x_prev) = jax.jit(adadp.update)(gradient, opt_state)
 
         expected_lr = .9 # 0.72005267 clipped by alpha_min
