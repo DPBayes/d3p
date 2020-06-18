@@ -38,6 +38,10 @@ in `LICENSE.txt`. Copyright holder of each contribution are the respective
 contributing developer or his or her assignee (i.e., universities or companies
 owning the copyright of software contributes by their employees).
 
+## Acknowledgements
+
+We thank Nvidia for their contribution of GPU performance benchmarking and optimisation.
+
 ## References
 
 1. J. Jälkö, O. Dikmen, A. Honkela:
