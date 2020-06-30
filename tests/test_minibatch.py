@@ -1,3 +1,17 @@
+# Copyright 2019- d3p Developers and their Assignees
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """ tests that the minibatch context manager leads to correct scaling of the
 affected sample sites in the numpyro.log_density method
 """
@@ -201,7 +215,7 @@ class SplitBatchifierTests(unittest.TestCase):
         batch_0 = fetch(3, batchifier_state)
         batch_1 = fetch(8, batchifier_state)
         self.assertFalse(np.allclose(batch_0, batch_1)) # ensure batches are different
-    
+
     def test_split_batchify_fetch_correct_shape(self):
         data = onp.random.normal(size=(105, 3))
         init, fetch = split_batchify_data((data,), 10)
@@ -267,7 +281,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
         batch = batch[0]
         self.assertEqual((10,3), np.shape(batch))
 
-    
+
     def test_subsample_batchify_fetch_with_replacement(self):
         data = onp.arange(105) + 100
         init, fetch = subsample_batchify_data((data,), 10, with_replacement=True)

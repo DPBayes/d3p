@@ -1,18 +1,3 @@
-# Copyright -2019 Copyright Contributors to the Pyro project.
-# Copyright 2019- d3p Developers and their Assignees
-
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-
-#     http://www.apache.org/licenses/LICENSE-2.0
-
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """VAE example from numpyro.
 
 original: https://github.com/pyro-ppl/numpyro/blob/master/examples/vae.py
@@ -47,6 +32,15 @@ from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_da
 
 from datasets import MNIST, load_dataset
 
+import jax
+try:
+    numpyro.set_platform('gpu')
+    jax.lib.xla_bridge.get_backend().platform
+except RuntimeError:
+    numpyro.set_platform('cpu')
+
+print(jax.lib.xla_bridge.get_backend().platform)
+
 RESULTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
                               '.results'))
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -61,21 +55,29 @@ def encoder(hidden_dim, z_dim):
     Network structure:
     x -> dense layer of hidden_dim with softplus activation --> dense layer of z_dim ( = means/loc of z)
                                                             |-> dense layer of z_dim with (elementwise) exp() as activation func ( = variance of z )
-    (note: the exp() as activation function serves solely to ensure positivity of the variance)
-
     :param hidden_dim: number of nodes in the hidden layer
     :param z_dim: dimension of the latent variable z
     :return: (init_fun, apply_fun) pair of the encoder: (encoder_init, encode)
     """
     return stax.serial(
-        stax.Dense(hidden_dim, W_init=stax.randn()), stax.Softplus,
-        stax.FanOut(2),
-        stax.parallel(stax.Dense(z_dim, W_init=stax.randn()),
-                      stax.serial(stax.Dense(z_dim, W_init=stax.randn()), stax.Exp)),
+        stax.Conv(6, filter_shape=(5, 5), padding='SAME', W_init=stax.randn()), stax.Relu,
+        stax.Conv(16, filter_shape=(5, 5), padding='SAME', W_init=stax.randn()), stax.Relu,
+        stax.Flatten,
+        stax.Dense(hidden_dim, W_init=stax.randn()), stax.Relu,
+        stax.Dense(z_dim, W_init=stax.randn())
     )
 
 
-def decoder(hidden_dim, out_dim):
+def ReshapeLayer(new_shape):
+    def init_fun(rng, input_shape):
+        output_shape = input_shape[0], *new_shape
+        assert(np.prod(input_shape[1:]) == np.prod(new_shape))
+        return output_shape, ()
+    def apply_fun(params, inputs, **kwargs):
+        return np.reshape(inputs, (inputs.shape[0], *new_shape))
+    return init_fun, apply_fun
+
+def decoder(hidden_dim, out_shape):
     """Defines the decoder, i.e., the network taking us from latent
         variables back to observations (or at least observation space).
 
@@ -87,9 +89,13 @@ def decoder(hidden_dim, out_dim):
 
     :return: (init_fun, apply_fun) pair of the decoder: (decoder_init, decode)
     """
+    out_dim = np.prod(out_shape)
     return stax.serial(
-        stax.Dense(hidden_dim, W_init=stax.randn()), stax.Softplus,
-        stax.Dense(out_dim, W_init=stax.randn()), stax.Sigmoid,
+        stax.Dense(hidden_dim, W_init=stax.randn()), stax.Relu,
+        stax.Dense(16*out_dim, W_init=stax.randn()), stax.Relu,
+        ReshapeLayer((*out_shape, 16)),
+        stax.ConvTranspose(6, filter_shape=(5, 5), padding='SAME', W_init=stax.randn()), stax.Relu,
+        stax.ConvTranspose(1, filter_shape=(5, 5), padding='SAME', W_init=stax.randn()), stax.Sigmoid
     )
 
 
@@ -105,14 +111,20 @@ def model(batch, z_dim, hidden_dim, num_obs_total=None):
     :return: (named) sample x from the model observation distribution p(x|z)p(z)
     """
     assert(np.ndim(batch) == 3 or np.ndim(batch) == 2)
-    batch_size = unvectorize_shape_3d(batch)[0]
-    batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
-    out_dim = np.shape(batch)[1]
+    batch_shape = unvectorize_shape_3d(batch)
+    batch_size = batch_shape[0]
+    # batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
+    out_shape = batch_shape[1:]
 
-    decode = numpyro.module('decoder', decoder(hidden_dim, out_dim), (batch_size, z_dim))
+    hidden_dim = 500
+    z_dim = 10
+
+    decode = numpyro.module('decoder', decoder(hidden_dim, out_shape), (batch_size, z_dim))
     with minibatch(batch_size, num_obs_total=num_obs_total):
-        z = sample('z', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior on z is N(0,I)
-        img_loc = decode(z) # evaluate decoder (p(x|z)) on sampled z to get means for output bernoulli distribution
+        z = sample('z', dist.Categorical(np.ones((z_dim,))/z_dim), sample_shape=(batch_size,))
+        z_onehot = np.eye(z_dim)[z]
+        assert(z_onehot.shape[-1] == z_dim)
+        img_loc = decode(z_onehot) # evaluate decoder (p(x|z)) on sampled z to get means for output bernoulli distribution
         x = sample('obs', dist.Bernoulli(img_loc), obs=batch) # outputs x are sampled from bernoulli distribution depending on z and conditioned on the observed data
         return x
 
@@ -123,14 +135,19 @@ def guide(batch, z_dim, hidden_dim, num_obs_total=None):
     :return: (named) sampled z from the variational (guide) distribution q(z)
     """
     assert(np.ndim(batch) == 3 or np.ndim(batch) == 2)
-    batch_size = unvectorize_shape_3d(batch)[0]
-    batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
-    out_dim = np.shape(batch)[1]
+    batch_shape = unvectorize_shape_3d(batch)
+    batch_size = batch_shape[0]
+    # batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
 
-    encode = numpyro.module('encoder', encoder(hidden_dim, z_dim), (batch_size, out_dim))
+    hidden_dim = 500
+    z_dim = 10
+
+    batch = np.reshape(batch, (*batch_shape, 1))
+
+    encode = numpyro.module('encoder', encoder(hidden_dim, z_dim), batch.shape)
     with minibatch(batch_size, num_obs_total=num_obs_total):
-        z_loc, z_std = encode(batch) # obtain mean and variance for q(z) ~ p(z|x) from encoder
-        z = sample('z', dist.Normal(z_loc, z_std)) # z follows q(z)
+        z_logits = encode(batch) # obtain mean and variance for q(z) ~ p(z|x) from encoder
+        z = sample('z', dist.Categorical(logits=z_logits)) # z follows q(z)
         return z
 
 

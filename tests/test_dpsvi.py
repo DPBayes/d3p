@@ -1,3 +1,17 @@
+# Copyright 2019- d3p Developers and their Assignees
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """ tests that the components of DPSVI class work as expected
 """
 import unittest
@@ -38,7 +52,7 @@ class DPSVITest(unittest.TestCase):
 
         self.assertIs(svi_state.optim_state, new_svi_state.optim_state)
         self.assertFalse(np.allclose(svi_state.rng_key, new_svi_state.rng_key))
-        self.assertEqual(np.sum(self.px_loss), loss_val)
+        self.assertEqual(np.mean(self.px_loss), loss_val)
         self.assertEqual(self.tree_def, jax.tree_structure(grads))
 
         expected_std = self.dp_scale * self.clipping_threshold

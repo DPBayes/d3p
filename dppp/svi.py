@@ -1,8 +1,19 @@
+# Copyright 2019- d3p Developers and their Assignees
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """ Stochastic Variational Inference implementation with per-example gradient
     manipulation capability.
-
-Based on numpyro's `svi`:
-    https://github.com/pyro-ppl/numpyro/blob/master/numpyro/svi.py
 """
 import functools
 
@@ -85,7 +96,7 @@ class TunableSVI(SVI):
         self.px_grad_manipulation_fn = per_example_grad_manipulation_fn
         self.batch_grad_manipulation_fn = batch_grad_manipulation_fn
 
-        total_loss = CombinedLoss(per_example_loss, combiner_fn = np.sum)
+        total_loss = CombinedLoss(per_example_loss, combiner_fn = np.mean)
 
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
 
