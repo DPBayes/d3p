@@ -40,7 +40,7 @@ owning the copyright of software contributes by their employees).
 
 ## Acknowledgements
 
-We thank Nvidia for their contribution of GPU performance benchmarking and optimisation.
+We thank the NVIDIA AI Technology Center Finland for their contribution of GPU performance benchmarking and optimisation.
 
 ## References
 
