@@ -489,7 +489,7 @@ def sample_prior_predictive(rng_key, model, model_args, substitutes=None, with_i
         sample values and the second element is a list of intermediate values.
     """
     if substitutes is None: substitutes = dict()
-    model = seed(substitute(model, param_map=substitutes), rng_key)
+    model = seed(substitute(model, data=substitutes), rng_key)
     t = trace(model).get_trace(*model_args)
     return get_samples_from_trace(t, with_intermediates)
 
@@ -518,7 +518,7 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args, p
     """
     model_rng_key, guide_rng_key = jax.random.split(rng_key)
 
-    guide = seed(substitute(guide, param_map=params), guide_rng_key)
+    guide = seed(substitute(guide, data=params), guide_rng_key)
     guide_samples = get_samples_from_trace(trace(guide).get_trace(*guide_args), with_intermediates)
 
     model_params = dict(**params)
@@ -527,7 +527,7 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args, p
     else:
         model_params.update({k: v for k, v in guide_samples.items()})
 
-    model = seed(substitute(model, param_map=model_params), model_rng_key)
+    model = seed(substitute(model, data=model_params), model_rng_key)
     model_samples = get_samples_from_trace(trace(model).get_trace(*model_args), with_intermediates)
 
     guide_samples.update(model_samples)
@@ -607,4 +607,4 @@ def fix_observations(model, observations):
         model function as designated by calls to `param`
     :return: Model function with fixed observations
     """
-    return substitute(model, param_map=observations)
+    return substitute(model, data=observations)

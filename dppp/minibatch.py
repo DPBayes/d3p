@@ -47,7 +47,7 @@ def minibatch(batch_or_batchsize, num_obs_total=None):
         raise TypeError("batch_or_batchsize must be an array or an integer")
     if num_obs_total is None:
         num_obs_total = batch_size
-    return scale(scale_factor = num_obs_total / batch_size)
+    return scale(scale = num_obs_total / batch_size)
 
 def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=False):
     """Returns functions to fetch (randomized) batches of a given dataset by
@@ -177,7 +177,7 @@ def split_batchify_data(dataset, batch_size=None, q=None):
             initialized state of the batchifier for the epoch
         """
         idxs = np.arange(num_records)
-        return num_records // batch_size, jax.random.shuffle(rng_key, idxs)
+        return num_records // batch_size, jax.random.permutation(rng_key, idxs)
 
     @jax.jit
     def get_batch(i, idxs):

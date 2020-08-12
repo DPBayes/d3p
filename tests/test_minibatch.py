@@ -192,7 +192,7 @@ class SplitBatchifierTests(unittest.TestCase):
     def test_split_batchify_fetch(self):
         data = onp.arange(105) + 100
         init, fetch = split_batchify_data((data,), 10)
-        batchifier_state = jax.random.shuffle(jax.random.PRNGKey(0), np.arange(0, 105))
+        batchifier_state = jax.random.permutation(jax.random.PRNGKey(0), np.arange(0, 105))
         num_batches = 10
 
         counts = onp.zeros(105)
@@ -219,7 +219,7 @@ class SplitBatchifierTests(unittest.TestCase):
     def test_split_batchify_fetch_correct_shape(self):
         data = onp.random.normal(size=(105, 3))
         init, fetch = split_batchify_data((data,), 10)
-        batchifier_state = jax.random.shuffle(jax.random.PRNGKey(0), np.arange(0, 105))
+        batchifier_state = jax.random.permutation(jax.random.PRNGKey(0), np.arange(0, 105))
 
         batch = fetch(6, batchifier_state)
         batch = batch[0]
