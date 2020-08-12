@@ -39,15 +39,14 @@ import numpyro.optim as optimizers
 
 from dppp.svi import DPSVI
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
-from dppp.util import unvectorize_shape_2d
 from dppp.svi import sample_prior_predictive
 
 def model(obs=None, num_obs_total=None, d=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
     """
     if obs is not None:
-        assert(np.ndim(obs) <= 2)
-        batch_size, d = unvectorize_shape_2d(obs)
+        assert(np.ndim(obs) == 2)
+        batch_size, d = np.shape(obs)
     else:
         assert(num_obs_total is not None)
         batch_size = num_obs_total
@@ -199,6 +198,6 @@ if __name__ == "__main__":
     parser.add_argument('-N', '--num-samples', default=10000, type=int, help='data samples count')
     parser.add_argument('--sigma', default=1., type=float, help='privacy scale')
     parser.add_argument('--delta', default=1/10000, type=float, help='privacy slack parameter delta')
-    parser.add_argument('-C', '--clip-threshold', default=20, type=float, help='clipping threshold for gradients')
+    parser.add_argument('-C', '--clip-threshold', default=1., type=float, help='clipping threshold for gradients')
     args = parser.parse_args()
     main(args)

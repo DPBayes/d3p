@@ -32,7 +32,12 @@ from fourier_accountant.compute_eps import get_epsilon_S, get_epsilon_R
 from fourier_accountant.compute_delta import get_delta_S, get_delta_R
 
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
-    value_and_grad_fun = jax.value_and_grad(fun, argnums, has_aux, holomorphic)
+    # vmap removes leading dimensions, we re-add those in a wrapper for fun so
+    # that fun can be oblivious of this
+    def fun_for_vmap(params, args):
+        new_args = (np.reshape(arg, (1, *np.shape(arg))) for arg in args)
+        return fun(params, new_args)
+    value_and_grad_fun = jax.value_and_grad(fun_for_vmap, argnums, has_aux, holomorphic)
     return jax.vmap(value_and_grad_fun, in_axes=(None, 0))
 
 

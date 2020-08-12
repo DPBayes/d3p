@@ -42,7 +42,6 @@ from numpyro.primitives import sample
 from numpyro.infer import ELBO
 
 from dppp.svi import DPSVI, sample_multi_posterior_predictive
-from dppp.util import unvectorize_shape_3d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
 from datasets import MNIST, load_dataset
@@ -104,8 +103,8 @@ def model(batch, z_dim, hidden_dim, num_obs_total=None):
 
     :return: (named) sample x from the model observation distribution p(x|z)p(z)
     """
-    assert(np.ndim(batch) == 3 or np.ndim(batch) == 2)
-    batch_size = unvectorize_shape_3d(batch)[0]
+    assert(np.ndim(batch) == 3)
+    batch_size = np.shape(batch)[0]
     batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
     out_dim = np.shape(batch)[1]
 
@@ -122,8 +121,8 @@ def guide(batch, z_dim, hidden_dim, num_obs_total=None):
     :param batch: a batch of observations
     :return: (named) sampled z from the variational (guide) distribution q(z)
     """
-    assert(np.ndim(batch) == 3 or np.ndim(batch) == 2)
-    batch_size = unvectorize_shape_3d(batch)[0]
+    assert(np.ndim(batch) == 3)
+    batch_size = np.shape(batch)[0]
     batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
     out_dim = np.shape(batch)[1]
 
@@ -257,6 +256,7 @@ def main(args):
         )
         rng, rng_binarize = random.split(rng, 2)
         test_sample = binarize(rng_binarize, img)
+        test_sample = np.reshape(test_sample, (1, *np.shape(test_sample)))
         params = svi.get_params(svi_state)
         # todo(lumip): fix this. with how stuff currently works, this call
         #   to sample_multi_posterior will always return test_sample instead

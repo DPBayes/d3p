@@ -38,7 +38,6 @@ from numpyro.primitives import sample, param
 from numpyro.infer import ELBO
 
 from dppp.svi import DPSVI, sample_prior_predictive
-from dppp.util import unvectorize_shape_2d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.gmm import GaussianMixture
 
@@ -47,8 +46,8 @@ def model(k, obs=None, num_obs_total=None, d=None):
     # this is our model function using the GaussianMixture distribution
     # with prior belief
     if obs is not None:
-        assert(np.ndim(obs) <= 2)
-        batch_size, d = unvectorize_shape_2d(obs)
+        assert(np.ndim(obs) == 2)
+        batch_size, d = np.shape(obs)
     else:
         assert(num_obs_total is not None)
         batch_size = num_obs_total
@@ -63,8 +62,8 @@ def model(k, obs=None, num_obs_total=None, d=None):
 def guide(k, obs=None, num_obs_total=None, d=None):
     # the latent MixGaus distribution which learns the parameters
     if obs is not None:
-        assert(np.ndim(obs) <= 2)
-        _, d = unvectorize_shape_2d(obs)
+        assert(np.ndim(obs) == 2)
+        _, d = np.shape(obs)
     else:
         assert(num_obs_total is not None)
         assert(d is not None)

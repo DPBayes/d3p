@@ -35,7 +35,7 @@ from numpyro.primitives import param, sample
 from numpyro.infer import ELBO
 import numpyro.optim as optimizers
 
-from dppp.util import example_count, normalize, unvectorize_shape_2d
+from dppp.util import example_count, normalize
 from dppp.svi import DPSVI, sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
@@ -47,8 +47,8 @@ def model(batch_X, batch_y=None, num_obs_total=None):
     :param batch_X: a batch of predictors
     :param batch_y: a batch of observations
     """
-    assert(np.ndim(batch_X) <= 2)
-    batch_size, d = unvectorize_shape_2d(batch_X)
+    assert(np.ndim(batch_X) == 2)
+    batch_size, d = np.shape(batch_X)
     assert(batch_y is None or example_count(batch_y) == batch_size)
 
     z_w = sample('w', dist.Normal(np.zeros((d,)), np.ones((d,)))) # prior is N(0,I)
@@ -65,7 +65,8 @@ def guide(batch_X, batch_y=None, num_obs_total=None):
     # we are interested in the posterior of w and intercept
     # since this is a fairly simple model, we just initialize them according
     # to our prior believe and let the optimization handle the rest
-    d = np.atleast_2d(batch_X).shape[1]
+    assert(np.ndim(batch_X) == 2)
+    d = np.shape(batch_X)[1]
 
     z_w_loc = param("w_loc", np.zeros((d,)))
     z_w_std = np.exp(param("w_std_log", np.zeros((d,))))
