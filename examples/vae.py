@@ -34,6 +34,7 @@ import jax.numpy as np
 from jax import jit, lax, random
 from jax.experimental import stax
 from jax.random import PRNGKey
+import jax
 
 import numpyro
 import numpyro.optim as optimizers
@@ -49,6 +50,12 @@ from datasets import MNIST, load_dataset
 RESULTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
                               '.results'))
 os.makedirs(RESULTS_DIR, exist_ok=True)
+
+try:
+    jax.lib.xla_bridge.get_backend('gpu') # this will fail if gpu not available
+    numpyro.set_platform('gpu')
+except RuntimeError:
+    print("gpu not available. falling back to cpu")
 
 
 def encoder(hidden_dim, z_dim):

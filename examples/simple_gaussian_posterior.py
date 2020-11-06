@@ -32,6 +32,7 @@ import jax.numpy as np
 from jax import jit, lax, random
 from jax.random import PRNGKey
 
+import numpyro
 import numpyro.distributions as dist
 from numpyro.primitives import param, sample
 from numpyro.infer import ELBO
@@ -40,6 +41,12 @@ import numpyro.optim as optimizers
 from dppp.svi import DPSVI
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.svi import sample_prior_predictive
+
+try:
+    jax.lib.xla_bridge.get_backend('gpu') # this will fail if gpu not available
+    numpyro.set_platform('gpu')
+except RuntimeError:
+    print("gpu not available. falling back to cpu")
 
 def model(obs=None, num_obs_total=None, d=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
