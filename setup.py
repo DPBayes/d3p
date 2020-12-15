@@ -9,7 +9,7 @@ PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
 
 setup(
     name='dppp',
-    python_requires='<=3.8',
+    python_requires='<3.9',
     version='0.2.0-devel',
     description='Differentially-Private Probabilistic Programming',
     packages=find_packages(include=['dppp', 'dppp.*']),
