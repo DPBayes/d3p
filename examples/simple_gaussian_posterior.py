@@ -28,14 +28,14 @@ import argparse
 import time
 
 import jax
-import jax.numpy as np
+import jax.numpy as jnp
 from jax import jit, lax, random
 from jax.random import PRNGKey
 
 import numpyro
 import numpyro.distributions as dist
 from numpyro.primitives import param, sample
-from numpyro.infer import ELBO
+from numpyro.infer import Trace_ELBO as ELBO
 import numpyro.optim as optimizers
 
 from dppp.svi import DPSVI
@@ -52,14 +52,14 @@ def model(obs=None, num_obs_total=None, d=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
     """
     if obs is not None:
-        assert(np.ndim(obs) == 2)
-        batch_size, d = np.shape(obs)
+        assert(jnp.ndim(obs) == 2)
+        batch_size, d = jnp.shape(obs)
     else:
         assert(num_obs_total is not None)
         batch_size = num_obs_total
         assert(d != None)
 
-    z_mu = sample('mu', dist.Normal(np.zeros((d,)), 1.))
+    z_mu = sample('mu', dist.Normal(jnp.zeros((d,)), 1.))
     x_var = .1
     with minibatch(batch_size, num_obs_total):
         x = sample('obs', dist.Normal(z_mu, x_var), obs=obs, sample_shape=(batch_size,))
@@ -72,37 +72,37 @@ def guide(obs=None, num_obs_total=None, d=None):
     # assert(obs != None)
     # mu_loc, mu_std = analytical_solution(obs)
     # mu_loc = param('mu_loc', mu_loc)
-    # mu_std = np.exp(param('mu_std_log', np.log(mu_std)))
+    # mu_std = jnp.exp(param('mu_std_log', jnp.log(mu_std)))
 
     # not so smart guide: starts from prior for mu
     assert(d != None)
-    mu_loc = param('mu_loc', np.zeros(d))
-    mu_std = np.exp(param('mu_std_log', np.zeros(d)))
+    mu_loc = param('mu_loc', jnp.zeros(d))
+    mu_std = jnp.exp(param('mu_std_log', jnp.zeros(d)))
 
     z_mu = sample('mu', dist.Normal(mu_loc, mu_std))
     return z_mu, mu_loc, mu_std
 
 def analytical_solution(obs):
-    N = np.atleast_1d(obs).shape[0]
+    N = jnp.atleast_1d(obs).shape[0]
     x_var = .1
     x_var_inv = 1/x_var
     mu_var = 1/(x_var_inv*N+1)
-    mu_std = np.sqrt(mu_var)
-    mu_loc = mu_var*np.sum(x_var_inv*obs, axis=0)
+    mu_std = jnp.sqrt(mu_var)
+    mu_loc = mu_var*jnp.sum(x_var_inv*obs, axis=0)
 
     return mu_loc, mu_std
 
 def ml_estimate(obs):
-    N = np.atleast_1d(obs).shape[0]
-    mu_loc = (1/N)*np.sum(obs, axis=0)
-    mu_var = 1/np.sqrt(N+1)
-    mu_std = np.sqrt(mu_var)
+    N = jnp.atleast_1d(obs).shape[0]
+    mu_loc = (1/N)*jnp.sum(obs, axis=0)
+    mu_var = 1/jnp.sqrt(N+1)
+    mu_std = jnp.sqrt(mu_var)
 
     return mu_loc, mu_std
 
 def create_toy_data(rng_key, N, d):
     ## Create some toy data
-    mu_true = np.ones(d)
+    mu_true = jnp.ones(d)
     samples = sample_prior_predictive(rng_key, model, (None, 2*N, d), {'mu': mu_true})
     X = samples['obs']
 
@@ -188,13 +188,13 @@ def main(args):
 
     params = svi.get_params(svi_state)
     mu_loc = params['mu_loc']
-    mu_std = np.exp(params['mu_std_log'])
+    mu_std = jnp.exp(params['mu_std_log'])
     print("### expected: {}".format(mu_true))
-    print("### svi result\nmu_loc: {}\nerror: {}\nmu_std: {}".format(mu_loc, np.linalg.norm(mu_loc-mu_true), mu_std))
+    print("### svi result\nmu_loc: {}\nerror: {}\nmu_std: {}".format(mu_loc, jnp.linalg.norm(mu_loc-mu_true), mu_std))
     mu_loc, mu_std = analytical_solution(X_train)
-    print("### analytical solution\nmu_loc: {}\nerror: {}\nmu_std: {}".format(mu_loc, np.linalg.norm(mu_loc-mu_true), mu_std))
+    print("### analytical solution\nmu_loc: {}\nerror: {}\nmu_std: {}".format(mu_loc, jnp.linalg.norm(mu_loc-mu_true), mu_std))
     mu_loc, mu_std = ml_estimate(X_train)
-    print("### ml estimate\nmu_loc: {}\nerror: {}\nmu_std: {}".format(mu_loc, np.linalg.norm(mu_loc-mu_true), mu_std))
+    print("### ml estimate\nmu_loc: {}\nerror: {}\nmu_std: {}".format(mu_loc, jnp.linalg.norm(mu_loc-mu_true), mu_std))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")

@@ -14,7 +14,7 @@
 
 from dppp.util import is_int_scalar, is_array, example_count, sample_from_array
 from numpyro.handlers import scale
-import jax.numpy as np
+import jax.numpy as jnp
 import jax
 
 __all__ = [
@@ -36,7 +36,7 @@ def minibatch(batch_or_batchsize, num_obs_total=None):
         full data set. Optional, defaults to the given batch size.
     """
     if is_int_scalar(batch_or_batchsize):
-        if not np.isscalar(batch_or_batchsize):
+        if not jnp.isscalar(batch_or_batchsize):
             raise TypeError("if a scalar is given for batch_or_batchsize, it "
                 "can't be traced through jit. consider using static_argnums "
                 "for the jit invocation.")
@@ -115,7 +115,7 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
         rng_key = batchifier_state
         batch_rng_key = jax.random.fold_in(rng_key, i)
         ret_idx = jax.random.randint(batch_rng_key, (batch_size,), 0, num_records)
-        return tuple(np.take(a, ret_idx, axis=0) for a in dataset)
+        return tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
 
     @jax.jit
     def get_batch_without_replacement(i, rng_key):
@@ -126,8 +126,8 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
         :return: the batch
         """
         batch_rng_key = jax.random.fold_in(rng_key, i)
-        ret_idx = sample_from_array(batch_rng_key, np.arange(num_records), batch_size, 0)
-        return tuple(np.take(a, ret_idx, axis=0) for a in dataset)
+        ret_idx = sample_from_array(batch_rng_key, jnp.arange(num_records), batch_size, 0)
+        return tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
 
     return init, get_batch_with_replacement if with_replacement else get_batch_without_replacement
 
@@ -176,7 +176,7 @@ def split_batchify_data(dataset, batch_size=None, q=None):
         :return: tuple consisting of: number of batches in the epoch,
             initialized state of the batchifier for the epoch
         """
-        idxs = np.arange(num_records)
+        idxs = jnp.arange(num_records)
         return num_records // batch_size, jax.random.permutation(rng_key, idxs)
 
     @jax.jit
@@ -188,7 +188,7 @@ def split_batchify_data(dataset, batch_size=None, q=None):
         :return: the batch
         """
         ret_idx = jax.lax.dynamic_slice_in_dim(idxs, i * batch_size, batch_size)
-        return tuple(np.take(a, ret_idx, axis=0) for a in dataset)
+        return tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
 
     return init, get_batch
 

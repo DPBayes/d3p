@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from numpyro.optim import _NumpyroOptim, _add_doc
+from numpyro.optim import _NumPyroOptim, _add_doc
 from jax.experimental.optimizers import make_schedule
-import jax.numpy as np
+import jax.numpy as jnp
+import numpy as np
 from jax import tree_map, tree_multimap, tree_leaves, lax
 
 def adadp(
@@ -45,7 +46,7 @@ def adadp(
     step_size = make_schedule(step_size)
     def init(x0):
         lr = step_size(0)
-        x_stepped = tree_map(lambda n: np.zeros_like(n), x0)
+        x_stepped = tree_map(lambda n: jnp.zeros_like(n), x0)
         return x0, lr, x_stepped, x0
 
     def _compute_update_step(x, g, step_size_):
@@ -64,28 +65,28 @@ def adadp(
         g, state, new_x = args
         x, lr, x_stepped, x_prev = state
 
-        x_stepped_parts = tree_leaves(x_stepped)
-        new_x_parts = tree_leaves(new_x)
+        norm_partials = tree_multimap(
+            lambda x_full, x_halfs: jnp.sum(((x_full - x_halfs)/jnp.maximum(1., x_full)) ** 2),
+            x_stepped, new_x
+        )
 
-        err_e = [
-            np.sum(((x_full - x_halfs)/np.maximum(1., x_full)) ** 2)
-            for x_full, x_halfs in zip(x_stepped_parts, new_x_parts)
-        ]
+        err_e = jnp.array(tree_leaves(norm_partials))
         # note(lumip): paper specifies the approximate error function as
         #   using absolute values, but since we square anyways, those are
         #   not required here; the resulting array is partial squared sums
         #   of the l2-norm over all gradient elements (per gradient site)
 
-        err_e = np.sqrt(np.sum(err_e)) # summing partial gradient norm
+        err_e = jnp.sqrt(jnp.sum(err_e)) # summing partial gradient norm
 
-        new_lr = lr * np.minimum(
-            np.maximum(np.sqrt(tol/err_e), 0.9), 1.1
+        new_lr = lr * jnp.minimum(
+            jnp.maximum(jnp.sqrt(tol/err_e), 0.9), 1.1
         )
 
-        new_x = lax.cond(
-            stability_check and err_e > tol,
-            x_prev, lambda nx: nx,
-            new_x, lambda nx: nx
+        new_x = tree_multimap(
+            lambda x_prev, new_x: jnp.where(
+                stability_check and err_e > tol, x_prev, new_x
+            ),
+            x_prev, new_x
         )
 
         return new_x, new_lr, x_stepped, x_prev
@@ -108,7 +109,7 @@ def adadp(
     return init, update, get_params
 
 @_add_doc(adadp)
-class ADADP(_NumpyroOptim):
+class ADADP(_NumPyroOptim):
 
     def __init__(self,
                  step_size=1e-3,

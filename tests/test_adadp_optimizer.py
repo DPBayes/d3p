@@ -16,7 +16,7 @@
 """
 import unittest
 
-import jax.numpy as np
+import jax.numpy as jnp
 import jax
 
 from dppp.optimizers import ADADP
@@ -32,16 +32,16 @@ class ADADPTests(unittest.TestCase):
 
     def same_tree_with_value(self, tree, value):
         return jax.tree_map(
-            lambda x: np.ones_like(x) * value, tree
+            lambda x: jnp.ones_like(x) * value, tree
         )
 
     def setUp(self):
         self.template = (
-            np.ones(shape=(7, 10)),
-            np.ones(shape=(7,)),
+            jnp.ones(shape=(7, 10)),
+            jnp.ones(shape=(7,)),
             (
-                np.ones(shape=(2, 7)),
-                np.ones(shape=(2,)),
+                jnp.ones(shape=(2, 7)),
+                jnp.ones(shape=(2,)),
             )
         )
 
@@ -103,7 +103,7 @@ class ADADPTests(unittest.TestCase):
 
         self.assertEqual(2, i)
         self.assertTreeAllClose(two_half_step_results, x)
-        self.assertTrue(np.allclose(expected_lr, lr))
+        self.assertTrue(jnp.allclose(expected_lr, lr))
 
     def test_update_step_2_with_stability_check(self):
         learning_rate = 1.
@@ -127,7 +127,7 @@ class ADADPTests(unittest.TestCase):
 
         self.assertEqual(2, i)
         self.assertTreeAllClose(value, x) # update rejected
-        self.assertTrue(np.allclose(expected_lr, lr))
+        self.assertTrue(jnp.allclose(expected_lr, lr))
 
     def test_init_with_jit(self):
         learning_rate = 1.
@@ -187,7 +187,7 @@ class ADADPTests(unittest.TestCase):
 
         self.assertEqual(2, i)
         self.assertTreeAllClose(two_half_step_results, x)
-        self.assertTrue(np.allclose(expected_lr, lr))
+        self.assertTrue(jnp.allclose(expected_lr, lr))
 
     def test_update_step_2_with_stability_check_with_jit(self):
         learning_rate = 1.
@@ -211,7 +211,7 @@ class ADADPTests(unittest.TestCase):
 
         self.assertEqual(2, i)
         self.assertTreeAllClose(value, x) # update rejected
-        self.assertTrue(np.allclose(expected_lr, lr))
+        self.assertTrue(jnp.allclose(expected_lr, lr))
 
 if __name__ == '__main__':
     unittest.main()

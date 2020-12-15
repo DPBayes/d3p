@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import jax
-import jax.numpy as np
+import jax.numpy as jnp
 from jax.scipy.special import logsumexp
 import numpyro.distributions as dist
 
@@ -27,7 +27,7 @@ class GaussianMixture(dist.Distribution):
 
     def __init__(self, locs=0., scales=1., pis=1.0, validate_args=None):
         self._locs, self._scales, self._pis = locs, scales, pis
-        event_shape = np.shape(locs[0])
+        event_shape = jnp.shape(locs[0])
         super(GaussianMixture, self).__init__(
             event_shape=event_shape, validate_args=validate_args
         )
@@ -35,8 +35,8 @@ class GaussianMixture(dist.Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        log_pis = np.log(self._pis)
-        log_phis = np.array([
+        log_pis = jnp.log(self._pis)
+        log_phis = jnp.array([
             dist.Normal(loc, scale).log_prob(value).sum(-1)
             for loc, scale
             in zip(self._locs, self._scales)

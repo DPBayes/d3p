@@ -16,16 +16,16 @@
 """
 import unittest
 
-import jax.numpy as np
+import jax.numpy as jnp
 import jax
-import numpy as onp
+import numpy as np
 
 from dppp import util
 
 class UtilityTests(unittest.TestCase):
 
     def test_map_over_secondary_dims_with_sum(self):
-        x = np.array([
+        x = jnp.array([
             [
                 [.3, .4],
                 [2., 1.],
@@ -37,24 +37,24 @@ class UtilityTests(unittest.TestCase):
                 [3.2, 1.]
             ]
         ])
-        expected = np.array([
+        expected = jnp.array([
             [1.3, 2.4],
             [4.4, 0],
             [9.2, 2.5]
         ])
 
-        mapped_sum = util.map_over_secondary_dims(np.sum)
+        mapped_sum = util.map_over_secondary_dims(jnp.sum)
         result = mapped_sum(x)
-        self.assertTrue(np.allclose(expected, result))
+        self.assertTrue(jnp.allclose(expected, result))
 
     #### has_shape ####
 
     def test_has_shape_true_for_single_element_jax_array(self):
-        a = np.array([1])
+        a = jnp.array([1])
         self.assertTrue(util.has_shape(a))
 
     def test_has_shape_true_for_single_element_numpy_array(self):
-        a = onp.array([1])
+        a = np.array([1])
         self.assertTrue(util.has_shape(a))
 
     def test_has_shape_false_for_scalar(self):
@@ -62,12 +62,12 @@ class UtilityTests(unittest.TestCase):
         self.assertFalse(util.has_shape(a))
 
     def test_has_shape_true_for_complex_array(self):
-        a = np.array([[1, 2], [3., 4.]])
+        a = jnp.array([[1, 2], [3., 4.]])
         self.assertTrue(util.has_shape(a))
 
     def test_has_shape_true_for_array_under_jit(self):
         has_shape_jitted = jax.jit(util.has_shape)
-        a = np.array([[1, 2], [3., 4.]])
+        a = jnp.array([[1, 2], [3., 4.]])
         self.assertTrue(has_shape_jitted(a))
 
     def test_has_shape_true_for_scalar_under_jit(self):
@@ -85,11 +85,11 @@ class UtilityTests(unittest.TestCase):
     #### is_array ####
 
     def test_is_array_true_for_single_element_jax_array(self):
-        a = np.array([1])
+        a = jnp.array([1])
         self.assertTrue(util.is_array(a))
 
     def test_is_array_true_for_single_element_numpy_array(self):
-        a = onp.array([1])
+        a = np.array([1])
         self.assertTrue(util.is_array(a))
 
     def test_is_array_false_for_scalar(self):
@@ -97,12 +97,12 @@ class UtilityTests(unittest.TestCase):
         self.assertFalse(util.is_array(a))
 
     def test_is_array_true_for_complex_array(self):
-        a = np.array([[1, 2], [3., 4.]])
+        a = jnp.array([[1, 2], [3., 4.]])
         self.assertTrue(util.is_array(a))
 
     def test_is_array_true_for_array_under_jit(self):
         is_array_jitted = jax.jit(util.is_array)
-        a = np.array([[1, 2], [3., 4.]])
+        a = jnp.array([[1, 2], [3., 4.]])
         self.assertTrue(is_array_jitted(a))
 
     def test_is_array_false_for_scalar_under_jit(self):
@@ -120,11 +120,11 @@ class UtilityTests(unittest.TestCase):
     #### is_scalar ####
 
     def test_is_scalar_true_for_single_element_array(self):
-        a = np.array([1])
+        a = jnp.array([1])
         self.assertTrue(util.is_scalar(a))
 
     def test_is_scalar_true_for_single_element_array_with_many_dims(self):
-        a = np.array([1])
+        a = jnp.array([1])
         a.reshape((1, 1, 1, 1))
         self.assertTrue(util.is_scalar(a))
 
@@ -133,17 +133,17 @@ class UtilityTests(unittest.TestCase):
         self.assertTrue(util.is_scalar(a))
 
     def test_is_scalar_false_for_complex_array(self):
-        a = np.array([[1, 2], [3., 4.]])
+        a = jnp.array([[1, 2], [3., 4.]])
         self.assertFalse(util.is_scalar(a))
 
     def test_is_scalar_false_for_array_under_jit(self):
         is_scalar_jitted = jax.jit(util.is_scalar)
-        a = np.array([[1, 2], [3., 4.]])
+        a = jnp.array([[1, 2], [3., 4.]])
         self.assertFalse(is_scalar_jitted(a))
 
     def test_is_scalar_true_for_single_element_array_with_many_dims_under_jit(self):
         is_scalar_jitted = jax.jit(util.is_scalar)
-        a = np.array([1])
+        a = jnp.array([1])
         a.reshape((1, 1, 1, 1))
         self.assertTrue(is_scalar_jitted(a))
 
@@ -167,21 +167,21 @@ class UtilityTests(unittest.TestCase):
         self.assertFalse(util.is_integer(a))
 
     def test_is_integer_true_for_int_array(self):
-        a = np.array([2, 3])
+        a = jnp.array([2, 3])
         self.assertTrue(util.is_integer(a))
 
     def test_is_integer_false_for_float_array(self):
-        a = np.array([2, 3.])
+        a = jnp.array([2, 3.])
         self.assertFalse(util.is_integer(a))
 
     def test_is_integer_true_for_int_array_under_jit(self):
         is_integer_jitted = jax.jit(util.is_integer)
-        a = np.array([2, 3])
+        a = jnp.array([2, 3])
         self.assertTrue(is_integer_jitted(a))
 
     def test_is_integer_false_for_float_array_under_jit(self):
         is_integer_jitted = jax.jit(util.is_integer)
-        a = np.array([2, 3.])
+        a = jnp.array([2, 3.])
         self.assertFalse(is_integer_jitted(a))
 
     #### is_int_scalar ####
@@ -195,15 +195,15 @@ class UtilityTests(unittest.TestCase):
         self.assertFalse(util.is_int_scalar(a))
 
     def test_is_int_scalar_true_for_single_element_int_array(self):
-        a = np.array([2])
+        a = jnp.array([2])
         self.assertTrue(util.is_int_scalar(a))
 
     def test_is_int_scalar_false_for_single_element_float_array(self):
-        a = np.array([2.])
+        a = jnp.array([2.])
         self.assertFalse(util.is_int_scalar(a))
 
     def test_is_int_scalar_false_for_array(self):
-        a = np.array([5, 4])
+        a = jnp.array([5, 4])
         self.assertFalse(util.is_int_scalar(a))
 
     def test_is_int_scalar_true_for_int_scalar_under_jit(self):
@@ -219,30 +219,30 @@ class UtilityTests(unittest.TestCase):
 
     def test_is_int_scalar_true_for_single_element_int_array_under_jit(self):
         is_int_scalar_jitted = jax.jit(util.is_int_scalar)
-        a = np.array([2])
+        a = jnp.array([2])
         self.assertTrue(is_int_scalar_jitted(a))
 
     def test_is_int_scalar_false_for_single_element_float_array_under_jit(self):
         is_int_scalar_jitted = jax.jit(util.is_int_scalar)
-        a = np.array([2.])
+        a = jnp.array([2.])
         self.assertFalse(is_int_scalar_jitted(a))
 
     def test_is_int_scalar_false_for_array_under_jit(self):
         is_int_scalar_jitted = jax.jit(util.is_int_scalar)
-        a = np.array([5, 4])
+        a = jnp.array([5, 4])
         self.assertFalse(is_int_scalar_jitted(a))
 
 
     #### example_count ####
 
     def test_example_count_is_correct(self):
-        a = np.array([[1., 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4], [5, 5, 5]])
+        a = jnp.array([[1., 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4], [5, 5, 5]])
         expected = 5
         result = util.example_count(a)
         self.assertEqual(expected, result)
 
     def test_example_count_is_correct_for_single_element(self):
-        a = np.array(1)
+        a = jnp.array(1)
         expected = 1
         result = util.example_count(a)
         self.assertEqual(expected, result)
@@ -255,14 +255,14 @@ class UtilityTests(unittest.TestCase):
 
     def test_example_count_is_correct_under_jit(self):
         example_count_jitted = jax.jit(util.example_count)
-        a = np.array([[1., 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4], [5, 5, 5]])
+        a = jnp.array([[1., 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4], [5, 5, 5]])
         expected = 5
         result = example_count_jitted(a)
         self.assertEqual(expected, result)
 
     def test_example_count_is_correct_for_single_element_under_jit(self):
         example_count_jitted = jax.jit(util.example_count)
-        a = np.array(1)
+        a = jnp.array(1)
         expected = 1
         result = example_count_jitted(a)
         self.assertEqual(expected, result)
@@ -277,9 +277,9 @@ class UtilityTests(unittest.TestCase):
     #### normalize ####
 
     def test_normalize_correct(self):
-        x = np.arange(7)
+        x = jnp.arange(7)
         res = util.normalize(x)
-        self.assertTrue(np.allclose(1., np.linalg.norm(res)))
+        self.assertTrue(jnp.allclose(1., jnp.linalg.norm(res)))
 
     def test_normalize_correct_for_scalar(self):
         x = 8.
@@ -289,25 +289,25 @@ class UtilityTests(unittest.TestCase):
     #### unvectorize_shape ####
 
     def test_unvectorize_shape_input_has_expected_amount_of_dims(self):
-        a = np.array([[3, 4], [5, 6], [7, 8]])
+        a = jnp.array([[3, 4], [5, 6], [7, 8]])
         expected = (3, 2)
         res = util.unvectorize_shape(a, 2)
         self.assertEqual(expected, res)
 
     def test_unvectorize_shape_input_has_more_dims(self):
-        a = np.array([[3, 4], [5, 6], [7, 8]])
+        a = jnp.array([[3, 4], [5, 6], [7, 8]])
         expected = (3, 2)
         res = util.unvectorize_shape(a, 1)
         self.assertEqual(expected, res)
 
     def test_unvectorize_shape_input_has_one_missing_dim(self):
-        a = np.array([[3, 4], [5, 6], [7, 8]])
+        a = jnp.array([[3, 4], [5, 6], [7, 8]])
         expected = (1, 3, 2)
         res = util.unvectorize_shape(a, 3)
         self.assertEqual(expected, res)
 
     def test_unvectorize_shape_input_has_two_missing_dims(self):
-        a = np.array([[3, 4], [5, 6], [7, 8]])
+        a = jnp.array([[3, 4], [5, 6], [7, 8]])
         expected = (1, 1, 3, 2)
         res = util.unvectorize_shape(a, 4)
         self.assertEqual(expected, res)
@@ -327,25 +327,25 @@ class UtilityTests(unittest.TestCase):
     #### expand_shape ####
 
     def test_expand_shape_input_has_expected_amount_of_dims(self):
-        a = np.array([[3, 4], [5, 6], [7, 8]])
+        a = jnp.array([[3, 4], [5, 6], [7, 8]])
         expected = (3, 2)
         res = util.expand_shape(a, 2)
         self.assertEqual(expected, res)
 
     def test_expand_shape_input_has_more_dims(self):
-        a = np.array([[3, 4], [5, 6], [7, 8]])
+        a = jnp.array([[3, 4], [5, 6], [7, 8]])
         expected = (3, 2)
         res = util.expand_shape(a, 1)
         self.assertEqual(expected, res)
 
     def test_expand_shape_input_has_one_missing_dim(self):
-        a = np.array([[3, 4], [5, 6], [7, 8]])
+        a = jnp.array([[3, 4], [5, 6], [7, 8]])
         expected = (3, 2, 1)
         res = util.expand_shape(a, 3)
         self.assertEqual(expected, res)
 
     def test_expand_shape_input_has_two_missing_dims(self):
-        a = np.array([[3, 4], [5, 6], [7, 8]])
+        a = jnp.array([[3, 4], [5, 6], [7, 8]])
         expected = (3, 2, 1, 1)
         res = util.expand_shape(a, 4)
         self.assertEqual(expected, res)
@@ -365,8 +365,8 @@ class UtilityTests(unittest.TestCase):
     #### do_trees_have_same_structure ####
 
     def test_do_trees_have_same_structure(self):
-        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
-        b = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
+        b = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
         self.assertTrue(util.do_trees_have_same_structure(a, b))
 
     def test_do_trees_have_same_structure_empty(self):
@@ -375,25 +375,25 @@ class UtilityTests(unittest.TestCase):
         self.assertTrue(util.do_trees_have_same_structure(a, b))
 
     def test_do_trees_have_same_structure_different_shape_dimensions(self):
-        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
-        b = ((np.ones((8, 4)), np.ones((7, 6, 3))), np.ones(7))
+        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
+        b = ((jnp.ones((8, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
         self.assertTrue(util.do_trees_have_same_structure(a, b))
 
     def test_do_trees_have_same_structure_different_shape_lengths(self):
-        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
-        b = ((np.ones((3)), np.ones((7, 6))), np.ones(7))
+        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
+        b = ((jnp.ones((3)), jnp.ones((7, 6))), jnp.ones(7))
         self.assertTrue(util.do_trees_have_same_structure(a, b))
 
     def test_do_trees_have_same_structure_different_values(self):
-        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
-        b = ((np.zeros((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
+        b = ((jnp.zeros((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
         self.assertTrue(util.do_trees_have_same_structure(a, b))
 
     #### do_trees_have_same_shape ####
 
     def test_do_trees_have_same_shape(self):
-        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
-        b = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
+        b = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
         self.assertTrue(util.do_trees_have_same_shape(a, b))
 
     def test_do_trees_have_same_shape_empty(self):
@@ -402,25 +402,25 @@ class UtilityTests(unittest.TestCase):
         self.assertTrue(util.do_trees_have_same_shape(a, b))
 
     def test_do_trees_have_same_shape_different_shape_dimensions(self):
-        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
-        b = ((np.ones((8, 4)), np.ones((7, 6, 3))), np.ones(7))
+        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
+        b = ((jnp.ones((8, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
         self.assertFalse(util.do_trees_have_same_shape(a, b))
 
     def test_do_trees_have_same_shape_different_shape_lengths(self):
-        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
-        b = ((np.ones((3)), np.ones((7, 6))), np.ones(7))
+        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
+        b = ((jnp.ones((3)), jnp.ones((7, 6))), jnp.ones(7))
         self.assertFalse(util.do_trees_have_same_shape(a, b))
 
     def test_do_trees_have_same_shape_different_values(self):
-        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
-        b = ((np.zeros((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
+        b = ((jnp.zeros((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
         self.assertTrue(util.do_trees_have_same_shape(a, b))
 
     #### are_trees_close ####
 
     def test_are_trees_close(self):
-        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
-        b = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
+        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
+        b = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
         self.assertTrue(util.are_trees_close(a, b))
 
     def test_are_trees_close_empty(self):
@@ -429,60 +429,60 @@ class UtilityTests(unittest.TestCase):
         self.assertTrue(util.are_trees_close(a, b))
 
     def test_are_trees_close_different_shape_dimensions(self):
-        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
-        b = ((np.ones((8, 4)), np.ones((7, 6, 3))), np.ones(7))
+        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
+        b = ((jnp.ones((8, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
         self.assertFalse(util.are_trees_close(a, b))
 
     def test_are_trees_close_different_shape_lengths(self):
-        a = ((np.ones((3, 4)), np.ones((7, 6, 3))), np.ones(7))
-        b = ((np.ones((3)), np.ones((7, 6))), np.ones(7))
+        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
+        b = ((jnp.ones((3)), jnp.ones((7, 6))), jnp.ones(7))
         self.assertFalse(util.are_trees_close(a, b))
 
     ### shuffle
 
     def test_sample_from_array(self):
-        x = np.arange(0, 1000000) + 100
+        x = jnp.arange(0, 1000000) + 100
         rng_key = jax.random.PRNGKey(0)
         n_vals = 978
         shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
-        unq_vals = onp.unique(shuffled)
-        self.assertEqual(n_vals, onp.size(unq_vals))
-        self.assertTrue(np.alltrue(shuffled >= 100))
+        unq_vals = np.unique(shuffled)
+        self.assertEqual(n_vals, np.size(unq_vals))
+        self.assertTrue(jnp.alltrue(shuffled >= 100))
 
     def test_sample_from_array_correct_shape(self):
         x = jax.random.uniform(jax.random.PRNGKey(124), shape=(1000, 200))
         rng_key = jax.random.PRNGKey(0)
         n_vals = 38
         shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
-        self.assertEqual((n_vals, 200), np.shape(shuffled))
+        self.assertEqual((n_vals, 200), jnp.shape(shuffled))
 
         shuffled = util.sample_from_array(rng_key, x, n_vals, 1)
-        self.assertEqual((1000, n_vals), np.shape(shuffled))
+        self.assertEqual((1000, n_vals), jnp.shape(shuffled))
 
     def test_sample_from_array_full_shuffle(self):
-        x = np.arange(0, 100) + 100
+        x = jnp.arange(0, 100) + 100
         rng_key = jax.random.PRNGKey(0)
         n_vals = 100
         shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
-        unq_vals = onp.unique(shuffled)
-        self.assertEqual(n_vals, onp.size(unq_vals))
-        self.assertTrue(np.alltrue(shuffled >= 100))
+        unq_vals = np.unique(shuffled)
+        self.assertEqual(n_vals, np.size(unq_vals))
+        self.assertTrue(jnp.alltrue(shuffled >= 100))
 
     def test_sample_from_array_almost_full_shuffle(self):
-        x = np.arange(0, 100) + 100
+        x = jnp.arange(0, 100) + 100
         rng_key = jax.random.PRNGKey(0)
         n_vals = 99
         shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
-        unq_vals = onp.unique(shuffled)
-        self.assertEqual(n_vals, onp.size(unq_vals))
-        self.assertTrue(np.alltrue(shuffled >= 100))
+        unq_vals = np.unique(shuffled)
+        self.assertEqual(n_vals, np.size(unq_vals))
+        self.assertTrue(jnp.alltrue(shuffled >= 100))
 
     def test_sample_from_array_single_sample(self):
-        x = np.arange(0, 100) + 100
+        x = jnp.arange(0, 100) + 100
         rng_key = jax.random.PRNGKey(0)
         n_vals = 1
         shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
-        self.assertTrue(np.alltrue(shuffled >= 100))
+        self.assertTrue(jnp.alltrue(shuffled >= 100))
 
 if __name__ == '__main__':
     unittest.main()
