@@ -26,19 +26,25 @@ import argparse
 import time
 
 import jax
-import jax.numpy as np
+import jax.numpy as jnp
 from jax import jit, lax, random
 from jax.random import PRNGKey
 
+import numpyro
 import numpyro.distributions as dist
 from numpyro.primitives import param, sample
-from numpyro.infer import ELBO
+from numpyro.infer import Trace_ELBO as ELBO
 import numpyro.optim as optimizers
 
-from dppp.util import example_count, normalize, unvectorize_shape_2d
+from dppp.util import example_count, normalize
 from dppp.svi import DPSVI, sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
+try:
+    jax.lib.xla_bridge.get_backend('gpu') # this will fail if gpu not available
+    numpyro.set_platform('gpu')
+except RuntimeError:
+    print("gpu not available. falling back to cpu")
 
 def model(batch_X, batch_y=None, num_obs_total=None):
     """Defines the generative probabilistic model: p(y|z,X)p(z)
@@ -47,11 +53,11 @@ def model(batch_X, batch_y=None, num_obs_total=None):
     :param batch_X: a batch of predictors
     :param batch_y: a batch of observations
     """
-    assert(np.ndim(batch_X) <= 2)
-    batch_size, d = unvectorize_shape_2d(batch_X)
+    assert(jnp.ndim(batch_X) == 2)
+    batch_size, d = jnp.shape(batch_X)
     assert(batch_y is None or example_count(batch_y) == batch_size)
 
-    z_w = sample('w', dist.Normal(np.zeros((d,)), np.ones((d,)))) # prior is N(0,I)
+    z_w = sample('w', dist.Normal(jnp.zeros((d,)), jnp.ones((d,)))) # prior is N(0,I)
     z_intercept = sample('intercept', dist.Normal(0,1)) # prior is N(0,1)
     logits = batch_X.dot(z_w)+z_intercept
 
@@ -65,14 +71,15 @@ def guide(batch_X, batch_y=None, num_obs_total=None):
     # we are interested in the posterior of w and intercept
     # since this is a fairly simple model, we just initialize them according
     # to our prior believe and let the optimization handle the rest
-    d = np.atleast_2d(batch_X).shape[1]
+    assert(jnp.ndim(batch_X) == 2)
+    d = jnp.shape(batch_X)[1]
 
-    z_w_loc = param("w_loc", np.zeros((d,)))
-    z_w_std = np.exp(param("w_std_log", np.zeros((d,))))
+    z_w_loc = param("w_loc", jnp.zeros((d,)))
+    z_w_std = jnp.exp(param("w_std_log", jnp.zeros((d,))))
     z_w = sample('w', dist.Normal(z_w_loc, z_w_std))
 
     z_intercept_loc = param("intercept_loc", 0.)
-    z_interpet_std = np.exp(param("intercept_std_log", 0.))
+    z_interpet_std = jnp.exp(param("intercept_std_log", 0.))
     z_intercept = sample('intercept', dist.Normal(z_intercept_loc, z_interpet_std))
 
     return (z_w, z_intercept)
@@ -97,7 +104,7 @@ def create_toy_data(rng_key, N, d):
 
 def estimate_accuracy_fixed_params(X, y, w, intercept, rng, num_iterations=1):
     samples = sample_multi_prior_predictive(rng, num_iterations, model, (X,), {'w': w, 'intercept': intercept})
-    return np.average(samples['obs'] == y)
+    return jnp.average(samples['obs'] == y)
 
 def estimate_accuracy(X, y, params, rng, num_iterations=1):
 
@@ -105,7 +112,7 @@ def estimate_accuracy(X, y, params, rng, num_iterations=1):
         rng, num_iterations, model, (X,), guide, (X,), params
     )
 
-    return np.average(samples['obs'] == y)
+    return jnp.average(samples['obs'] == y)
 
 def main(args):
     rng = PRNGKey(123)
@@ -192,19 +199,19 @@ def main(args):
     # parameters for logistic regression may be scaled arbitrarily. normalize
     #   w (and scale intercept accordingly) for comparison
     w_true = normalize(true_params[0])
-    scale_true = np.linalg.norm(true_params[0])
+    scale_true = jnp.linalg.norm(true_params[0])
     intercept_true = true_params[1] / scale_true
 
     params = svi.get_params(svi_state)
     w_post = normalize(params['w_loc'])
-    scale_post = np.linalg.norm(params['w_loc'])
+    scale_post = jnp.linalg.norm(params['w_loc'])
     intercept_post = params['intercept_loc'] / scale_post
 
-    print("w_loc: {}\nexpected: {}\nerror: {}".format(w_post, w_true, np.linalg.norm(w_post-w_true)))
-    print("w_std: {}".format(np.exp(params['w_std_log'])))
+    print("w_loc: {}\nexpected: {}\nerror: {}".format(w_post, w_true, jnp.linalg.norm(w_post-w_true)))
+    print("w_std: {}".format(jnp.exp(params['w_std_log'])))
     print("")
-    print("intercept_loc: {}\nexpected: {}\nerror: {}".format(intercept_post, intercept_true, np.abs(intercept_post-intercept_true)))
-    print("intercept_std: {}".format(np.exp(params['intercept_std_log'])))
+    print("intercept_loc: {}\nexpected: {}\nerror: {}".format(intercept_post, intercept_true, jnp.abs(intercept_post-intercept_true)))
+    print("intercept_std: {}".format(jnp.exp(params['intercept_std_log'])))
     print("")
 
     X_test, y_test = test_data

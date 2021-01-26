@@ -13,7 +13,8 @@
 # limitations under the License.
 
 import jax
-import jax.numpy as np
+import jax.numpy as jnp
+import numpy as np
 from functools import reduce, wraps, partial
 
 __all__ = ["map_over_secondary_dims", "has_shape", "is_array", "is_scalar",
@@ -55,7 +56,7 @@ def map_over_secondary_dims(f):
     """
     @wraps(f)
     def map_over_secondary_dims_f(T):
-        assert(np.ndim(T) >= 1)
+        assert(jnp.ndim(T) >= 1)
         T_ = T.reshape((T.shape[0], -1))
         Z_ = jax.vmap(f, in_axes=1)(T_)
         return Z_.reshape(T.shape[1:])
@@ -69,7 +70,7 @@ def example_count(a):
     :param a: The data set from which to extract the example count.
     """
     try:
-        return np.shape(a)[0]
+        return jnp.shape(a)[0]
     except:
         return 1
 
@@ -94,7 +95,7 @@ def is_array(a):
 
     :param a: Anything that might be an array.
     """
-    return has_shape(a) and np.ndim(a) > 0
+    return has_shape(a) and jnp.ndim(a) > 0
 
 
 def is_scalar(x):
@@ -108,9 +109,9 @@ def is_scalar(x):
     """
     # note(lumip): a call to jax.jit(is_scalar)(s), where x is a scalar,
     #   results in an x that is a jax.numpy array without any dimensions but
-    #   which has a shape attribute. therefore, np.isscalar(x) as well as
+    #   which has a shape attribute. therefore, jnp.isscalar(x) as well as
     #   is_array(x) are False -> we have to use has_shape(x) to detect this
-    return np.isscalar(x) or (has_shape(x) and reduce(lambda x, a: x*a, np.shape(x), 1) == 1)
+    return jnp.isscalar(x) or (has_shape(x) and reduce(lambda x, a: x*a, jnp.shape(x), 1) == 1)
 
 
 def is_integer(x):
@@ -120,7 +121,7 @@ def is_integer(x):
 
     :param x: Scalar or (jax.)numpy array that could have integer values.
     """
-    return (has_shape(x) and np.issubdtype(x.dtype, np.integer)) or np.issubdtype(type(x), np.integer)
+    return (has_shape(x) and jnp.issubdtype(x.dtype, jnp.integer)) or jnp.issubdtype(type(x), jnp.integer)
 
 
 def is_int_scalar(x):
@@ -138,7 +139,7 @@ def normalize(x):
 
     :param x: The vector to normalize.
     """
-    return x / np.linalg.norm(x)
+    return x / jnp.linalg.norm(x)
 
 def unvectorize_shape(a, d):
     """Undoes the stripping of leading dimensions in the shape of a vectorized/
@@ -150,13 +151,13 @@ def unvectorize_shape(a, d):
     array has as least as many dimensions as specified, its shape is returned
     unmodified.
 
-    Similar to `np.shape(np.atleast_xd(a))` but guaranteed to fill the shape
+    Similar to `jnp.shape(jnp.atleast_xd(a))` but guaranteed to fill the shape
     from the front.
 
     :param a: The vectorized/vmapped array.
     :param d: The minimum number of dimensions included in the output shape.
     """
-    shape = np.shape(a)
+    shape = jnp.shape(a)
     ndim = len(shape)
     if ndim < d:
         return (1,) * (d - ndim) + shape
@@ -183,7 +184,7 @@ def unvectorize_shape_2d(a):
     be filled with dimensions of size 1 from the front. If the input
     array has dimensionality 2 or greater, its shape is returned unmodified.
 
-    Similar to `np.shape(np.atleast_2d(a))`.
+    Similar to `jnp.shape(jnp.atleast_2d(a))`.
 
     :param a: The vectorized/vmapped array.
     """
@@ -197,7 +198,7 @@ def unvectorize_shape_3d(a):
     be filled with dimensions of size 1 from the front. If the input
     array has dimensionality 3 or greater, its shape is returned unmodified.
 
-    Similar to `np.shape(np.atleast_3d(a))` but fills the shape from the front.
+    Similar to `jnp.shape(jnp.atleast_3d(a))` but fills the shape from the front.
 
     :param a: The vectorized/vmapped array.
     """
@@ -212,13 +213,13 @@ def expand_shape(a, d):
     already has as least as many dimensions as specified, its shape is returned
     unmodified.
 
-    Similar to `np.shape(np.atleast_xd(a))` but guaranteed to fill the shape
+    Similar to `jnp.shape(jnp.atleast_xd(a))` but guaranteed to fill the shape
     from the back.
 
     :param a: The vectorized/vmapped array.
     :param d: The minimum number of dimensions included in the output shape.
     """
-    shape = np.shape(a)
+    shape = jnp.shape(a)
     ndim = len(shape)
     if ndim < d:
         return shape + (1,) * (d - ndim)
@@ -243,7 +244,7 @@ def expand_shape_2d(a):
     be filled with dimensions of size 1 from the back. If the input array
     already has dimensionality 2 or greater, its shape is returned unmodified.
 
-    Similar to `np.shape(np.atleast_2d(a))` but fills the returned shape from
+    Similar to `jnp.shape(jnp.atleast_2d(a))` but fills the returned shape from
     the back.
 
     :param a: The vectorized/vmapped array.
@@ -257,7 +258,7 @@ def expand_shape_3d(a):
     be filled with dimensions of size 1 from the back. If the input array
     already has dimensionality 3 or greater, its shape is returned unmodified.
 
-    Similar to `np.shape(np.atleast_3d(a))`.
+    Similar to `jnp.shape(jnp.atleast_3d(a))`.
 
     :param a: The vectorized/vmapped array.
     """
@@ -276,7 +277,7 @@ def do_trees_have_same_shape(a, b):
         all corresponding leaves are identical.
     """
     return do_trees_have_same_structure(a, b) and _and_reduce(
-        np.shape(x) == np.shape(y)
+        jnp.shape(x) == jnp.shape(y)
         for x, y, in zip(jax.tree_leaves(a), jax.tree_leaves(b))
     )
 
@@ -286,12 +287,22 @@ def are_trees_close(a, b):
     close.
     """
     return do_trees_have_same_shape(a,b) and _and_reduce(
-        np.allclose(x, y)
+        jnp.allclose(x, y)
         for x, y, in zip(jax.tree_leaves(a), jax.tree_leaves(b))
     )
 
 @partial(jax.jit, static_argnums=(2,3))
 def sample_from_array(rng_key, x, n, axis):
+    """ Samples n elements from a given array without replacement.
+
+    Uses the Feistel shuffle to uniformly draw
+    n unique elements from x along the given axis.
+
+    :param rng_key: jax prng key used for sampling.
+    :param x: the array from which elements are sampled
+    :param n: how many elements to return
+    :param axis: axis along which samples are drawn
+    """
     capacity = np.uint32(np.shape(x)[axis])
     data = np.arange(n, dtype=np.uint32)
 
@@ -302,33 +313,33 @@ def sample_from_array(rng_key, x, n, axis):
 
     def permute32(vals):
         def hash_func_in(x):
-            x = np.bitwise_xor(x, np.right_shift(x, np.uint32(16)))
-            x *= np.uint32(0x85ebca6b)
-            x = np.bitwise_xor(x, np.right_shift(x, np.uint32(13)))
-            x *= np.uint32(0xc2b2ae35)
-            x = np.bitwise_xor(x, np.right_shift(x, np.uint32(16)))
+            x = jnp.bitwise_xor(x, jnp.right_shift(x, jnp.uint32(16)))
+            x *= jnp.uint32(0x85ebca6b)
+            x = jnp.bitwise_xor(x, jnp.right_shift(x, jnp.uint32(13)))
+            x *= jnp.uint32(0xc2b2ae35)
+            x = jnp.bitwise_xor(x, jnp.right_shift(x, jnp.uint32(16)))
 
             return x
 
         num_iters = np.uint32(8)
 
-        bits = np.uint32(len(bin(capacity)) - 2)
-        bits_lower = np.right_shift(bits, 1)
+        bits = jnp.uint32(len(bin(capacity)) - 2)
+        bits_lower = jnp.right_shift(bits, 1)
         bits_upper = bits - bits_lower
-        mask_lower = (np.left_shift(np.uint32(1), bits_lower)) - np.uint32(1)
+        mask_lower = (jnp.left_shift(jnp.uint32(1), bits_lower)) - jnp.uint32(1)
 
         seed_offst = hash_func_in(seed)
         position = vals
 
         def iter_func(position):
             for j in range(num_iters):
-                j = np.uint32(j)
-                upper = np.right_shift(position, bits_lower)
-                lower = np.bitwise_and(position, mask_lower)
+                j = jnp.uint32(j)
+                upper = jnp.right_shift(position, bits_lower)
+                lower = jnp.bitwise_and(position, mask_lower)
                 mixer = hash_func_in(upper + seed_offst + j)
 
-                tmp = np.bitwise_xor(lower, mixer)
-                position = upper + (np.left_shift(np.bitwise_and(tmp, mask_lower), bits_upper))
+                tmp = jnp.bitwise_xor(lower, mixer)
+                position = upper + (jnp.left_shift(jnp.bitwise_and(tmp, mask_lower), bits_upper))
             return position
 
         position = iter_func(position)
@@ -339,4 +350,4 @@ def sample_from_array(rng_key, x, n, axis):
     func = jax.vmap(permute32)
     a = func(data)
 
-    return a
+    return jnp.take(x, a, axis=axis)

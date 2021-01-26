@@ -1,0 +1,3 @@
+- current:
+    - Upgraded dependencies: numpyro (>=0.4.0), jax (>=0.2.3)
+- 0.1.0: Initial not-quite-a-release

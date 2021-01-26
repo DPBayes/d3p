@@ -30,19 +30,19 @@ import time
 
 import matplotlib.pyplot as plt
 
-import jax.numpy as np
+import jax.numpy as jnp
 from jax import jit, lax, random
 from jax.experimental import stax
 from jax.random import PRNGKey
+import jax
 
 import numpyro
 import numpyro.optim as optimizers
 import numpyro.distributions as dist
 from numpyro.primitives import sample
-from numpyro.infer import ELBO
+from numpyro.infer import Trace_ELBO as ELBO
 
 from dppp.svi import DPSVI, sample_multi_posterior_predictive
-from dppp.util import unvectorize_shape_3d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
 from datasets import MNIST, load_dataset
@@ -50,6 +50,12 @@ from datasets import MNIST, load_dataset
 RESULTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
                               '.results'))
 os.makedirs(RESULTS_DIR, exist_ok=True)
+
+try:
+    jax.lib.xla_bridge.get_backend('gpu') # this will fail if gpu not available
+    numpyro.set_platform('gpu')
+except RuntimeError:
+    print("gpu not available. falling back to cpu")
 
 
 def encoder(hidden_dim, z_dim):
@@ -104,14 +110,14 @@ def model(batch, z_dim, hidden_dim, num_obs_total=None):
 
     :return: (named) sample x from the model observation distribution p(x|z)p(z)
     """
-    assert(np.ndim(batch) == 3 or np.ndim(batch) == 2)
-    batch_size = unvectorize_shape_3d(batch)[0]
-    batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
-    out_dim = np.shape(batch)[1]
+    assert(jnp.ndim(batch) == 3)
+    batch_size = jnp.shape(batch)[0]
+    batch = jnp.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
+    out_dim = jnp.shape(batch)[1]
 
     decode = numpyro.module('decoder', decoder(hidden_dim, out_dim), (batch_size, z_dim))
     with minibatch(batch_size, num_obs_total=num_obs_total):
-        z = sample('z', dist.Normal(np.zeros((z_dim,)), np.ones((z_dim,)))) # prior on z is N(0,I)
+        z = sample('z', dist.Normal(jnp.zeros((z_dim,)), jnp.ones((z_dim,)))) # prior on z is N(0,I)
         img_loc = decode(z) # evaluate decoder (p(x|z)) on sampled z to get means for output bernoulli distribution
         x = sample('obs', dist.Bernoulli(img_loc), obs=batch) # outputs x are sampled from bernoulli distribution depending on z and conditioned on the observed data
         return x
@@ -122,10 +128,10 @@ def guide(batch, z_dim, hidden_dim, num_obs_total=None):
     :param batch: a batch of observations
     :return: (named) sampled z from the variational (guide) distribution q(z)
     """
-    assert(np.ndim(batch) == 3 or np.ndim(batch) == 2)
-    batch_size = unvectorize_shape_3d(batch)[0]
-    batch = np.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
-    out_dim = np.shape(batch)[1]
+    assert(jnp.ndim(batch) == 3)
+    batch_size = jnp.shape(batch)[0]
+    batch = jnp.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
+    out_dim = jnp.shape(batch)[1]
 
     encode = numpyro.module('encoder', encoder(hidden_dim, z_dim), (batch_size, out_dim))
     with minibatch(batch_size, num_obs_total=num_obs_total):
@@ -250,13 +256,14 @@ def main(args):
         img = test_fetch_plain(0, batchifier_state)[0][0]
         plt.imsave(
             os.path.join(RESULTS_DIR, "epoch_{:0{}d}_original.png".format(
-                epoch, (int(np.log10(num_epochs))+1))
+                epoch, (int(jnp.log10(num_epochs))+1))
             ),
             img,
             cmap='gray'
         )
         rng, rng_binarize = random.split(rng, 2)
         test_sample = binarize(rng_binarize, img)
+        test_sample = jnp.reshape(test_sample, (1, *jnp.shape(test_sample)))
         params = svi.get_params(svi_state)
         # todo(lumip): fix this. with how stuff currently works, this call
         #   to sample_multi_posterior will always return test_sample instead
@@ -267,17 +274,17 @@ def main(args):
             guide, (test_sample, args.z_dim, args.hidden_dim), params
         )
         img_loc = samples['obs'][0].reshape([28, 28])
-        avg_img_loc = np.mean(samples['obs'], axis=0).reshape([28, 28])
+        avg_img_loc = jnp.mean(samples['obs'], axis=0).reshape([28, 28])
         plt.imsave(
             os.path.join(RESULTS_DIR, "epoch_{:0{}d}_recons_single.png".format(
-                epoch, (int(np.log10(num_epochs))+1))
+                epoch, (int(jnp.log10(num_epochs))+1))
             ),
             img_loc,
             cmap='gray'
         )
         plt.imsave(
             os.path.join(RESULTS_DIR, "epoch_{:0{}d}_recons_avg.png".format(
-                epoch, (int(np.log10(num_epochs))+1))
+                epoch, (int(jnp.log10(num_epochs))+1))
             ),
             avg_img_loc,
             cmap='gray'

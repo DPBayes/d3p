@@ -18,7 +18,7 @@ import unittest
 
 from functools import reduce
 
-import jax.numpy as np
+import jax.numpy as jnp
 import jax
 from numpyro.infer.svi import SVIState
 
@@ -31,11 +31,11 @@ class DPSVITest(unittest.TestCase):
         self.batch_size = 10
         self.num_obs_total = 100
         self.px_grads = ((
-            np.zeros((self.batch_size, 10000)),
-            np.zeros((self.batch_size, 10000))
+            jnp.zeros((self.batch_size, 10000)),
+            jnp.zeros((self.batch_size, 10000))
         ))
         self.px_grads_list, self.tree_def = jax.tree_flatten(self.px_grads)
-        self.px_loss = np.arange(self.batch_size, dtype=np.float32)
+        self.px_loss = jnp.arange(self.batch_size, dtype=jnp.float32)
         self.dp_scale = 1.
         self.clipping_threshold = 2.
         self.svi = DPSVI(None, None, None, None, self.clipping_threshold,
@@ -51,16 +51,16 @@ class DPSVITest(unittest.TestCase):
             )
 
         self.assertIs(svi_state.optim_state, new_svi_state.optim_state)
-        self.assertFalse(np.allclose(svi_state.rng_key, new_svi_state.rng_key))
-        self.assertEqual(np.mean(self.px_loss), loss_val)
+        self.assertFalse(jnp.allclose(svi_state.rng_key, new_svi_state.rng_key))
+        self.assertEqual(jnp.mean(self.px_loss), loss_val)
         self.assertEqual(self.tree_def, jax.tree_structure(grads))
 
         expected_std = self.dp_scale * self.clipping_threshold
         for site in jax.tree_leaves(grads):
             self.assertTrue(
-                np.allclose(expected_std, np.std(site)/self.num_obs_total, atol=1e-1)
+                jnp.allclose(expected_std, jnp.std(site)/self.num_obs_total, atol=1e-1)
             )
-            self.assertTrue(np.allclose(0., np.mean(site)/self.num_obs_total, atol=1e-1))
+            self.assertTrue(jnp.allclose(0., jnp.mean(site)/self.num_obs_total, atol=1e-1))
 
     def test_dp_noise_perturbation_not_deterministic_over_calls(self):
         svi_state = SVIState(None, self.rng)
@@ -77,7 +77,7 @@ class DPSVITest(unittest.TestCase):
         some_gradient_noise_is_equal = reduce(lambda are_equal, acc: are_equal or acc,
             jax.tree_leaves(
                 jax.tree_multimap(
-                    lambda x, y: np.allclose(x, y), first_grads, second_grads
+                    lambda x, y: jnp.allclose(x, y), first_grads, second_grads
                 )
             )
         )
@@ -92,7 +92,7 @@ class DPSVITest(unittest.TestCase):
 
         noise_sites = jax.tree_leaves(grads)
 
-        self.assertFalse(np.allclose(noise_sites[0], noise_sites[1]))
+        self.assertFalse(jnp.allclose(noise_sites[0], noise_sites[1]))
 
 
 if __name__ == '__main__':

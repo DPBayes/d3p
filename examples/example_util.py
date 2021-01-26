@@ -14,12 +14,12 @@
 
 __all__ = ['sigmoid', 'softmax']
 
-import jax.numpy as np
+import jax.numpy as jnp
 
 def sigmoid(x):
-    return 1 / (1 + np.exp(-x))
+    return 1 / (1 + jnp.exp(-x))
 
 def softmax(x):
-    y = np.max(x)
+    y = jnp.max(x)
     x_ = x-y
-    return np.exp(x_)/np.sum(np.exp(x_))
+    return jnp.exp(x_)/jnp.sum(jnp.exp(x_))

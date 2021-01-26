@@ -19,12 +19,11 @@ import functools
 
 import jax
 from jax import random
-import jax.numpy as np
+import jax.numpy as jnp
 
 from numpyro.infer.svi import SVI, SVIState
 import numpyro.distributions as dist
 from numpyro.handlers import seed, trace, substitute
-from numpyro.optim import _NumpyroOptim
 
 from dppp.util import map_over_secondary_dims, example_count
 
@@ -32,13 +31,18 @@ from fourier_accountant.compute_eps import get_epsilon_S, get_epsilon_R
 from fourier_accountant.compute_delta import get_delta_S, get_delta_R
 
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
-    value_and_grad_fun = jax.value_and_grad(fun, argnums, has_aux, holomorphic)
+    # vmap removes leading dimensions, we re-add those in a wrapper for fun so
+    # that fun can be oblivious of this
+    def fun_for_vmap(params, args):
+        new_args = (jnp.reshape(arg, (1, *jnp.shape(arg))) for arg in args)
+        return fun(params, new_args)
+    value_and_grad_fun = jax.value_and_grad(fun_for_vmap, argnums, has_aux, holomorphic)
     return jax.vmap(value_and_grad_fun, in_axes=(None, 0))
 
 
 class CombinedLoss(object):
 
-    def __init__(self, per_example_loss, combiner_fn = np.mean):
+    def __init__(self, per_example_loss, combiner_fn = jnp.mean):
         self.px_loss = per_example_loss
         self.combiner_fn = combiner_fn
 
@@ -79,7 +83,7 @@ class TunableSVI(SVI):
         (recognition network).
     :param per_example_loss_fn: ELBo loss, i.e. negative Evidence Lower Bound,
         to minimize, per example.
-    :param optim: an instance of :class:`~numpyro.optim._NumpyroOptim`.
+    :param optim: an instance of :class:`~numpyro.optim._NumPyroOptim`.
     :param per_example_grad_manipulation_fn: optional function that allows to
         manipulate the gradient for each sample.
     :param batch_grad_manipulation_fn: An optional function that allows to modify
@@ -96,22 +100,9 @@ class TunableSVI(SVI):
         self.px_grad_manipulation_fn = per_example_grad_manipulation_fn
         self.batch_grad_manipulation_fn = batch_grad_manipulation_fn
 
-        total_loss = CombinedLoss(per_example_loss, combiner_fn = np.mean)
+        total_loss = CombinedLoss(per_example_loss, combiner_fn = jnp.mean)
 
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
-
-    def init(self, *args, **kwargs):
-        ## note(lumip):
-        ## hotfix for numpyro issue https://github.com/pyro-ppl/numpyro/issues/602
-        ## which causes double compilation of model/guide functions.
-        ## can be removed once the corresponding numpyro fix is in a released
-        ## version we depend on.
-        svi_state = super().init(*args, **kwargs)
-        if isinstance(self.optim, _NumpyroOptim):
-            optim_state = svi_state.optim_state
-            optim_state = (np.array(optim_state[0]), *optim_state[1:])
-            svi_state = SVIState(optim_state, svi_state.rng_key)
-        return svi_state
 
     def _compute_per_example_gradients(self, svi_state, *args, **kwargs):
         """ Computes the raw per-example gradients of the model.
@@ -154,7 +145,7 @@ class TunableSVI(SVI):
             definition. The list is a flattened representation of the jax tree,
             the shape of per-example gradients per parameter is unaffected.
         """
-        # px_gradients is a jax tree of jax np.arrays of shape
+        # px_gradients is a jax tree of jax jnp.arrays of shape
         #   [batch_size, (param_shape)] for each parameter. flatten it out!
         px_grads_list, px_grads_tree_def = jax.tree_flatten(
             px_gradients
@@ -204,14 +195,14 @@ class TunableSVI(SVI):
         #   (1xbatch_size) Jacobian and construct a function that takes
         #   per-example gradients and left-multiplies them with that jacobian
         #   to get the final combined gradient
-        loss_jacobian = np.reshape(loss_combine_vjp(np.array(1.))[0], (1, -1))
-        # loss_vjp = lambda px_grads: np.sum(np.multiply(loss_jacobian, px_grads))
-        loss_vjp = lambda px_grads: np.matmul(loss_jacobian, px_grads)
+        loss_jacobian = jnp.reshape(loss_combine_vjp(jnp.array(1.))[0], (1, -1))
+        # loss_vjp = lambda px_grads: jnp.sum(jnp.multiply(loss_jacobian, px_grads))
+        loss_vjp = lambda px_grads: jnp.matmul(loss_jacobian, px_grads)
 
         # we map the loss combination vjp func over all secondary dimensions
         #   of gradient sites. This is necessary since some gradient
         #   sites might be matrices in itself (e.g., for NN layers), so a stack
-        #   of those would be 3-dimensional and not admittable to np.matmul
+        #   of those would be 3-dimensional and not admittable to jnp.matmul
         loss_vjp = map_over_secondary_dims(loss_vjp)
 
         # combine gradients for all parameters in the gradient jax tree
@@ -284,9 +275,9 @@ def full_norm(list_of_parts_or_tree, ord=2):
         return 0.
 
     ravelled = [g.ravel() for g in list_of_parts]
-    gradients = np.concatenate(ravelled)
+    gradients = jnp.concatenate(ravelled)
     assert(len(gradients.shape) == 1)
-    norm = np.linalg.norm(gradients, ord=ord)
+    norm = jnp.linalg.norm(gradients, ord=ord)
     return norm
 
 def normalize_gradient(list_of_gradient_parts, ord=2):
@@ -322,10 +313,10 @@ def clip_gradient(list_of_gradient_parts, c, rescale_factor = 1.):
     if c == 0.:
         raise ValueError("The clipping threshold must be greater than 0.")
     norm = full_norm(list_of_gradient_parts) * rescale_factor # norm of rescale_factor * grad
-    normalization_constant = 1./np.maximum(1., norm/c)
+    normalization_constant = 1./jnp.maximum(1., norm/c)
     f = rescale_factor * normalization_constant # to scale grad to max(rescale_factor * grad, C)
     clipped_grads = [f * g for g in list_of_gradient_parts]
-    # assert(np.all(full_gradient_norm(clipped_grads)<c)) # jax doesn't like this
+    # assert(jnp.all(full_gradient_norm(clipped_grads)<c)) # jax doesn't like this
     return clipped_grads
 
 def get_gradients_clipping_function(c, rescale_factor):
@@ -370,7 +361,7 @@ class DPSVI(TunableSVI):
         (recognition network).
     :param per_example_loss_fn: ELBo loss, i.e. negative Evidence Lower Bound,
         to minimize, per example.
-    :param optim: an instance of :class:`~numpyro.optim._NumpyroOptim`.
+    :param optim: an instance of :class:`~numpyro.optim._NumPyroOptim`.
     :param clipping_threshold: The clipping threshold C to which the norm
         of each per-example gradient is clipped.
     :param dp_scale: Scale parameter for the Gaussian mechanism applied to
@@ -484,7 +475,7 @@ def sample_prior_predictive(rng_key, model, model_args, substitutes=None, with_i
         sample values and the second element is a list of intermediate values.
     """
     if substitutes is None: substitutes = dict()
-    model = seed(substitute(model, param_map=substitutes), rng_key)
+    model = seed(substitute(model, data=substitutes), rng_key)
     t = trace(model).get_trace(*model_args)
     return get_samples_from_trace(t, with_intermediates)
 
@@ -513,7 +504,7 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args, p
     """
     model_rng_key, guide_rng_key = jax.random.split(rng_key)
 
-    guide = seed(substitute(guide, param_map=params), guide_rng_key)
+    guide = seed(substitute(guide, data=params), guide_rng_key)
     guide_samples = get_samples_from_trace(trace(guide).get_trace(*guide_args), with_intermediates)
 
     model_params = dict(**params)
@@ -522,7 +513,7 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args, p
     else:
         model_params.update({k: v for k, v in guide_samples.items()})
 
-    model = seed(substitute(model, param_map=model_params), model_rng_key)
+    model = seed(substitute(model, data=model_params), model_rng_key)
     model_samples = get_samples_from_trace(trace(model).get_trace(*model_args), with_intermediates)
 
     guide_samples.update(model_samples)
@@ -602,4 +593,4 @@ def fix_observations(model, observations):
         model function as designated by calls to `param`
     :return: Model function with fixed observations
     """
-    return substitute(model, param_map=observations)
+    return substitute(model, data=observations)

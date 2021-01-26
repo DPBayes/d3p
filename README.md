@@ -1,5 +1,7 @@
 # d3p - Differentially Private Probabilistic Programming
 
+[![Build Status](https://travis-ci.com/DPBayes/dppp.svg?branch=master)](https://travis-ci.com/DPBayes/dppp)
+
 d3p is an implementation of the differentially private variational inference algorithm [1] for [NumPyro](https://github.com/pyro-ppl/numpyro), using [JAX](https://github.com/google/jax/) for auto-differentiation and fast execution on CPU and GPU.
 
 ## Current Status
@@ -40,7 +42,7 @@ owning the copyright of software contributes by their employees).
 
 ## Acknowledgements
 
-We thank Nvidia for their contribution of GPU performance benchmarking and optimisation.
+We thank the NVIDIA AI Technology Center Finland for their contribution of GPU performance benchmarking and optimisation.
 
 ## References
 

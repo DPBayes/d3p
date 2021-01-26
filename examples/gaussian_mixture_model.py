@@ -28,62 +28,69 @@ import argparse
 import time
 
 import jax
-import jax.numpy as np
+import jax.numpy as jnp
 from jax import jit, lax, random
 from jax.random import PRNGKey
 
+import numpyro
 import numpyro.distributions as dist
 import numpyro.optim as optimizers
 from numpyro.primitives import sample, param
-from numpyro.infer import ELBO
+from numpyro.infer import Trace_ELBO as ELBO
 
 from dppp.svi import DPSVI, sample_prior_predictive
-from dppp.util import unvectorize_shape_2d
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.gmm import GaussianMixture
 
+
+try:
+    jax.lib.xla_bridge.get_backend('gpu') # this will fail if gpu not available
+    numpyro.set_platform('gpu')
+except RuntimeError:
+    print("gpu not available. falling back to cpu")
 
 def model(k, obs=None, num_obs_total=None, d=None):
     # this is our model function using the GaussianMixture distribution
     # with prior belief
     if obs is not None:
-        assert(np.ndim(obs) <= 2)
-        batch_size, d = unvectorize_shape_2d(obs)
+        assert(jnp.ndim(obs) == 2)
+        batch_size, d = jnp.shape(obs)
     else:
         assert(num_obs_total is not None)
         batch_size = num_obs_total
         assert(d is not None)
 
-    pis = sample('pis', dist.Dirichlet(np.ones(k)))
-    mus = sample('mus', dist.Normal(np.zeros((k, d)), 10.))
-    sigs = sample('sigs', dist.InverseGamma(1., 1.), sample_shape=np.shape(mus))
+    pis = sample('pis', dist.Dirichlet(jnp.ones(k)))
+    mus = sample('mus', dist.Normal(jnp.zeros((k, d)), 10.))
+    sigs = sample('sigs', dist.InverseGamma(1., 1.), sample_shape=jnp.shape(mus))
     with minibatch(batch_size, num_obs_total=num_obs_total):
         return sample('obs', GaussianMixture(mus, sigs, pis), obs=obs, sample_shape=(batch_size,))
 
 def guide(k, obs=None, num_obs_total=None, d=None):
     # the latent MixGaus distribution which learns the parameters
     if obs is not None:
-        assert(np.ndim(obs) <= 2)
-        _, d = unvectorize_shape_2d(obs)
+        assert(jnp.ndim(obs) == 2)
+        _, d = jnp.shape(obs)
     else:
         assert(num_obs_total is not None)
         assert(d is not None)
 
-    mus_loc = param('mus_loc', np.zeros((k, d)))
-    mus = sample('mus', dist.Normal(mus_loc, 1.))
-    sigs = sample('sigs', dist.InverseGamma(1., 1.), obs=np.ones_like(mus))
-    alpha_log = param('alpha_log', np.zeros(k))
-    alpha = np.exp(alpha_log)
+    alpha_log = param('alpha_log', jnp.zeros(k))
+    alpha = jnp.exp(alpha_log)
     pis = sample('pis', dist.Dirichlet(alpha))
+
+    mus_loc = param('mus_loc', jnp.zeros((k, d)))
+    mus = sample('mus', dist.Normal(mus_loc, 1.))
+    sigs = sample('sigs', dist.InverseGamma(1., 1.), obs=jnp.ones_like(mus))
     return pis, mus, sigs
 
 def create_toy_data(rng_key, N, d):
     """Creates some toy data (for training and testing)"""
     # To spice things up, it is imbalanced:
     # The last component has twice as many samples as the others.
-    mus = np.array([-10. * np.ones(d), 10. * np.ones(d), -2. * np.ones(d)])
-    sigs = np.reshape(np.array([0.1, 1., 0.1]), (3,1))
-    pis = np.array([1/4, 1/4, 2/4])
+    mus = jnp.array([-10. * jnp.ones(d), 10. * jnp.ones(d), -2. * jnp.ones(d)])
+    sigs = jnp.reshape(jnp.array([0.1, 1., 0.1]), (3,1))
+    pis = jnp.array([1/4, 1/4, 2/4])
 
     samples = sample_prior_predictive(rng_key, model, (3, None, 2*N, d), substitutes={
         'pis': pis, 'mus': mus, 'sigs': sigs
@@ -107,17 +114,17 @@ def compute_assignment_log_posterior(k, obs, mus, sigs, pis_prior):
     """computes the unnormalized log-posterior for each value of assignment z
        for each data point
     """
-    N = np.atleast_1d(obs).shape[0]
+    N = jnp.atleast_1d(obs).shape[0]
 
     def per_component_fun(j):
-        log_prob_x_zj = np.sum(dist.Normal(mus[j], sigs[j]).log_prob(obs), axis=1).flatten()
-        assert(np.atleast_1d(log_prob_x_zj).shape == (N,))
+        log_prob_x_zj = jnp.sum(dist.Normal(mus[j], sigs[j]).log_prob(obs), axis=1).flatten()
+        assert(jnp.atleast_1d(log_prob_x_zj).shape == (N,))
         log_prob_zj = dist.Categorical(pis_prior).log_prob(j)
         log_prob = log_prob_x_zj + log_prob_zj
-        assert(np.atleast_1d(log_prob).shape == (N,))
+        assert(jnp.atleast_1d(log_prob).shape == (N,))
         return log_prob
 
-    z_log_post = jax.vmap(per_component_fun)(np.arange(k))
+    z_log_post = jax.vmap(per_component_fun)(jnp.arange(k))
     return z_log_post.T
 
 def compute_assignment_accuracy(
@@ -125,13 +132,13 @@ def compute_assignment_accuracy(
     """computes the accuracy score for attributing data to the mixture
     components based on the learned model
     """
-    k, d = np.shape(original_modes)
+    k, d = jnp.shape(original_modes)
     # we first map our true modes to the ones learned in the model using the
     # log posterior for z
     mode_assignment_posterior = compute_assignment_log_posterior(
-        k, original_modes, posterior_modes, np.ones((k, d)), posterior_pis
+        k, original_modes, posterior_modes, jnp.ones((k, d)), posterior_pis
     )
-    mode_map = np.argmax(mode_assignment_posterior, axis=1)._value
+    mode_map = jnp.argmax(mode_assignment_posterior, axis=1)._value
     # a potential problem could be that mode_map might not be bijective, skewing
     # the results of the mapping. we build the inverse map and use identity
     # mapping as a base to counter that
@@ -141,16 +148,16 @@ def compute_assignment_accuracy(
     # we next obtain the assignments for the data according to the model and
     # pass them through the inverse map we just build
     post_data_assignment = compute_assignment_log_posterior(
-        k, X_test, posterior_modes, np.ones((k, d)), posterior_pis
+        k, X_test, posterior_modes, jnp.ones((k, d)), posterior_pis
     )
-    post_data_assignment = np.argmax(post_data_assignment, axis=1)
-    remapped_data_assignment = np.array(
+    post_data_assignment = jnp.argmax(post_data_assignment, axis=1)
+    remapped_data_assignment = jnp.array(
         [inv_mode_map[j] for j in post_data_assignment._value]
     )
 
     # finally, we can compare the results with the original assigments and compute
     # the accuracy
-    acc = np.mean(original_assignment == remapped_data_assignment)
+    acc = jnp.mean(original_assignment == remapped_data_assignment)
     return acc
 
 
@@ -241,7 +248,7 @@ def main(args):
     params = svi.get_params(svi_state)
     print(params)
     posterior_modes = params['mus_loc']
-    posterior_pis = dist.Dirichlet(np.exp(params['alpha_log'])).mean
+    posterior_pis = dist.Dirichlet(jnp.exp(params['alpha_log'])).mean
     print("MAP estimate of mixture weights: {}".format(posterior_pis))
     print("MAP estimate of mixture modes  : {}".format(posterior_modes))
 

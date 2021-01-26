@@ -1,0 +1,16 @@
+language: python
+python:
+  - "3.6"
+  - "3.7"
+  - "3.8"
+before_install:
+  - pip install pytest coverage coveralls
+install:
+  - pip install -e .
+script:
+  - coverage run --source dppp -m pytest tests/
+after_success:
+  - coveralls
+
+notifications:
+  email: false
