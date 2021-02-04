@@ -184,22 +184,24 @@ def main(args):
     # setting up optimizer
     optimizer = optimizers.Adam(args.learning_rate)
 
-    q = args.batch_size / num_samples
-    target_eps = args.epsilon
-    dp_scale, act_eps, _ = approximate_sigma(
-        target_eps=target_eps,
-        delta=1/num_samples, q=q,
-        num_iter=int(1/q) * args.num_epochs,
-        force_smaller=True
-    )
-    print(f"using noise scale {dp_scale} for epsilon of {act_eps} (targeted: {target_eps})")
+    if args.no_dp:
+        svi = SVI(model, guide, optimizer, ELBO(), num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim)
+    else:
+        q = args.batch_size / num_samples
+        target_eps = args.epsilon
+        dp_scale, act_eps, _ = approximate_sigma(
+            target_eps=target_eps,
+            delta=1/num_samples, q=q,
+            num_iter=int(1/q) * args.num_epochs,
+            force_smaller=True
+        )
+        print(f"using noise scale {dp_scale} for epsilon of {act_eps} (targeted: {target_eps})")
 
-    svi = DPSVI(
-        model, guide, optimizer, ELBO(),
-        dp_scale=dp_scale, clipping_threshold=10.,
-        num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim
-    )
-    # svi = SVI(model, guide, optimizer, ELBO(), num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim)
+        svi = DPSVI(
+            model, guide, optimizer, ELBO(),
+            dp_scale=dp_scale, clipping_threshold=10.,
+            num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim
+        )
 
     # preparing random number generators and initializing svi
     rng = PRNGKey(0)
@@ -325,5 +327,6 @@ if __name__ == '__main__':
     parser.add_argument('--z-dim', default=50, type=int, help='size of latent')
     parser.add_argument('--hidden-dim', default=400, type=int, help='size of hidden layer in encoder/decoder networks')
     parser.add_argument('--epsilon', default=1., type=float, help='targeted value for privacy parameter epsilon')
+    parser.add_argument('--no_dp', default=False, action='store_true', help='Use plain SVI instead of DPSVI algorithm')
     args = parser.parse_args()
     main(args)
