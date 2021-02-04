@@ -36,14 +36,18 @@ from jax.experimental import stax
 from jax.random import PRNGKey
 import jax
 
+import numpy as np
+
 import numpyro
 import numpyro.optim as optimizers
 import numpyro.distributions as dist
 from numpyro.primitives import sample
-from numpyro.infer import Trace_ELBO as ELBO
+from numpyro.infer import Trace_ELBO as ELBO, SVI
 
 from dppp.svi import DPSVI, sample_multi_posterior_predictive
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
+from dppp.dputil import approximate_sigma
+from dppp.util import is_int_scalar
 
 from datasets import MNIST, load_dataset
 
@@ -98,8 +102,7 @@ def decoder(hidden_dim, out_dim):
         stax.Dense(out_dim, W_init=stax.randn()), stax.Sigmoid,
     )
 
-
-def model(batch, z_dim, hidden_dim, num_obs_total=None):
+def model(batch_or_batchsize, z_dim, hidden_dim, out_dim=None, num_obs_total=None):
     """Defines the generative probabilistic model: p(x|z)p(z)
 
     The model is conditioned on the observed data
@@ -107,13 +110,21 @@ def model(batch, z_dim, hidden_dim, num_obs_total=None):
     :param batch: a batch of observations
     :param hidden_dim: dimensions of the hidden layers in the VAE
     :param z_dim: dimensions of the latent variable / code
+    :param out_dim: number of dimensions in a single output sample (flattened)
 
     :return: (named) sample x from the model observation distribution p(x|z)p(z)
     """
-    assert(jnp.ndim(batch) == 3)
-    batch_size = jnp.shape(batch)[0]
-    batch = jnp.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
-    out_dim = jnp.shape(batch)[1]
+    if is_int_scalar(batch_or_batchsize):
+        batch = None
+        batch_size = batch_or_batchsize
+        if out_dim is None:
+            raise ValueError("if no batch is provided, out_dim must be given")
+    else:
+        batch = batch_or_batchsize
+        assert(jnp.ndim(batch) == 3)
+        batch_size = jnp.shape(batch)[0]
+        batch = jnp.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
+        out_dim = jnp.shape(batch)[1]
 
     decode = numpyro.module('decoder', decoder(hidden_dim, out_dim), (batch_size, z_dim))
     with minibatch(batch_size, num_obs_total=num_obs_total):
@@ -123,7 +134,7 @@ def model(batch, z_dim, hidden_dim, num_obs_total=None):
         return x
 
 
-def guide(batch, z_dim, hidden_dim, num_obs_total=None):
+def guide(batch, z_dim, hidden_dim, out_dim=None, num_obs_total=None):
     """Defines the probabilistic guide for z (variational approximation to posterior): q(z) ~ p(z|q)
     :param batch: a batch of observations
     :return: (named) sampled z from the variational (guide) distribution q(z)
@@ -147,14 +158,6 @@ def binarize(rng, batch):
 
     Reason: This example assumes a Bernoulli distribution for the decoder output
     and thus requires inputs to be binary values as well.
-
-    note(lumip): From an answer to a pyro github issue for similar VAE example
-    code using MNIST ( https://github.com/pyro-ppl/pyro/issues/529#issuecomment-342670366 ):
-    "be aware to only do this once, as repeated sampling of the data provides
-    unfair regularization to the model and also inflates likelihood scores".
-    This is not how binarize is currently used throughout this file, i.e.,
-    repeated sampling occurs. Is that intended? what is "unfair" regularization
-    supposed to mean in that context, though?
 
     :param rng: rng seed key
     :param batch: Batch of data with continous values in interval [0, 1]
@@ -181,15 +184,22 @@ def main(args):
     # setting up optimizer
     optimizer = optimizers.Adam(args.learning_rate)
 
-    # note(lumip): choice of c is somewhat arbitrary at the moment.
-    #   in early iterations gradient norm values are typically
-    #   between 100 and 200 but in epoch 20 usually at 280 to 290.
-    #   value for dp_scale completely made up currently.
+    q = args.batch_size / num_samples
+    target_eps = args.epsilon
+    dp_scale, act_eps, _ = approximate_sigma(
+        target_eps=target_eps,
+        delta=1/num_samples, q=q,
+        num_iter=int(1/q) * args.num_epochs,
+        force_smaller=True
+    )
+    print(f"using noise scale {dp_scale} for epsilon of {act_eps} (targeted: {target_eps})")
+
     svi = DPSVI(
         model, guide, optimizer, ELBO(),
-        dp_scale=0.01, clipping_threshold=300.,
+        dp_scale=dp_scale, clipping_threshold=10.,
         num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim
     )
+    # svi = SVI(model, guide, optimizer, ELBO(), num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim)
 
     # preparing random number generators and initializing svi
     rng = PRNGKey(0)
@@ -200,7 +210,7 @@ def main(args):
 
     # functions for training tasks
     @jit
-    def epoch_train(svi_state, batchifier_state, num_batch, rng):
+    def epoch_train(svi_state, batchifier_state, num_batches, rng):
         """Trains one epoch
 
         :param svi_state: current state of the optimizer
@@ -214,16 +224,16 @@ def main(args):
             binarize_rng = random.fold_in(rng, i)
             batch = train_fetch(i, batchifier_state, binarize_rng)[0]
             svi_state, batch_loss = svi.update(
-                svi_state, batch,
+                svi_state, batch
             )
-            loss += batch_loss / (num_samples * num_batch)
+            loss += batch_loss / (num_samples * num_batches)
             return svi_state, loss
 
-        svi_state, loss = lax.fori_loop(0, num_batch, body_fn, (svi_state, 0.))
+        svi_state, loss = lax.fori_loop(0, num_batches, body_fn, (svi_state, 0.))
         return svi_state, loss
 
     @jit
-    def eval_test(svi_state, batchifier_state, num_batch, rng):
+    def eval_test(svi_state, batchifier_state, num_batches, rng):
         """Evaluates current model state on test data.
 
         :param svi_state: current state of the optimizer
@@ -234,11 +244,11 @@ def main(args):
         def body_fn(i, loss_sum):
             binarize_rng = random.fold_in(rng, i)
             batch = test_fetch(i, batchifier_state, binarize_rng)[0]
-            loss = svi.evaluate(svi_state, batch)
-            loss_sum += loss / (num_samples * num_batch)
+            batch_loss = svi.evaluate(svi_state, batch)
+            loss_sum += batch_loss / (num_samples * num_batches)
             return loss_sum
 
-        return lax.fori_loop(0, num_batch, body_fn, 0.)
+        return lax.fori_loop(0, num_batches, body_fn, 0.)
 
     def reconstruct_img(epoch, num_epochs, batchifier_state, svi_state, rng):
         """Reconstructs an image for the given epoch
@@ -265,14 +275,12 @@ def main(args):
         test_sample = binarize(rng_binarize, img)
         test_sample = jnp.reshape(test_sample, (1, *jnp.shape(test_sample)))
         params = svi.get_params(svi_state)
-        # todo(lumip): fix this. with how stuff currently works, this call
-        #   to sample_multi_posterior will always return test_sample instead
-        #   of an actual posterior sample, giving a wrong impression on how good
-        #   the model performs!
+
         samples = sample_multi_posterior_predictive(
-            rng, 10, model, (test_sample, args.z_dim, args.hidden_dim),
+            rng, 10, model, (1, args.z_dim, args.hidden_dim, np.prod(test_sample.shape[1:])),
             guide, (test_sample, args.z_dim, args.hidden_dim), params
         )
+
         img_loc = samples['obs'][0].reshape([28, 28])
         avg_img_loc = jnp.mean(samples['obs'], axis=0).reshape([28, 28])
         plt.imsave(
@@ -293,9 +301,7 @@ def main(args):
     # main training loop
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng, data_fetch_rng, train_rng = random.split(
-            rng, 3
-        )
+        rng, data_fetch_rng, train_rng = random.split(rng, 3)
         num_train_batches, train_batchifier_state, = train_init(rng_key=data_fetch_rng)
         svi_state, train_loss = epoch_train(
             svi_state, train_batchifier_state, num_train_batches, train_rng
@@ -315,8 +321,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="parse args")
     parser.add_argument('-n', '--num-epochs', default=20, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
-    parser.add_argument('-batch-size', default=128, type=int, help='batch size')
-    parser.add_argument('-z-dim', default=50, type=int, help='size of latent')
-    parser.add_argument('-hidden-dim', default=400, type=int, help='size of hidden layer in encoder/decoder networks')
+    parser.add_argument('--batch-size', default=128, type=int, help='batch size')
+    parser.add_argument('--z-dim', default=50, type=int, help='size of latent')
+    parser.add_argument('--hidden-dim', default=400, type=int, help='size of hidden layer in encoder/decoder networks')
+    parser.add_argument('--epsilon', default=1., type=float, help='targeted value for privacy parameter epsilon')
     args = parser.parse_args()
     main(args)
