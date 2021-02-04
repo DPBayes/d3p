@@ -1,4 +1,5 @@
-- current:
-    - Upgraded dependencies: numpyro (>=0.4.0), jax (>=0.2.3)
-    - Fast subsamples using Feistel shuffle
+- current(0.2.0):
+    - Fix: DPSVI perturbation was too large (scaled by minibatch size)
+    - Update: Upgraded dependencies: numpyro (>=0.4.0), jax (>=0.2.3)
+    - Feature: Fast minibatch sampling using Feistel shuffle
 - 0.1.0: Initial not-quite-a-release

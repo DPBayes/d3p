@@ -89,18 +89,20 @@ class TunableSVI(SVI):
     :param batch_grad_manipulation_fn: An optional function that allows to modify
         the total gradient. This gets called after applying the
         per_example_grad_manipulation_fn and loss_combiner_fn.
+    :param loss_combiner_fn: An optional function used for combining the per-example
+        losses. Defaults to averaging (using `jnp.mean`).
     :param static_kwargs: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     """
 
     def __init__(self, model, guide, optim, per_example_loss,
             per_example_grad_manipulation_fn=None,
-            batch_grad_manipulation_fn=None, **static_kwargs):
+            batch_grad_manipulation_fn=None, loss_combiner_fn=jnp.mean, **static_kwargs):
 
         self.px_grad_manipulation_fn = per_example_grad_manipulation_fn
         self.batch_grad_manipulation_fn = batch_grad_manipulation_fn
 
-        total_loss = CombinedLoss(per_example_loss, combiner_fn = jnp.mean)
+        total_loss = CombinedLoss(per_example_loss, combiner_fn = loss_combiner_fn)
 
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
 
@@ -209,14 +211,13 @@ class TunableSVI(SVI):
         #   according to the loss combination vjp func
         grads_list = tuple(map(loss_vjp, px_grads_list))
 
-        batch_size = example_count(px_loss)
-
         # apply batch gradient modification (e.g., DP noise perturbation) (if any)
         if self.batch_grad_manipulation_fn:
+            batch_size = example_count(px_loss)
             rng_key, rng_key_step = random.split(svi_state.rng_key, 2)
             svi_state = SVIState(svi_state.optim_state, rng_key)
             grads_list = self.batch_grad_manipulation_fn(
-                grads_list, rng=rng_key_step
+                grads_list, rng=rng_key_step, batch_size=batch_size
             )
 
         # reassemble the jax tree used by optimizer for the final gradients
@@ -316,7 +317,6 @@ def clip_gradient(list_of_gradient_parts, c, rescale_factor = 1.):
     normalization_constant = 1./jnp.maximum(1., norm/c)
     f = rescale_factor * normalization_constant # to scale grad to max(rescale_factor * grad, C)
     clipped_grads = [f * g for g in list_of_gradient_parts]
-    # assert(jnp.all(full_gradient_norm(clipped_grads)<c)) # jax doesn't like this
     return clipped_grads
 
 def get_gradients_clipping_function(c, rescale_factor):
@@ -388,9 +388,9 @@ class DPSVI(TunableSVI):
         self._clipping_threshold = clipping_threshold
 
         @jax.jit
-        def grad_perturbation_fn(list_of_grads, rng):
+        def grad_perturbation_fn(list_of_grads, rng, batch_size):
             def perturb_one(grad, site_rng):
-                noise = dist.Normal(0, dp_scale * clipping_threshold).sample(
+                noise = dist.Normal(0, dp_scale * clipping_threshold / batch_size).sample(
                     site_rng, sample_shape=grad.shape
                 )
                 return grad + noise
@@ -410,6 +410,7 @@ class DPSVI(TunableSVI):
         super().__init__(
             model, guide, optim, per_example_loss,
             gradients_clipping_fn, grad_perturbation_fn,
+            loss_combiner_fn=jnp.mean,
             num_obs_total=num_obs_total, **static_kwargs
         )
 
