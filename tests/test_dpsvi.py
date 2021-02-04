@@ -55,7 +55,8 @@ class DPSVITest(unittest.TestCase):
         self.assertEqual(jnp.mean(self.px_loss), loss_val)
         self.assertEqual(self.tree_def, jax.tree_structure(grads))
 
-        expected_std = self.dp_scale * self.clipping_threshold
+        batch_size = len(self.px_loss)
+        expected_std = self.dp_scale * self.clipping_threshold / batch_size
         for site in jax.tree_leaves(grads):
             self.assertTrue(
                 jnp.allclose(expected_std, jnp.std(site)/self.num_obs_total, atol=1e-1)
