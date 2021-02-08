@@ -20,25 +20,51 @@ import functools
 import jax
 from jax import random
 import jax.numpy as jnp
+import numpy as np
 
 from numpyro.infer.svi import SVI, SVIState
 import numpyro.distributions as dist
-from numpyro.handlers import seed, trace, substitute
+from numpyro.handlers import seed, trace, substitute, block
 
 from dppp.util import map_over_secondary_dims, example_count
 
 from fourier_accountant.compute_eps import get_epsilon_S, get_epsilon_R
 from fourier_accountant.compute_delta import get_delta_S, get_delta_R
 
+from collections import namedtuple
+
+DPSVIState = namedtuple('DPSVIState', ('optim_state', 'rng_key', 'observation_scale'))
+
 def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
     # vmap removes leading dimensions, we re-add those in a wrapper for fun so
     # that fun can be oblivious of this
     def fun_for_vmap(params, args):
-        new_args = (jnp.reshape(arg, (1, *jnp.shape(arg))) for arg in args)
+        new_args = (jnp.expand_dims(arg, 0) for arg in args)
         return fun(params, new_args)
     value_and_grad_fun = jax.value_and_grad(fun_for_vmap, argnums, has_aux, holomorphic)
     return jax.vmap(value_and_grad_fun, in_axes=(None, 0))
 
+
+def get_observations_scale(model, model_args, model_kwargs, params):
+    """
+    Traces through a model to extract the scale applied to observation log-likelihood.
+    """
+
+    # todo(lumip): is there a way to avoid tracing through the entire model?
+    #       need to experiment with effect handlers and what exactly blocking achieves
+    model = substitute(seed(model, 0), data=params)
+    model = block(model, lambda msg: msg['type'] != 'sample' or not msg['is_observed'])
+    model_trace = trace(model).get_trace(*model_args, **model_kwargs)
+    scales = np.unique(
+        [msg['scale'] if msg['scale'] is not None else 1 for msg in model_trace.values()]
+    )
+
+    if len(scales) > 1:
+        raise ValueError("The model received several observation sites with different example counts. This is not supported in DPSVI.")
+    elif len(scales) == 0:
+        return 1.
+
+    return scales[0]
 
 class CombinedLoss(object):
 
@@ -50,211 +76,6 @@ class CombinedLoss(object):
         return self.combiner_fn(self.px_loss.loss(
             rng_key, param_map, model, guide, *args, **kwargs
         ))
-
-
-class TunableSVI(SVI):
-    """
-    Tunable Stochastic Variational Inference given a per-example loss objective
-    and a loss combiner function.
-
-    This is identical to numpyro's `SVI` but explicitely computes gradients
-    per example (i.e. observed data instance) based on `per_example_loss_fn`
-    before combining them to a total loss value using `loss_combiner_fn`.
-    This allows manipulating the per-example gradients which has
-    applications, e.g., in differentially private machine learning applications.
-
-    To obtain the per-example gradients, the `per_example_loss_fn` is evaluated
-    for (and the gradient take wrt) each example in a vectorized manner (using
-    `jax.vmap`).
-
-    For this to work, the following requirements are imposed upon
-    `per_example_loss_fn`:
-    - in per-example evaluation, the leading dimension of the batch (indicating
-        the number of examples) is stripped away. The loss function must be able
-        to handle this if it was originally designed to handle batched values
-    - since it will be evaluated on each example, take special care that the
-        loss function scales the likelihood contribution of the data properly
-        wrt to batch size and total example count (use e.g. the `numpyro.scale`
-        or the convenience `minibatch` context managers)
-
-
-    :param model: Python callable with Pyro primitives for the model.
-    :param guide: Python callable with Pyro primitives for the guide
-        (recognition network).
-    :param per_example_loss_fn: ELBo loss, i.e. negative Evidence Lower Bound,
-        to minimize, per example.
-    :param optim: an instance of :class:`~numpyro.optim._NumPyroOptim`.
-    :param per_example_grad_manipulation_fn: optional function that allows to
-        manipulate the gradient for each sample.
-    :param batch_grad_manipulation_fn: An optional function that allows to modify
-        the total gradient. This gets called after applying the
-        per_example_grad_manipulation_fn and loss_combiner_fn.
-    :param loss_combiner_fn: An optional function used for combining the per-example
-        losses. Defaults to averaging (using `jnp.mean`).
-    :param static_kwargs: static arguments for the model / guide, i.e. arguments
-        that remain constant during fitting.
-    """
-
-    def __init__(self, model, guide, optim, per_example_loss,
-            per_example_grad_manipulation_fn=None,
-            batch_grad_manipulation_fn=None, loss_combiner_fn=jnp.mean, **static_kwargs):
-
-        self.px_grad_manipulation_fn = per_example_grad_manipulation_fn
-        self.batch_grad_manipulation_fn = batch_grad_manipulation_fn
-
-        total_loss = CombinedLoss(per_example_loss, combiner_fn = loss_combiner_fn)
-
-        super().__init__(model, guide, optim, total_loss, **static_kwargs)
-
-    def _compute_per_example_gradients(self, svi_state, *args, **kwargs):
-        """ Computes the raw per-example gradients of the model.
-
-        This is the first step in a full update iteration.
-
-        :param svi_state: The current state of the SVI algorithm.
-        :param args: Arguments to the loss function.
-        :param kwargs: All keyword arguments to model or guide.
-        :returns: tuple consisting of the updated svi state, an array of loss
-            values per example, and a jax tuple tree of per-example gradients
-            per parameter site (each site's gradients have shape (batch_size, *parameter_shape))
-        """
-        rng_key, rng_key_step = random.split(svi_state.rng_key, 2)
-        params = self.optim.get_params(svi_state.optim_state)
-
-        def wrapped_px_loss(x, loss_args):
-            return self.loss.px_loss.loss(
-                rng_key_step, self.constrain_fn(x), self.model, self.guide,
-                *loss_args, **kwargs, **self.static_kwargs
-            )
-
-        per_example_loss, per_example_grads = per_example_value_and_grad(
-            wrapped_px_loss
-        )(params, args)
-        return SVIState(svi_state.optim_state, rng_key), per_example_loss, per_example_grads
-
-    def _apply_per_example_gradient_transformations(self, svi_state, px_gradients):
-        """ Applies per-example gradient transformations by applying
-            `per_example_grad_manipulation_fn` (e.g., clipping) to each per-example
-            gradient.
-
-        This is the second step in a full update iteration.
-
-        :param svi_state: The current state of the SVI algorithm.
-        :param px_gradients: Jax tuple tree of per-example gradients as returned
-            by `_compute_per_example_gradients`
-        :returns: tuple consisting of the updated svi state, a list of
-            transformed per-example gradients per site and the jax tree structure
-            definition. The list is a flattened representation of the jax tree,
-            the shape of per-example gradients per parameter is unaffected.
-        """
-        # px_gradients is a jax tree of jax jnp.arrays of shape
-        #   [batch_size, (param_shape)] for each parameter. flatten it out!
-        px_grads_list, px_grads_tree_def = jax.tree_flatten(
-            px_gradients
-        )
-
-        # if per-sample gradient manipulation is present, we apply it to
-        #   each gradient site in the tree
-        if self.px_grad_manipulation_fn:
-            # apply per-sample gradient manipulation, if present
-            px_grads_list = jax.vmap(
-                self.px_grad_manipulation_fn, in_axes=0
-            )(
-                px_grads_list
-            )
-            # todo(lumip, all): by flattening the tree before passing it into
-            #   gradient manipulation, we lose all information on which value
-            #   belongs to which parameter. on the other hand, we have plain and
-            #   straightforward access to the values, which might be all we need.
-            #   think about whether that is okay or whether ps_grad_manipulation_fn
-            #   should just get the whole tree per sample to get all available
-            #   information
-
-        return svi_state, px_grads_list, px_grads_tree_def
-
-    def _combine_and_transform_gradient(self, svi_state, px_grads_list, px_loss, px_grads_tree_def):
-        """ Combines the per-example gradients into the batch gradient and
-            applies the batch gradient transformation given as
-            `batch_grad_manipulation_fn`.
-
-        This is the third step of a full update iteration.
-
-        :param svi_state: The current state of the SVI algorithm.
-        :param px_grads_list: List of transformed per-example gradients as returned
-            by `_apply_per_example_gradient_transformations`
-        :param px_loss: Array of per-example loss values as output by
-            `_compute_per_example_gradients`.
-        :param px_grads_tree_def: Jax tree definition for the gradient tree as
-            returned by `_apply_per_example_gradient_transformations`.
-        :returns: tuple consisting of the updated svi state, the loss value for
-            the batch and a jax tree of batch gradients per parameter site.
-        """
-        # get total loss and loss combiner vjp func
-        loss_val, loss_combine_vjp = jax.vjp(self.loss.combiner_fn, px_loss)
-
-        # loss_combine_vjp gives us the backward differentiation function
-        #   from combined loss to per-example losses. we use it to get the
-        #   (1xbatch_size) Jacobian and construct a function that takes
-        #   per-example gradients and left-multiplies them with that jacobian
-        #   to get the final combined gradient
-        loss_jacobian = jnp.reshape(loss_combine_vjp(jnp.array(1.))[0], (1, -1))
-        # loss_vjp = lambda px_grads: jnp.sum(jnp.multiply(loss_jacobian, px_grads))
-        loss_vjp = lambda px_grads: jnp.matmul(loss_jacobian, px_grads)
-
-        # we map the loss combination vjp func over all secondary dimensions
-        #   of gradient sites. This is necessary since some gradient
-        #   sites might be matrices in itself (e.g., for NN layers), so a stack
-        #   of those would be 3-dimensional and not admittable to jnp.matmul
-        loss_vjp = map_over_secondary_dims(loss_vjp)
-
-        # combine gradients for all parameters in the gradient jax tree
-        #   according to the loss combination vjp func
-        grads_list = tuple(map(loss_vjp, px_grads_list))
-
-        # apply batch gradient modification (e.g., DP noise perturbation) (if any)
-        if self.batch_grad_manipulation_fn:
-            batch_size = example_count(px_loss)
-            rng_key, rng_key_step = random.split(svi_state.rng_key, 2)
-            svi_state = SVIState(svi_state.optim_state, rng_key)
-            grads_list = self.batch_grad_manipulation_fn(
-                grads_list, rng=rng_key_step, batch_size=batch_size
-            )
-
-        # reassemble the jax tree used by optimizer for the final gradients
-        grads = jax.tree_unflatten(
-            px_grads_tree_def, grads_list
-        )
-
-        return svi_state, loss_val, grads
-
-
-    def _apply_gradient(self, svi_state, batch_gradient):
-        """ Takes a (batch) gradient step in parameter space using the specified
-            optimizer.
-
-        This is the fourth and last step of a full update iteration.
-        :param svi_state: The current state of the SVI algorithm.
-        :param batch_gradient: Jax tree of batch gradients per parameter site,
-            as returned by `_combine_and_transform_gradient`.
-        :returns: tuple consisting of the updated svi state.
-        """
-        optim_state = self.optim.update(batch_gradient, svi_state.optim_state)
-        return SVIState(optim_state, svi_state.rng_key)
-
-    def update(self, svi_state, *args, **kwargs):
-        svi_state, per_example_loss, per_example_grads = \
-            self._compute_per_example_gradients(svi_state, *args, **kwargs)
-
-        svi_state, per_example_grads, tree_def = \
-            self._apply_per_example_gradient_transformations(
-                svi_state, per_example_grads
-            )
-
-        svi_state, loss, gradient = self._combine_and_transform_gradient(
-            svi_state, per_example_grads, per_example_loss, tree_def
-        )
-
-        return self._apply_gradient(svi_state, gradient), loss
 
 
 def full_norm(list_of_parts_or_tree, ord=2):
@@ -333,12 +154,12 @@ def get_gradients_clipping_function(c, rescale_factor):
         return clip_gradient(list_of_gradient_parts, c, rescale_factor)
     return gradient_clipping_fn_inner
 
-class DPSVI(TunableSVI):
+class DPSVI(SVI):
     """
     Differentially-Private Stochastic Variational Inference given a per-example
     loss objective and a gradient clipping threshold.
 
-    This is identical to numpyro's `svi` but adds differential privacy by
+    This is identical to numpyro's `SVI` but adds differential privacy by
     clipping gradients per example to the given clipping_threshold and
     perturbing the batch gradient with noise determined by sigma*clipping_threshold.
 
@@ -346,15 +167,13 @@ class DPSVI(TunableSVI):
     for (and the gradient take wrt) each example in a vectorized manner (using
     `jax.vmap`).
 
-    For this to work, the following requirements are imposed upon
-    `per_example_loss_fn`:
-    - in per-example evaluation, the leading dimension of the batch (indicating
-        the number of examples) is stripped away. The loss function must be able
-        to handle this if it was originally designed to handle batched values
-    - since it will be evaluated on each example, take special care that the
-        loss function scales the likelihood contribution of the data properly
-        wrt to batch size and total example count (use e.g. the `numpyro.scale`
-        or the convenience `minibatch` context managers)
+    For this to work `per_example_loss_fn` must be able to deal with batches
+    of single examples. The leading batch dimension WILL NOT be stripped away,
+    however, so a `per_example_loss_fn` that can deal with arbitrarily sized batches
+    suffices. Take special care that the loss function scales the likelihood
+    contribution of the data properly wrt to batch size and total example count
+    (use e.g. the `numpyro.scale` or the convenience `minibatch` context managers
+    in the `model` and `guide` functions where appropriate).
 
     :param model: Python callable with Pyro primitives for the model.
     :param guide: Python callable with Pyro primitives for the guide
@@ -366,53 +185,226 @@ class DPSVI(TunableSVI):
         of each per-example gradient is clipped.
     :param dp_scale: Scale parameter for the Gaussian mechanism applied to
         each dimension of the batch gradients.
-    :param num_obs_total: The total number of examples/observations in the
-        full data set. To be used iff examples are scaled in a minibatch
-        `guide`. See `make_observed_model` for details.
     :param static_kwargs: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     """
 
     def __init__(self, model, guide, optim, per_example_loss,
-            clipping_threshold, dp_scale, num_obs_total = 1, **static_kwargs):
+            clipping_threshold, dp_scale, **static_kwargs):
 
-
-        # Using a minibatch environment will scale up the log likelihood contribution
-        # of each example by num_obs_total to maintain relative likelihood to prior ratio.
-        # To ensure that clipping and noise are correct, we have to scale back
-        # the gradient so that example contributions are unscaled
-        gradients_clipping_fn = get_gradients_clipping_function(
-            clipping_threshold, 1./num_obs_total
-        )
-        self._dp_scale = dp_scale
         self._clipping_threshold = clipping_threshold
+        self._dp_scale = dp_scale
 
-        @jax.jit
-        def grad_perturbation_fn(list_of_grads, rng, batch_size):
-            def perturb_one(grad, site_rng):
-                noise = dist.Normal(0, dp_scale * clipping_threshold / batch_size).sample(
-                    site_rng, sample_shape=grad.shape
-                )
-                return grad + noise
+        total_loss = CombinedLoss(per_example_loss, combiner_fn = jnp.mean)
+        super().__init__(model, guide, optim, total_loss, **static_kwargs)
 
-            per_site_rngs = jax.random.split(rng, len(list_of_grads))
-            # todo(lumip): somehow parallelizing/vmapping this would be great
-            #   but current vmap will instead vmap over each position in it
-            list_of_grads = tuple(
-                perturb_one(grad, site_rng) * num_obs_total
-                for grad, site_rng in zip(list_of_grads, per_site_rngs)
-            )
-            # we multiply by num_obs_total in the above to revert the downscaling
-            # we applied before clipping, so that the final gradient is scaled
-            # as expected without DP
-            return list_of_grads
-
-        super().__init__(
-            model, guide, optim, per_example_loss,
-            gradients_clipping_fn, grad_perturbation_fn,
-            loss_combiner_fn=jnp.mean,
-            num_obs_total=num_obs_total, **static_kwargs
+    @staticmethod
+    def _update_state_rng(dp_svi_state: DPSVIState, rng_key) -> DPSVIState:
+        return DPSVIState(
+            dp_svi_state.optim_state,
+            rng_key,
+            dp_svi_state.observation_scale
         )
+
+    @staticmethod
+    def _update_state_optim_state(dp_svi_state: DPSVIState, optim_state) -> DPSVIState:
+        return DPSVIState(
+            optim_state,
+            dp_svi_state.rng_key,
+            dp_svi_state.observation_scale
+        )
+
+    @staticmethod
+    def _split_rng_key(dp_svi_state: DPSVIState):
+        rng_key = dp_svi_state.rng_key
+        rng_key, split_key = jax.random.split(rng_key)
+        return DPSVI._update_state_rng(dp_svi_state, rng_key), split_key
+
+    def init(self, rng_key, *args, **kwargs):
+        svi_state = super().init(rng_key, *args, **kwargs)
+
+        params = self.optim.get_params(svi_state.optim_state)
+
+        model_kwargs = dict(kwargs)
+        model_kwargs.update(self.static_kwargs)
+
+        one_element_batch = [
+            jnp.expand_dims(a[0], 0) for a in args
+        ]
+
+        observation_scale = get_observations_scale(
+            self.model, one_element_batch, model_kwargs, params
+        )
+
+        return DPSVIState(svi_state.optim_state, svi_state.rng_key, observation_scale)
+
+    def _compute_per_example_gradients(self, dp_svi_state, *args, **kwargs):
+        """ Computes the raw per-example gradients of the model.
+
+        This is the first step in a full update iteration.
+
+        :param dp_svi_state: The current state of the DPSVI algorithm.
+        :param args: Arguments to the loss function.
+        :param kwargs: All keyword arguments to model or guide.
+        :returns: tuple consisting of the updated DPSVI state, an array of loss
+            values per example, and a jax tuple tree of per-example gradients
+            per parameter site (each site's gradients have shape (batch_size, *parameter_shape))
+        """
+        dp_svi_state, rng_key_step = self._split_rng_key(dp_svi_state)
+        params = self.optim.get_params(dp_svi_state.optim_state)
+
+        def wrapped_px_loss(x, loss_args):
+            return self.loss.px_loss.loss(
+                rng_key_step, self.constrain_fn(x), self.model, self.guide,
+                *loss_args, **kwargs, **self.static_kwargs
+            )
+
+        per_example_loss, per_example_grads = per_example_value_and_grad(
+            wrapped_px_loss
+        )(params, args)
+
+        return dp_svi_state, per_example_loss, per_example_grads
+
+    def _clip_gradients(self, dp_svi_state, px_gradients):
+        """ Clips each per-example gradient.
+
+        This is the second step in a full update iteration.
+
+        :param dp_svi_state: The current state of the DPSVI algorithm.
+        :param px_gradients: Jax tuple tree of per-example gradients as returned
+            by `_compute_per_example_gradients`
+        :returns: tuple consisting of the updated svi state, a list of
+            transformed per-example gradients per site and the jax tree structure
+            definition. The list is a flattened representation of the jax tree,
+            the shape of per-example gradients per parameter is unaffected.
+        """
+        obs_scale = dp_svi_state.observation_scale
+
+        # px_gradients is a jax tree of jax jnp.arrays of shape
+        #   [batch_size, (param_shape)] for each parameter. flatten it out!
+        px_grads_list, px_grads_tree_def = jax.tree_flatten(
+            px_gradients
+        )
+
+        # scale the gradients by 1/obs_scale then clip them:
+        #  in the loss, every single examples loss contribution is scaled by obs_scale
+        #  but the clipping threshold assumes no scaling.
+        #  we scale by the reciprocal to ensure that clipping is correct.
+        clip_fn = get_gradients_clipping_function(self._clipping_threshold, 1./obs_scale)
+        px_grads_list = jax.vmap(clip_fn, in_axes=0)(px_grads_list)
+
+        return dp_svi_state, px_grads_list, px_grads_tree_def
+
+    def _combine_gradients(self, px_grads_list, px_loss):
+        """ Combines the per-example gradients into the batch gradient and
+            applies the batch gradient transformation given as
+            `batch_grad_manipulation_fn`.
+
+        This is the third step of a full update iteration.
+
+        :param px_grads_list: List of transformed per-example gradients as returned
+            by `_apply_per_example_gradient_transformations`
+        :param px_loss: Array of per-example loss values as output by
+            `_compute_per_example_gradients`.
+        :returns: tuple consisting of the updated svi state, the loss value for
+            the batch and a jax tree of batch gradients per parameter site.
+        """
+
+        # get total loss and loss combiner vjp func
+        loss_val, loss_combine_vjp = jax.vjp(self.loss.combiner_fn, px_loss)
+
+        # loss_combine_vjp gives us the backward differentiation function
+        #   from combined loss to per-example losses. we use it to get the
+        #   (1xbatch_size) Jacobian and construct a function that takes
+        #   per-example gradients and left-multiplies them with that jacobian
+        #   to get the final combined gradient
+        loss_jacobian = jnp.reshape(loss_combine_vjp(jnp.array(1.))[0], (1, -1))
+        # loss_vjp = lambda px_grads: jnp.sum(jnp.multiply(loss_jacobian, px_grads))
+        loss_vjp = lambda px_grads: jnp.matmul(loss_jacobian, px_grads)
+
+        # we map the loss combination vjp func over all secondary dimensions
+        #   of gradient sites. This is necessary since some gradient
+        #   sites might be matrices in itself (e.g., for NN layers), so a stack
+        #   of those would be 3-dimensional and not admittable to jnp.matmul
+        loss_vjp = map_over_secondary_dims(loss_vjp)
+
+        # combine gradients for all parameters in the gradient jax tree
+        #   according to the loss combination vjp func
+        grads_list = tuple(map(loss_vjp, px_grads_list))
+
+        return loss_val, grads_list
+
+    def _perturb_and_reassemble_gradients(self, dp_svi_state, gradient_list, batch_size, px_grads_tree_def):
+        """ Perturbs the gradients using Gaussian noise and reassembles the gradient tree.
+
+        This is the fourth step of a full update iteration.
+
+        :param dp_svi_state: The current state of the DPSVI algorithm.
+        :param gradient_list: List of batch gradients for each parameter site
+        :param batch_size: Size of the training batch.
+        :param px_grads_tree_def: Jax tree definition for the gradient tree as
+            returned by `_apply_per_example_gradient_transformations`.
+        """
+        dp_svi_state, perturbation_rng = self._split_rng_key(dp_svi_state)
+
+        perturbation_scale = self._dp_scale * self._clipping_threshold / batch_size
+        perturbed_grads_list = self.perturbation_function(
+            perturbation_rng, gradient_list, perturbation_scale
+        )
+
+        # we multiply each parameter site by obs_scale to revert the downscaling
+        # performed before clipping, so that the final gradient is scaled as
+        # expected without DP
+        obs_scale = dp_svi_state.observation_scale
+        perturbed_grads_list = tuple(
+            grad * obs_scale
+            for grad in perturbed_grads_list
+        )
+
+        # reassemble the jax tree used by optimizer for the final gradients
+        perturbed_grads = jax.tree_unflatten(
+            px_grads_tree_def, perturbed_grads_list
+        )
+
+        return dp_svi_state, perturbed_grads
+
+    def _apply_gradient(self, dp_svi_state, batch_gradient):
+        """ Takes a (batch) gradient step in parameter space using the specified
+            optimizer.
+
+        This is the fifth and last step of a full update iteration.
+        :param dp_svi_state: The current state of the DPSVI algorithm.
+        :param batch_gradient: Jax tree of batch gradients per parameter site,
+            as returned by `_combine_and_transform_gradient`.
+        :returns: tuple consisting of the updated svi state.
+        """
+        optim_state = dp_svi_state.optim_state
+        optim_state = self.optim.update(batch_gradient, optim_state)
+        dp_svi_state = self._update_state_optim_state(dp_svi_state, optim_state)
+        return dp_svi_state
+
+    def update(self, svi_state, *args, **kwargs):
+        svi_state, per_example_loss, per_example_grads = \
+            self._compute_per_example_gradients(svi_state, *args, **kwargs)
+
+        batch_size = example_count(per_example_loss)
+
+        svi_state, per_example_grads, tree_def = \
+            self._clip_gradients(
+                svi_state, per_example_grads
+            )
+
+        loss, gradient = self._combine_gradients(
+            per_example_grads, per_example_loss
+        )
+
+        svi_state, gradient = self._perturb_and_reassemble_gradients(
+            svi_state, gradient, batch_size, tree_def
+        )
+
+        svi_state = self._apply_gradient(svi_state, gradient)
+
+        return svi_state, loss
 
     def _validate_epochs_and_iter(self, num_epochs, num_iter, q):
         if num_epochs is not None:
@@ -432,6 +424,33 @@ class DPSVI(TunableSVI):
 
         eps = get_delta_R(target_epsilon, self._dp_scale, q, ncomp=num_iter)
         return eps
+
+    @staticmethod
+    def perturbation_function(rng, values, perturbation_scale):
+        """ Perturbs given values using Gaussian noise.
+
+        `values` can be a list of array-like objects. Each value is independently
+        perturbed by adding noise sampled from a Gaussian distribution with a
+        standard deviation of `perturbation_scale`.
+
+        :param rng: Jax PRNGKey for perturbation randomness.
+        :param values: Iterable of array-like where each value will be perturbed.
+        :param perturbation_scale: The scale/standard deviation of the noise
+            distribution.
+        """
+        def perturb_one(a, site_rng):
+            noise = dist.Normal(0, perturbation_scale).sample(
+                site_rng, sample_shape=a.shape
+            )
+            return a + noise
+
+        per_site_rngs = jax.random.split(rng, len(values))
+        values = tuple(
+            perturb_one(grad, site_rng)
+            for grad, site_rng in zip(values, per_site_rngs)
+        )
+        return values
+
 
 
 def get_samples_from_trace(trace, with_intermediates=False):
