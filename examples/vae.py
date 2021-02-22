@@ -42,6 +42,7 @@ import numpyro
 import numpyro.optim as optimizers
 import numpyro.distributions as dist
 from numpyro.primitives import sample
+from numpyro.handlers import scale
 from numpyro.infer import Trace_ELBO as ELBO, SVI
 
 from dppp.svi import DPSVI, sample_multi_posterior_predictive
@@ -184,8 +185,15 @@ def main(args):
     # setting up optimizer
     optimizer = optimizers.Adam(args.learning_rate)
 
+    # the minibatch environment in our model scales individual
+    # records' contributions to the loss up by num_samples.
+    # This can cause numerical instabilities so we scale down
+    # the loss by 1/num_samples here.
+    sc_model = scale(model, scale=1/num_samples)
+    sc_guide = scale(guide, scale=1/num_samples)
+
     if args.no_dp:
-        svi = SVI(model, guide, optimizer, ELBO(), num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim)
+        svi = SVI(sc_model, sc_guide, optimizer, ELBO(), num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim)
     else:
         q = args.batch_size / num_samples
         target_eps = args.epsilon
@@ -198,7 +206,7 @@ def main(args):
         print(f"using noise scale {dp_scale} for epsilon of {act_eps} (targeted: {target_eps})")
 
         svi = DPSVI(
-            model, guide, optimizer, ELBO(),
+            sc_model, sc_guide, optimizer, ELBO(),
             dp_scale=dp_scale, clipping_threshold=10.,
             num_obs_total=num_samples, z_dim=args.z_dim, hidden_dim=args.hidden_dim
         )
@@ -228,7 +236,7 @@ def main(args):
             svi_state, batch_loss = svi.update(
                 svi_state, batch
             )
-            loss += batch_loss / (num_samples * num_batches)
+            loss += batch_loss / num_batches
             return svi_state, loss
 
         svi_state, loss = lax.fori_loop(0, num_batches, body_fn, (svi_state, 0.))
@@ -247,7 +255,7 @@ def main(args):
             binarize_rng = random.fold_in(rng, i)
             batch = test_fetch(i, batchifier_state, binarize_rng)[0]
             batch_loss = svi.evaluate(svi_state, batch)
-            loss_sum += batch_loss / (num_samples * num_batches)
+            loss_sum += batch_loss / num_batches
             return loss_sum
 
         return lax.fori_loop(0, num_batches, body_fn, 0.)
