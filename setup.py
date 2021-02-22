@@ -9,7 +9,7 @@ PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
 
 setup(
     name='dppp',
-    python_requires='>=3.6, <3.9', # while numpyro 0.4.0 is still supported, cannot go to 3.9
+    python_requires='>=3.6'
     version='0.2.0-devel',
     description='Differentially-Private Probabilistic Programming',
     packages=find_packages(include=['dppp', 'dppp.*']),
@@ -35,5 +35,6 @@ setup(
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
     ],
 )
