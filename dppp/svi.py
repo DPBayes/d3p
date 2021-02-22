@@ -30,16 +30,6 @@ from dppp.util import map_over_secondary_dims, example_count
 from fourier_accountant.compute_eps import get_epsilon_S, get_epsilon_R
 from fourier_accountant.compute_delta import get_delta_S, get_delta_R
 
-def per_example_value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
-    # vmap removes leading dimensions, we re-add those in a wrapper for fun so
-    # that fun can be oblivious of this
-    def fun_for_vmap(params, args):
-        new_args = (jnp.reshape(arg, (1, *jnp.shape(arg))) for arg in args)
-        return fun(params, new_args)
-    value_and_grad_fun = jax.value_and_grad(fun_for_vmap, argnums, has_aux, holomorphic)
-    return jax.vmap(value_and_grad_fun, in_axes=(None, 0))
-
-
 class CombinedLoss(object):
 
     def __init__(self, per_example_loss, combiner_fn = jnp.mean):
@@ -121,15 +111,23 @@ class TunableSVI(SVI):
         rng_key, rng_key_step = random.split(svi_state.rng_key, 2)
         params = self.optim.get_params(svi_state.optim_state)
 
-        def wrapped_px_loss(x, loss_args):
+        # we wrap the per-example loss (ELBO) to make it easier "digestable"
+        # for jax.vmap(jax.value_and_grad()): slighly reordering parameters; fixing kwargs, model and guide
+        def wrapped_px_loss(prms, rng_key, loss_args):
+            # vmap removes leading dimensions, we re-add those in a wrapper for fun so
+            # that fun can be oblivious of this
+            new_args = (jnp.expand_dims(arg, 0) for arg in loss_args)
             return self.loss.px_loss.loss(
-                rng_key_step, self.constrain_fn(x), self.model, self.guide,
-                *loss_args, **kwargs, **self.static_kwargs
+                rng_key, self.constrain_fn(prms), self.model, self.guide,
+                *new_args, **kwargs, **self.static_kwargs
             )
 
-        per_example_loss, per_example_grads = per_example_value_and_grad(
-            wrapped_px_loss
-        )(params, args)
+        batch_size = jnp.shape(args[0])[0] # todo: need checks to ensure this indexing is okay
+        px_rng_keys = jax.random.split(rng_key_step, batch_size)
+
+        px_value_and_grad = jax.vmap(jax.value_and_grad(wrapped_px_loss), in_axes=(None, 0, 0))
+        per_example_loss, per_example_grads = px_value_and_grad(params, px_rng_keys, args)
+
         return SVIState(svi_state.optim_state, rng_key), per_example_loss, per_example_grads
 
     def _apply_per_example_gradient_transformations(self, svi_state, px_gradients):
