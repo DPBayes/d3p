@@ -17,6 +17,9 @@
 
 """
 
+import logging
+logging.getLogger().setLevel('INFO')
+
 import os
 
 # allow example to find dppp without installing
@@ -42,11 +45,6 @@ from dppp.svi import DPSVI
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.modelling import sample_prior_predictive
 
-try:
-    jax.lib.xla_bridge.get_backend('gpu') # this will fail if gpu not available
-    numpyro.set_platform('gpu')
-except RuntimeError:
-    print("gpu not available. falling back to cpu")
 
 def model(obs=None, num_obs_total=None, d=None):
     """Defines the generative probabilistic model: p(x|z)p(z)

@@ -17,6 +17,9 @@
 This example demonstrates inferring a Gaussian mixture model.
 """
 
+import logging
+logging.getLogger().setLevel('INFO')
+
 import os
 
 # allow example to find dppp without installing
@@ -42,13 +45,6 @@ from dppp.svi import DPSVI
 from dppp.modelling import sample_prior_predictive
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.gmm import GaussianMixture
-
-
-try:
-    jax.lib.xla_bridge.get_backend('gpu') # this will fail if gpu not available
-    numpyro.set_platform('gpu')
-except RuntimeError:
-    print("gpu not available. falling back to cpu")
 
 def model(k, obs=None, num_obs_total=None, d=None):
     # this is our model function using the GaussianMixture distribution

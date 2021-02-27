@@ -15,6 +15,9 @@
 """Logistic regression example.
 """
 
+import logging
+logging.getLogger().setLevel('INFO')
+
 import os
 
 # allow example to find dppp without installing
@@ -40,12 +43,6 @@ from dppp.util import example_count, normalize
 from dppp.svi import DPSVI
 from dppp.modelling import sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
-
-try:
-    jax.lib.xla_bridge.get_backend('gpu') # this will fail if gpu not available
-    numpyro.set_platform('gpu')
-except RuntimeError:
-    print("gpu not available. falling back to cpu")
 
 def model(batch_X, batch_y=None, num_obs_total=None):
     """Defines the generative probabilistic model: p(y|z,X)p(z)
