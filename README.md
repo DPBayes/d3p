@@ -1,6 +1,6 @@
 # d3p - Differentially Private Probabilistic Programming
 
-[![Build Status](https://travis-ci.com/DPBayes/dppp.svg?branch=master)](https://travis-ci.com/DPBayes/dppp)
+[![Build Status](https://travis-ci.com/DPBayes/d3p.svg?branch=master)](https://travis-ci.com/DPBayes/d3p)
 
 d3p is an implementation of the differentially private variational inference algorithm [1] for [NumPyro](https://github.com/pyro-ppl/numpyro), using [JAX](https://github.com/google/jax/) for auto-differentiation and fast execution on CPU and GPU.
 
@@ -14,8 +14,8 @@ Since both NumPyro and JAX are evolving rapdily, some convenience features imple
 
 d3p is pure Python software. Simply clone this git repository and install with pip:
 ```
-git clone https://github.com/DPBayes/dppp
-cd dppp
+git clone https://github.com/DPBayes/d3p
+cd d3p
 pip install -e .
 ```
 
