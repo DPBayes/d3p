@@ -20,7 +20,7 @@ from jax.scipy.special import logsumexp
 import numpy as np
 from numpyro.distributions import Normal
 
-from dppp.gmm import GaussianMixture
+from d3p.gmm import GaussianMixture
 
 class GaussianMixtureTests(unittest.TestCase):
 

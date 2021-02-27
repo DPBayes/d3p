@@ -22,7 +22,7 @@ logging.getLogger().setLevel('INFO')
 
 import os
 
-# allow example to find dppp without installing
+# allow example to find d3p without installing
 import sys
 sys.path.append(os.path.dirname(sys.path[0]))
 ####
@@ -41,10 +41,10 @@ import numpyro.optim as optimizers
 from numpyro.primitives import sample, param
 from numpyro.infer import Trace_ELBO as ELBO
 
-from dppp.svi import DPSVI
-from dppp.modelling import sample_prior_predictive
-from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
-from dppp.gmm import GaussianMixture
+from d3p.svi import DPSVI
+from d3p.modelling import sample_prior_predictive
+from d3p.minibatch import minibatch, split_batchify_data, subsample_batchify_data
+from d3p.gmm import GaussianMixture
 
 def model(k, obs=None, num_obs_total=None, d=None):
     # this is our model function using the GaussianMixture distribution

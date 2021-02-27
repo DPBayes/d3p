@@ -1,4 +1,4 @@
-name: dppp
+name: d3p
 channels:
   - defaults
 dependencies:

@@ -23,7 +23,7 @@ import jax
 from numpyro.infer.svi import SVIState
 import numpy as np
 
-from dppp.svi import DPSVI, DPSVIState
+from d3p.svi import DPSVI, DPSVIState
 
 class DPSVITest(unittest.TestCase):
 

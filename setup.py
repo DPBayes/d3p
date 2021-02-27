@@ -8,11 +8,11 @@ from setuptools import find_packages, setup
 PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
 
 setup(
-    name='dppp',
+    name='d3p',
     python_requires='>=3.6',
     version='0.2.0-devel',
     description='Differentially-Private Probabilistic Programming',
-    packages=find_packages(include=['dppp', 'dppp.*']),
+    packages=find_packages(include=['d3p', 'd3p.*']),
     author='PADS @ Helsinki University and Aalto University',
     install_requires=[
         'numpyro >= 0.4.0, < 0.6.0',

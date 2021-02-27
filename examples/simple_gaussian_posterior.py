@@ -22,7 +22,7 @@ logging.getLogger().setLevel('INFO')
 
 import os
 
-# allow example to find dppp without installing
+# allow example to find d3p without installing
 import sys
 sys.path.append(os.path.dirname(sys.path[0]))
 ####
@@ -41,9 +41,9 @@ from numpyro.primitives import param, sample
 from numpyro.infer import Trace_ELBO as ELBO
 import numpyro.optim as optimizers
 
-from dppp.svi import DPSVI
-from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
-from dppp.modelling import sample_prior_predictive
+from d3p.svi import DPSVI
+from d3p.minibatch import minibatch, split_batchify_data, subsample_batchify_data
+from d3p.modelling import sample_prior_predictive
 
 
 def model(obs=None, num_obs_total=None, d=None):

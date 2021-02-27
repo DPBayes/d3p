@@ -20,7 +20,7 @@ logging.getLogger().setLevel('INFO')
 
 import os
 
-# allow example to find dppp without installing
+# allow example to find d3p without installing
 import sys
 sys.path.append(os.path.dirname(sys.path[0]))
 ####
@@ -39,10 +39,10 @@ from numpyro.primitives import param, sample
 from numpyro.infer import Trace_ELBO as ELBO
 import numpyro.optim as optimizers
 
-from dppp.util import example_count, normalize
-from dppp.svi import DPSVI
-from dppp.modelling import sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive
-from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
+from d3p.util import example_count, normalize
+from d3p.svi import DPSVI
+from d3p.modelling import sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive
+from d3p.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
 def model(batch_X, batch_y=None, num_obs_total=None):
     """Defines the generative probabilistic model: p(y|z,X)p(z)

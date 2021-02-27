@@ -23,7 +23,7 @@ logging.getLogger().setLevel('INFO')
 
 import os
 
-# allow example to find dppp without installing
+# allow example to find d3p without installing
 import sys
 sys.path.append(os.path.dirname(sys.path[0]))
 ####
@@ -48,11 +48,11 @@ from numpyro.primitives import sample
 from numpyro.handlers import scale
 from numpyro.infer import Trace_ELBO as ELBO, SVI
 
-from dppp.svi import DPSVI
-from dppp.modelling import sample_multi_posterior_predictive
-from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
-from dppp.dputil import approximate_sigma
-from dppp.util import is_int_scalar
+from d3p.svi import DPSVI
+from d3p.modelling import sample_multi_posterior_predictive
+from d3p.minibatch import minibatch, split_batchify_data, subsample_batchify_data
+from d3p.dputil import approximate_sigma
+from d3p.util import is_int_scalar
 
 from datasets import MNIST, load_dataset
 
@@ -327,7 +327,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', default=20, type=int, help='number of training epochs')
+    parser.add_argument('-n', '--num-epochs', default=1, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
     parser.add_argument('--z-dim', default=50, type=int, help='size of latent')

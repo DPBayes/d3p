@@ -26,7 +26,7 @@ from numpyro.infer.util import log_density
 from numpyro.handlers import seed, trace
 from numpyro.primitives import sample, deterministic
 
-from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
+from d3p.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
 class MinibatchTests(unittest.TestCase):
 

@@ -14,7 +14,7 @@
 
 import jax
 from numpyro.handlers import seed, trace, substitute, condition
-from dppp.util import unvectorize_shape_2d
+from d3p.util import unvectorize_shape_2d
 
 def get_samples_from_trace(trace, with_intermediates=False):
     """ Extracts all sample values from a numpyro trace.

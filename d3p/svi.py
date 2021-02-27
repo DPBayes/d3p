@@ -26,7 +26,7 @@ from numpyro.infer.svi import SVI, SVIState
 import numpyro.distributions as dist
 from numpyro.handlers import seed, trace, substitute, block
 
-from dppp.util import map_over_secondary_dims, example_count
+from d3p.util import map_over_secondary_dims, example_count
 
 from fourier_accountant.compute_eps import get_epsilon_S, get_epsilon_R
 from fourier_accountant.compute_delta import get_delta_S, get_delta_R

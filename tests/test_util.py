@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""tests the implementations in the dppp.svi utils package
+"""tests the implementations in the d3p.svi utils package
 """
 import unittest
 
@@ -20,7 +20,7 @@ import jax.numpy as jnp
 import jax
 import numpy as np
 
-from dppp import util
+from d3p import util
 
 class UtilityTests(unittest.TestCase):
 

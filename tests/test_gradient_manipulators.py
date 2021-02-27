@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-""" tests that the dppp.clip_gradient method works correctly
+""" tests that the d3p.clip_gradient method works correctly
 """
 import unittest
 
 import jax.numpy as jnp
 import numpy as np
 
-from dppp.svi import clip_gradient, full_norm, normalize_gradient
+from d3p.svi import clip_gradient, full_norm, normalize_gradient
 
 class GradientManipulatorsTests(unittest.TestCase):
 

@@ -1,4 +1,5 @@
 - current(0.2.0):
+    - ! Renamed main package 'dppp' to 'd3p' !
     - Fix: DPSVI perturbation was too large (scaled by minibatch size)
     - Update: Upgraded dependencies: numpyro (>=0.4.0), jax (>=0.2.3)
     - Feature: Fast minibatch sampling using Feistel-based CUDA-Shuffle

@@ -19,16 +19,16 @@ import unittest
 import jax.numpy as jnp
 import jax
 
-from dppp.optimizers import ADADP
-import dppp.util
+from d3p.optimizers import ADADP
+import d3p.util
 
 class ADADPTests(unittest.TestCase):
 
     def assertTreeStructure(self, expected, actual):
-        self.assertTrue(dppp.util.do_trees_have_same_structure(expected, actual))
+        self.assertTrue(d3p.util.do_trees_have_same_structure(expected, actual))
 
     def assertTreeAllClose(self, expected, actual):
-        self.assertTrue(dppp.util.are_trees_close(expected, actual))
+        self.assertTrue(d3p.util.are_trees_close(expected, actual))
 
     def same_tree_with_value(self, tree, value):
         return jax.tree_map(

@@ -32,7 +32,7 @@ import numpy as np
 
 from jax import device_put
 
-from dppp.minibatch import split_batchify_data
+from d3p.minibatch import split_batchify_data
 
 if 'CI' in os.environ:
     DATA_DIR = os.path.expanduser('~/.data')

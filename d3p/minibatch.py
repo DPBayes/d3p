@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dppp.util import is_int_scalar, is_array, example_count, sample_from_array
+from d3p.util import is_int_scalar, is_array, example_count, sample_from_array
 from numpyro.handlers import scale
 import jax.numpy as jnp
 import jax
