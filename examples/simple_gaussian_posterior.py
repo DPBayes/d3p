@@ -40,7 +40,7 @@ import numpyro.optim as optimizers
 
 from dppp.svi import DPSVI
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
-from dppp.svi import sample_prior_predictive
+from dppp.modelling import sample_prior_predictive
 
 try:
     jax.lib.xla_bridge.get_backend('gpu') # this will fail if gpu not available

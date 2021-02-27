@@ -37,7 +37,8 @@ from numpyro.infer import Trace_ELBO as ELBO
 import numpyro.optim as optimizers
 
 from dppp.util import example_count, normalize
-from dppp.svi import DPSVI, sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive
+from dppp.svi import DPSVI
+from dppp.modelling import sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 
 try:

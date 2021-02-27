@@ -20,7 +20,7 @@ import jax
 import numpyro.distributions as dist
 from numpyro.primitives import sample, param
 
-from dppp.svi import sample_prior_predictive, sample_multi_prior_predictive, \
+from dppp.modelling import sample_prior_predictive, sample_multi_prior_predictive, \
     sample_posterior_predictive, sample_multi_posterior_predictive
 
 class ModelSamplingTests(unittest.TestCase):

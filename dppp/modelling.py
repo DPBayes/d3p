@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import jax
-from numpyro.handlers import seed, trace, substitute, Messenger
+from numpyro.handlers import seed, trace, substitute, condition
 from dppp.util import unvectorize_shape_2d
 
 def get_samples_from_trace(trace, with_intermediates=False):
@@ -61,7 +61,7 @@ def sample_prior_predictive(rng_key, model, model_args,
         sample values and the second element is a list of intermediate values.
     """
     if substitutes is None: substitutes = dict()
-    model = seed(substitute(model, param_map=substitutes), rng_key)
+    model = seed(substitute(model, data=substitutes), rng_key)
     t = trace(model).get_trace(*model_args, **kwargs)
     return get_samples_from_trace(t, with_intermediates)
 
@@ -92,7 +92,7 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args,
     """
     model_rng_key, guide_rng_key = jax.random.split(rng_key)
 
-    guide = seed(substitute(guide, param_map=params), guide_rng_key)
+    guide = seed(substitute(guide, data=params), guide_rng_key)
     guide_samples = get_samples_from_trace(
         trace(guide).get_trace(*guide_args, **kwargs), with_intermediates
     )
@@ -103,7 +103,7 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args,
     else:
         model_params.update({k: v for k, v in guide_samples.items()})
 
-    model = seed(substitute(model, param_map=model_params), model_rng_key)
+    model = seed(substitute(model, data=model_params), model_rng_key)
     model_samples = get_samples_from_trace(
         trace(model).get_trace(*model_args, **kwargs), with_intermediates
     )
@@ -185,24 +185,6 @@ def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide,
 def map_args_obs_to_shape(obs, *args, **kwargs):
     return unvectorize_shape_2d(obs), kwargs, {'obs': obs}
 
-class observe(Messenger):
-    """ Numpyro messenger injecting observations for a sample site.
-
-    This is similar to the `substitute` handler but additionally marks the
-    sample site as observed.
-    """
-    def __init__(self, fn=None, param_map=None):
-        self.param_map = param_map
-        super(observe, self).__init__(fn)
-
-    def process_message(self, msg):
-        if msg['type'] not in ('sample'):
-            return
-        if msg['name'] in self.param_map:
-            msg['value'] = self.param_map[msg['name']]
-            msg['is_observed'] = True
-
-
 def make_observed_model(model, obs_to_model_args_fn):
     """ Transforms a generative model function into one with fixed observations
     for likelihood evaluation in the SVI algorithm.
@@ -219,5 +201,5 @@ def make_observed_model(model, obs_to_model_args_fn):
     """
     def transformed_model_fn(*args, **kwargs):
         mapped_args, mapped_kwargs, fixed_obs = obs_to_model_args_fn(*args, **kwargs)
-        return observe(model, param_map=fixed_obs)(*mapped_args, **mapped_kwargs)
+        return condition(model, data=fixed_obs)(*mapped_args, **mapped_kwargs)
     return transformed_model_fn
