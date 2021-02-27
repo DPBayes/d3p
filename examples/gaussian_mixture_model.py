@@ -38,7 +38,8 @@ import numpyro.optim as optimizers
 from numpyro.primitives import sample, param
 from numpyro.infer import Trace_ELBO as ELBO
 
-from dppp.svi import DPSVI, sample_prior_predictive
+from dppp.svi import DPSVI
+from dppp.modelling import sample_prior_predictive
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.gmm import GaussianMixture
 

@@ -45,7 +45,8 @@ from numpyro.primitives import sample
 from numpyro.handlers import scale
 from numpyro.infer import Trace_ELBO as ELBO, SVI
 
-from dppp.svi import DPSVI, sample_multi_posterior_predictive
+from dppp.svi import DPSVI
+from dppp.modelling import sample_multi_posterior_predictive
 from dppp.minibatch import minibatch, split_batchify_data, subsample_batchify_data
 from dppp.dputil import approximate_sigma
 from dppp.util import is_int_scalar
