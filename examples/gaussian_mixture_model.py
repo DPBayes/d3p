@@ -185,8 +185,6 @@ def main(args):
     model_fixed = fix_params(model, k)
     guide_fixed = fix_params(guide, k)
 
-    # note(lumip): value for c currently completely made up
-    #   value for dp_scale completely made up currently.
     svi = DPSVI(
         model_fixed, guide_fixed, optimizer, ELBO(),
         dp_scale=0.01,  clipping_threshold=20., num_obs_total=args.num_samples
@@ -229,7 +227,7 @@ def main(args):
         svi_state, train_loss = epoch_train(
             svi_state, train_batchifier_state, num_train_batches
         )
-        train_loss.block_until_ready() # todo: blocking on loss will probabyl ignore rest of optimization
+        train_loss.block_until_ready()
         t_end = time.time()
 
         if i % 100 == 0:

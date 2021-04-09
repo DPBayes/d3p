@@ -171,7 +171,7 @@ def main(args):
         svi_state, train_loss = epoch_train(
             svi_state, train_batchifier_state, num_train_batches
         )
-        train_loss.block_until_ready() # todo: blocking on loss will probabyl ignore rest of optimization
+        train_loss.block_until_ready()
         t_end = time.time()
 
         if (i % (args.num_epochs // 10) == 0):

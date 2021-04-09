@@ -127,8 +127,6 @@ def main(args):
     ## Init optimizer and training algorithms
     optimizer = optimizers.Adam(args.learning_rate)
 
-    # note(lumip): value for c currently completely made up
-    #   value for dp_scale completely made up currently.
     svi = DPSVI(model, guide, optimizer, ELBO(),
         dp_scale=0.01, clipping_threshold=20., num_obs_total=args.num_samples
     )
@@ -182,7 +180,7 @@ def main(args):
         svi_state, train_loss = epoch_train(
             svi_state, train_batchifier_state, num_train_batches
         )
-        train_loss.block_until_ready() # todo: blocking on loss will probabyl ignore rest of optimization
+        train_loss.block_until_ready()
         t_end = time.time()
 
         if (i % (args.num_epochs//10)) == 0:
