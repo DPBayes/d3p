@@ -5,5 +5,6 @@
     - Feature: Fast minibatch sampling using Feistel-based CUDA-Shuffle
     - Removed: num_obs_total argument to DPSVI.
     - Removed: TunableSVI class.
+    - Removed: minibatch context handler - superseded by numpyro plate primitive.
     - Moved: Routines for sampling from posterior/prior in d3p.svi
 - 0.1.0: Initial not-quite-a-release

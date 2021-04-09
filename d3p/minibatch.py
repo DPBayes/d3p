@@ -18,36 +18,9 @@ import jax.numpy as jnp
 import jax
 
 __all__ = [
-    'minibatch', 'subsample_batchify_data', 'split_batchify_data',
+    'subsample_batchify_data', 'split_batchify_data',
     'q_to_batch_size', 'batch_size_to_q'
 ]
-
-def minibatch(batch_or_batchsize, num_obs_total=None):
-    """Returns a context within which all samples are treated as being a
-    minibatch of a larger data set.
-
-    In essence, this marks the (log)likelihood of the sampled examples to be
-    scaled to the total loss value over the whole data set.
-
-    :param batch_or_batchsize: An integer indicating the batch size or an array
-        indicating the shape of the batch where the length of the first axis
-        is interpreted as batch size.
-    :param num_obs_total: The total number of examples/observations in the
-        full data set. Optional, defaults to the given batch size.
-    """
-    if is_int_scalar(batch_or_batchsize):
-        if not jnp.isscalar(batch_or_batchsize):
-            raise TypeError("if a scalar is given for batch_or_batchsize, it "
-                "can't be traced through jit. consider using static_argnums "
-                "for the jit invocation.")
-        batch_size = batch_or_batchsize
-    elif is_array(batch_or_batchsize):
-        batch_size = example_count(batch_or_batchsize)
-    else:
-        raise TypeError("batch_or_batchsize must be an array or an integer")
-    if num_obs_total is None:
-        num_obs_total = batch_size
-    return scale(scale = num_obs_total / batch_size)
 
 def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=False):
     """Returns functions to fetch (randomized) batches of a given dataset by

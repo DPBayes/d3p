@@ -38,12 +38,12 @@ from jax.random import PRNGKey
 import numpyro
 import numpyro.distributions as dist
 import numpyro.optim as optimizers
-from numpyro.primitives import sample, param
+from numpyro.primitives import sample, param, plate
 from numpyro.infer import Trace_ELBO as ELBO
 
 from d3p.svi import DPSVI
 from d3p.modelling import sample_prior_predictive
-from d3p.minibatch import minibatch, split_batchify_data, subsample_batchify_data
+from d3p.minibatch import split_batchify_data, subsample_batchify_data
 from d3p.gmm import GaussianMixture
 
 def model(k, obs=None, num_obs_total=None, d=None):
@@ -56,11 +56,12 @@ def model(k, obs=None, num_obs_total=None, d=None):
         assert(num_obs_total is not None)
         batch_size = num_obs_total
         assert(d is not None)
+    num_obs_total = batch_size if num_obs_total is None else num_obs_total
 
     pis = sample('pis', dist.Dirichlet(jnp.ones(k)))
     mus = sample('mus', dist.Normal(jnp.zeros((k, d)), 10.))
     sigs = sample('sigs', dist.InverseGamma(1., 1.), sample_shape=jnp.shape(mus))
-    with minibatch(batch_size, num_obs_total=num_obs_total):
+    with plate('batch', num_obs_total, batch_size):
         return sample('obs', GaussianMixture(mus, sigs, pis), obs=obs, sample_shape=(batch_size,))
 
 def guide(k, obs=None, num_obs_total=None, d=None):

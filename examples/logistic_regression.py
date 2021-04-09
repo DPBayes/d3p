@@ -35,14 +35,14 @@ from jax.random import PRNGKey
 
 import numpyro
 import numpyro.distributions as dist
-from numpyro.primitives import param, sample
+from numpyro.primitives import param, sample, plate
 from numpyro.infer import Trace_ELBO as ELBO
 import numpyro.optim as optimizers
 
 from d3p.util import example_count, normalize
 from d3p.svi import DPSVI
 from d3p.modelling import sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive
-from d3p.minibatch import minibatch, split_batchify_data, subsample_batchify_data
+from d3p.minibatch import split_batchify_data, subsample_batchify_data
 
 def model(batch_X, batch_y=None, num_obs_total=None):
     """Defines the generative probabilistic model: p(y|z,X)p(z)
@@ -53,13 +53,14 @@ def model(batch_X, batch_y=None, num_obs_total=None):
     """
     assert(jnp.ndim(batch_X) == 2)
     batch_size, d = jnp.shape(batch_X)
+    num_obs_total = batch_size if num_obs_total is None else num_obs_total
     assert(batch_y is None or example_count(batch_y) == batch_size)
 
     z_w = sample('w', dist.Normal(jnp.zeros((d,)), jnp.ones((d,)))) # prior is N(0,I)
     z_intercept = sample('intercept', dist.Normal(0,1)) # prior is N(0,1)
     logits = batch_X.dot(z_w)+z_intercept
 
-    with minibatch(batch_size, num_obs_total=num_obs_total):
+    with plate("batch", num_obs_total, batch_size):
         return sample('obs', dist.Bernoulli(logits=logits), obs=batch_y)
 
 

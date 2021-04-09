@@ -37,12 +37,12 @@ from jax.random import PRNGKey
 
 import numpyro
 import numpyro.distributions as dist
-from numpyro.primitives import param, sample
+from numpyro.primitives import param, sample, plate
 from numpyro.infer import Trace_ELBO as ELBO
 import numpyro.optim as optimizers
 
 from d3p.svi import DPSVI
-from d3p.minibatch import minibatch, split_batchify_data, subsample_batchify_data
+from d3p.minibatch import split_batchify_data, subsample_batchify_data
 from d3p.modelling import sample_prior_predictive
 
 
@@ -56,11 +56,12 @@ def model(obs=None, num_obs_total=None, d=None):
         assert(num_obs_total is not None)
         batch_size = num_obs_total
         assert(d != None)
+    num_obs_total = batch_size if num_obs_total is None else num_obs_total
 
     z_mu = sample('mu', dist.Normal(jnp.zeros((d,)), 1.))
     x_var = .1
-    with minibatch(batch_size, num_obs_total):
-        x = sample('obs', dist.Normal(z_mu, x_var), obs=obs, sample_shape=(batch_size,))
+    with plate('batch', num_obs_total, batch_size):
+        x = sample('obs', dist.Normal(z_mu, x_var).to_event(1), obs=obs, sample_shape=(batch_size,))
     return x
 
 def guide(obs=None, num_obs_total=None, d=None):

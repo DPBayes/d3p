@@ -44,13 +44,13 @@ import numpy as np
 import numpyro
 import numpyro.optim as optimizers
 import numpyro.distributions as dist
-from numpyro.primitives import sample
+from numpyro.primitives import sample, plate
 from numpyro.handlers import scale
 from numpyro.infer import Trace_ELBO as ELBO, SVI
 
 from d3p.svi import DPSVI
 from d3p.modelling import sample_multi_posterior_predictive
-from d3p.minibatch import minibatch, split_batchify_data, subsample_batchify_data
+from d3p.minibatch import split_batchify_data, subsample_batchify_data
 from d3p.dputil import approximate_sigma
 from d3p.util import is_int_scalar
 
@@ -124,12 +124,13 @@ def model(batch_or_batchsize, z_dim, hidden_dim, out_dim=None, num_obs_total=Non
         batch_size = jnp.shape(batch)[0]
         batch = jnp.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
         out_dim = jnp.shape(batch)[1]
+    num_obs_total = batch_size if num_obs_total is None else num_obs_total
 
     decode = numpyro.module('decoder', decoder(hidden_dim, out_dim), (batch_size, z_dim))
-    with minibatch(batch_size, num_obs_total=num_obs_total):
-        z = sample('z', dist.Normal(jnp.zeros((z_dim,)), jnp.ones((z_dim,)))) # prior on z is N(0,I)
+    with plate('batch', num_obs_total, batch_size):
+        z = sample('z', dist.Normal(jnp.zeros((z_dim,)), jnp.ones((z_dim,))).to_event(1)) # prior on z is N(0,I)
         img_loc = decode(z) # evaluate decoder (p(x|z)) on sampled z to get means for output bernoulli distribution
-        x = sample('obs', dist.Bernoulli(img_loc), obs=batch) # outputs x are sampled from bernoulli distribution depending on z and conditioned on the observed data
+        x = sample('obs', dist.Bernoulli(img_loc).to_event(1), obs=batch) # outputs x are sampled from bernoulli distribution depending on z and conditioned on the observed data
         return x
 
 
@@ -142,11 +143,12 @@ def guide(batch, z_dim, hidden_dim, out_dim=None, num_obs_total=None):
     batch_size = jnp.shape(batch)[0]
     batch = jnp.reshape(batch, (batch_size, -1)) # squash each data item into a one-dimensional array (preserving only the batch size on the first axis)
     out_dim = jnp.shape(batch)[1]
+    num_obs_total = batch_size if num_obs_total is None else num_obs_total
 
     encode = numpyro.module('encoder', encoder(hidden_dim, z_dim), (batch_size, out_dim))
-    with minibatch(batch_size, num_obs_total=num_obs_total):
+    with plate('batch', num_obs_total, batch_size):
         z_loc, z_std = encode(batch) # obtain mean and variance for q(z) ~ p(z|x) from encoder
-        z = sample('z', dist.Normal(z_loc, z_std)) # z follows q(z)
+        z = sample('z', dist.Normal(z_loc, z_std).to_event(1)) # z follows q(z)
         return z
 
 
@@ -183,7 +185,7 @@ def main(args):
     # setting up optimizer
     optimizer = optimizers.Adam(args.learning_rate)
 
-    # the minibatch environment in our model scales individual
+    # the plate environment in our model scales individual
     # records' contributions to the loss up by num_samples.
     # This can cause numerical instabilities so we scale down
     # the loss by 1/num_samples here.
