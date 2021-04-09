@@ -29,7 +29,7 @@ For now, see the examples in `examples/`.
 
 The `master` branch contains the latest stable development version of d3p.
 
-In the future, we will adopt semantic versioning. The first version will be released as `0.1.0` shortly. Commits corresponding to version releases will be tagged accordingly.
+In the future, we will adopt semantic versioning. Commits corresponding to version releases will be tagged accordingly.
 
 A list of important changes between releases will be available in `ChangeLog.txt`.
 
