@@ -12,12 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Tuple, Callable, Optional
 from fourier_accountant.compute_eps import get_epsilon_S, get_epsilon_R
 import numpy as np
 
 __all__ = ['approximate_sigma', 'approximate_sigma_remove_relation']
+ComputeEpsFn = Callable[[float, Optional[float]], float]
 
-def get_bracketing_bounds(compute_eps_fn, target_eps, maxeval, initial_sigma = 1.):
+def get_bracketing_bounds(
+        compute_eps_fn: ComputeEpsFn,
+        target_eps: float,
+        maxeval: int,
+        initial_sigma: Optional[float]=1.
+    ) -> Tuple[np.ndarray, np.ndarray, int]:
     """ Determines rough upper and lower bounds for sigma around a target privacy
     epsilon value.
 
@@ -39,7 +46,6 @@ def get_bracketing_bounds(compute_eps_fn, target_eps, maxeval, initial_sigma = 1
 
     sig = initial_sigma
     num_evals = 0
-    precision = 1.
 
     while num_evals < maxeval:
         try:
@@ -72,7 +78,7 @@ def get_bracketing_bounds(compute_eps_fn, target_eps, maxeval, initial_sigma = 1
                     eps = compute_eps_fn(sig)
                     break
                 except ValueError:
-                    sig = np.mean(sig, sig_1)
+                    sig = np.mean([sig, sig_1])
 
                 if num_evals >= maxeval:
                     raise RuntimeError("Could not establish bounds in given evaluation limit")
@@ -87,7 +93,7 @@ def get_bracketing_bounds(compute_eps_fn, target_eps, maxeval, initial_sigma = 1
                     eps = compute_eps_fn(sig)
                     break
                 except ValueError:
-                    sig = np.mean(sig, sig_1)
+                    sig = np.mean([sig, sig_1])
 
                 if num_evals >= maxeval:
                     raise RuntimeError("Could not establish bounds in given evaluation limit")
@@ -95,7 +101,14 @@ def get_bracketing_bounds(compute_eps_fn, target_eps, maxeval, initial_sigma = 1
 
         return np.array([sig, sig_1]), np.array([eps, eps_1]), num_evals
 
-def update_bounds(sig, eps, target_eps, bounds, bound_eps, consecutive_updates):
+def update_bounds(
+        sig: float,
+        eps: float,
+        target_eps: float,
+        bounds: np.ndarray,
+        bound_eps: np.ndarray,
+        consecutive_updates: int
+    ) -> Tuple[np.ndarray, np.ndarray, int]:
     """ Updates bounds for sigma around a target privacy epsilon.
 
     Updates the lower bound for sigma if `eps` is larger than `target_eps` and
@@ -125,7 +138,14 @@ def update_bounds(sig, eps, target_eps, bounds, bound_eps, consecutive_updates):
 
     return bounds, bound_eps, consecutive_updates
 
-def _approximate_sigma(compute_eps_fn, target_eps, q, tol=1e-4, force_smaller=False, maxeval=10):
+def _approximate_sigma(
+        compute_eps_fn: ComputeEpsFn,
+        target_eps: float,
+        q: float,
+        tol: Optional[float]=1e-4,
+        force_smaller: Optional[bool]=False,
+        maxeval: Optional[int]=10
+    ) -> Tuple[float, float, int]:
     """ Approximates the sigma corresponding to a target privacy epsilon.
 
     Uses a bracketing approach where an initial rough estimate of lower and upper
@@ -155,7 +175,6 @@ def _approximate_sigma(compute_eps_fn, target_eps, q, tol=1e-4, force_smaller=Fa
     bounds, bound_eps, num_evals = get_bracketing_bounds(compute_eps_fn, target_eps, maxeval, initial_sigma=initial_sigma)
     eps = bound_eps[1]
     consecutive_updates = [0,0]
-    # scale = 1.
 
     while abs(target_eps - eps) > tol and num_evals < maxeval:
         assert(bound_eps[0] >= target_eps) # loop invariants
@@ -170,7 +189,6 @@ def _approximate_sigma(compute_eps_fn, target_eps, q, tol=1e-4, force_smaller=Fa
         new_sig = a - b * np.log(target_eps)
         assert(new_sig >= bounds[0] and new_sig <= bounds[1])
         eps = compute_eps_fn(new_sig)
-        # scale = target_eps/eps
         num_evals += 1
 
         bounds, bound_eps, consecutive_updates = update_bounds(
@@ -204,7 +222,15 @@ def _approximate_sigma(compute_eps_fn, target_eps, q, tol=1e-4, force_smaller=Fa
 
     return new_sig, eps, num_evals
 
-def approximate_sigma(target_eps, delta, q, num_iter, tol=1e-4, force_smaller=False, maxeval=10):
+def approximate_sigma(
+        target_eps: float,
+        delta: float,
+        q: float,
+        num_iter: int,
+        tol: Optional[float]=1e-4,
+        force_smaller: Optional[bool]=False,
+        maxeval: Optional[int]=10
+    ) -> Tuple[float, float, int]:
     """ Approximates the sigma corresponding to a target privacy epsilon using
     the Fourier Accountant for the substitute relation.
 
@@ -240,7 +266,15 @@ def approximate_sigma(target_eps, delta, q, num_iter, tol=1e-4, force_smaller=Fa
 
     return _approximate_sigma(compute_eps, target_eps, q, tol, force_smaller, maxeval)
 
-def approximate_sigma_remove_relation(target_eps, delta, q, num_iter, tol=1e-4, force_smaller=False, maxeval=10):
+def approximate_sigma_remove_relation(
+        target_eps: float,
+        delta: float,
+        q: float,
+        num_iter: int,
+        tol: Optional[float]=1e-4,
+        force_smaller: Optional[bool]=False,
+        maxeval: Optional[int]=10
+    ) -> Tuple[float, float, int]:
     """ Approximates the sigma corresponding to a target privacy epsilon using
     the Fourier Accountant for the add/remove relation.
 
