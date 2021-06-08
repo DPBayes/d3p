@@ -17,24 +17,28 @@
     manipulation capability.
 """
 import functools
+from typing import Any, NamedTuple, Sequence, Tuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from numpyro.infer.svi import SVI
+from numpyro.infer.svi import SVI, SVIState
 from numpyro.infer.elbo import ELBO
 import numpyro.distributions as dist
 from numpyro.handlers import seed, trace, substitute, block
 
 from d3p.util import example_count
+from d3p.random import normal as dpnormal
+import d3p.random
 
 from fourier_accountant.compute_eps import get_epsilon_R
 from fourier_accountant.compute_delta import get_delta_R
 
-from collections import namedtuple
-
-DPSVIState = namedtuple('DPSVIState', ('optim_state', 'rng_key', 'observation_scale'))
+class DPSVIState(NamedTuple):
+    optim_state: Any
+    rng_key: d3p.random.PRNGState
+    observation_scale: float
 
 
 def get_observations_scale(model, model_args, model_kwargs, params):
@@ -210,7 +214,7 @@ class DPSVI(SVI):
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
 
     @staticmethod
-    def _update_state_rng(dp_svi_state: DPSVIState, rng_key) -> DPSVIState:
+    def _update_state_rng(dp_svi_state: DPSVIState, rng_key: d3p.random.PRNGState) -> DPSVIState:
         return DPSVIState(
             dp_svi_state.optim_state,
             rng_key,
@@ -218,7 +222,7 @@ class DPSVI(SVI):
         )
 
     @staticmethod
-    def _update_state_optim_state(dp_svi_state: DPSVIState, optim_state) -> DPSVIState:
+    def _update_state_optim_state(dp_svi_state: DPSVIState, optim_state: Any) -> DPSVIState:
         return DPSVIState(
             optim_state,
             dp_svi_state.rng_key,
@@ -226,13 +230,15 @@ class DPSVI(SVI):
         )
 
     @staticmethod
-    def _split_rng_key(dp_svi_state: DPSVIState):
+    def _split_rng_key(dp_svi_state: DPSVIState) -> Tuple[DPSVIState, d3p.random.PRNGState] :
         rng_key = dp_svi_state.rng_key
-        rng_key, split_key = jax.random.split(rng_key)
+        rng_key, split_key = d3p.random.split(rng_key)
         return DPSVI._update_state_rng(dp_svi_state, rng_key), split_key
 
     def init(self, rng_key, *args, **kwargs):
-        svi_state = super().init(rng_key, *args, **kwargs)
+        rng_key, jax_rng_key = d3p.random.split(rng_key)
+        jax_rng_key = d3p.random.convert_to_jax_rng_key(jax_rng_key)
+        svi_state = super().init(jax_rng_key, *args, **kwargs)
 
         if svi_state.mutable_state is not None:
             raise RuntimeError("Mutable state is not supported.")
@@ -251,7 +257,7 @@ class DPSVI(SVI):
             self.model, one_element_batch, model_kwargs, params
         )
 
-        return DPSVIState(svi_state.optim_state, svi_state.rng_key, observation_scale)
+        return DPSVIState(svi_state.optim_state, rng_key, observation_scale)
 
     def _compute_per_example_gradients(self, dp_svi_state, *args, **kwargs):
         """ Computes the raw per-example gradients of the model.
@@ -266,6 +272,7 @@ class DPSVI(SVI):
             per parameter site (each site's gradients have shape (batch_size, *parameter_shape))
         """
         dp_svi_state, rng_key_step = self._split_rng_key(dp_svi_state)
+        jax_rng_key = d3p.random.convert_to_jax_rng_key(rng_key_step)
 
         # note: do NOT use self.get_params here; that applies constraint transforms for end-consumers of the parameters
         # but internally we maintain and optimize on unconstrained params
@@ -283,7 +290,7 @@ class DPSVI(SVI):
             )
 
         batch_size = jnp.shape(args[0])[0]  # todo: need checks to ensure this indexing is okay
-        px_rng_keys = jax.random.split(rng_key_step, batch_size)
+        px_rng_keys = jax.random.split(jax_rng_key, batch_size)
 
         px_value_and_grad = jax.vmap(jax.value_and_grad(wrapped_px_loss), in_axes=(None, 0, 0))
         per_example_loss, per_example_grads = px_value_and_grad(params, px_rng_keys, args)
@@ -414,6 +421,22 @@ class DPSVI(SVI):
 
         return svi_state, loss
 
+    def evaluate(self, svi_state: DPSVIState, *args, **kwargs):
+        """
+        Take a single step of SVI (possibly on a batch / minibatch of data).
+
+        :param svi_state: current state of DPSVI.
+        :param args: arguments to the model / guide (these can possibly vary during
+            the course of fitting).
+        :param kwargs: keyword arguments to the model / guide.
+        :return: evaluate ELBO loss given the current parameter values
+            (held within `svi_state.optim_state`).
+        """
+        # we split to have the same seed as `update_fn` given an svi_state
+        jax_rng_key = d3p.random.convert_to_jax_rng_key(d3p.random.split(svi_state.rng_key, 1)[0])
+        jax_svi_state = SVIState(svi_state.optim_state, jax_rng_key)
+        return super().evaluate(jax_svi_state, *args, **kwargs)
+
     def _validate_epochs_and_iter(self, num_epochs, num_iter, q):
         if num_epochs is not None:
             num_iter = num_epochs / q
@@ -434,7 +457,9 @@ class DPSVI(SVI):
         return eps
 
     @staticmethod
-    def perturbation_function(rng, values, perturbation_scale):
+    def perturbation_function(
+            rng: d3p.random.PRNGState, values: Sequence[jnp.ndarray], perturbation_scale: float
+        ) -> Sequence[jnp.ndarray]:
         """ Perturbs given values using Gaussian noise.
 
         `values` can be a list of array-like objects. Each value is independently
@@ -446,13 +471,11 @@ class DPSVI(SVI):
         :param perturbation_scale: The scale/standard deviation of the noise
             distribution.
         """
-        def perturb_one(a, site_rng):
-            noise = dist.Normal(0, perturbation_scale).sample(
-                site_rng, sample_shape=a.shape
-            )
+        def perturb_one(a: jnp.ndarray, site_rng: d3p.random.PRNGState) -> jnp.ndarray:
+            noise = dpnormal(site_rng, a.shape) * perturbation_scale
             return a + noise
 
-        per_site_rngs = jax.random.split(rng, len(values))
+        per_site_rngs = d3p.random.split(rng, len(values))
         values = tuple(
             perturb_one(grad, site_rng)
             for grad, site_rng in zip(values, per_site_rngs)

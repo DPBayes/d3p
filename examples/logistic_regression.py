@@ -33,6 +33,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit, lax, random
 from jax.random import PRNGKey
+import d3p.random
 
 import numpyro
 import numpyro.distributions as dist
@@ -132,11 +133,12 @@ def main(args):
         dp_scale=0.01, clipping_threshold=20., num_obs_total=args.num_samples
     )
 
-    rng, svi_init_rng, data_fetch_rng = random.split(rng, 3)
+    rng, data_fetch_rng = random.split(rng, 2)
     _, batchifier_state = train_init(rng_key=data_fetch_rng)
     sample_batch = train_fetch(0, batchifier_state)
 
-    svi_state = svi.init(svi_init_rng, *sample_batch)
+    dpsvi_rng = d3p.random.PRNGKey()
+    svi_state = svi.init(dpsvi_rng, *sample_batch)
 
     @jit
     def epoch_train(svi_state, batchifier_state, num_batch):

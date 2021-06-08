@@ -46,6 +46,7 @@ from d3p.svi import DPSVI
 from d3p.modelling import sample_prior_predictive
 from d3p.minibatch import split_batchify_data, subsample_batchify_data
 from d3p.gmm import GaussianMixture
+import d3p.random
 
 def model(k, obs=None, num_obs_total=None, d=None):
     # this is our model function using the GaussianMixture distribution
@@ -191,13 +192,15 @@ def main(args):
         dp_scale=0.01,  clipping_threshold=20., num_obs_total=args.num_samples
     )
 
-    rng, svi_init_rng, fetch_rng = random.split(rng, 3)
+    rng, fetch_rng = random.split(rng, 2)
     _, batchifier_state = train_init(fetch_rng)
     batch = train_fetch(0, batchifier_state)
-    svi_state = svi.init(svi_init_rng, *batch)
+
+    dpsvi_rng = d3p.random.PRNGKey()
+    svi_state = svi.init(dpsvi_rng, *batch)
 
     @jit
-    def epoch_train(svi_state, data_idx, num_batch):
+    def epoch_train(svi_state, batchifier_state, num_batch):
         def body_fn(i, val):
             svi_state, loss = val
             batch = train_fetch(i, batchifier_state)

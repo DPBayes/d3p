@@ -54,6 +54,7 @@ from d3p.modelling import sample_multi_posterior_predictive
 from d3p.minibatch import split_batchify_data, subsample_batchify_data
 from d3p.dputil import approximate_sigma
 from d3p.util import is_int_scalar
+import d3p.random
 
 from datasets import MNIST, load_dataset
 
@@ -214,10 +215,12 @@ def main(args):
 
     # preparing random number generators and initializing svi
     rng = PRNGKey(0)
-    rng, binarize_rng, svi_init_rng, batchifier_rng = random.split(rng, 4)
+    rng, binarize_rng, batchifier_rng = random.split(rng, 3)
     _, batchifier_state = train_init(rng_key=batchifier_rng)
     sample_batch = train_fetch(0, batchifier_state, binarize_rng)[0]
-    svi_state = svi.init(svi_init_rng, sample_batch)
+
+    dpsvi_rng = d3p.random.PRNGKey()
+    svi_state = svi.init(dpsvi_rng, sample_batch)
 
     # functions for training tasks
     @jit

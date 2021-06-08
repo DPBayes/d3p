@@ -22,6 +22,7 @@ from functools import reduce
 import jax.numpy as jnp
 import jax
 from numpyro.optim import SGD
+import d3p.random
 import numpy as np
 
 from d3p.svi import DPSVI, DPSVIState, full_norm
@@ -30,7 +31,7 @@ from d3p.svi import DPSVI, DPSVIState, full_norm
 class DPSVITest(unittest.TestCase):
 
     def setUp(self):
-        self.rng = jax.random.PRNGKey(9782346)
+        self.rng = d3p.random.PRNGKey(9782346)
         self.batch_size = 10
         self.num_obs_total = 100
         self.px_grads = ((

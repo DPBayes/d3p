@@ -34,7 +34,6 @@ import time
 import jax
 import jax.numpy as jnp
 from jax import jit, lax, random
-from jax.random import PRNGKey
 
 import numpyro
 import numpyro.distributions as dist
@@ -45,6 +44,7 @@ import numpyro.optim as optimizers
 from d3p.svi import DPSVI
 from d3p.minibatch import split_batchify_data, subsample_batchify_data
 from d3p.modelling import sample_prior_predictive
+import d3p.random
 
 
 def model(obs=None, num_obs_total=None, d=None):
@@ -100,7 +100,7 @@ def ml_estimate(obs):
 
     return mu_loc, mu_std
 
-def create_toy_data(rng_key, N, d):
+def create_toy_data(rng_key: jnp.array, N: int, d: int):
     ## Create some toy data
     mu_true = jnp.ones(d)
     samples = sample_prior_predictive(rng_key, model, (None, 2*N, d), {'mu': mu_true})
@@ -112,7 +112,7 @@ def create_toy_data(rng_key, N, d):
     return X_train, X_test, mu_true
 
 def main(args):
-    rng = PRNGKey(1234)
+    rng = jax.random.PRNGKey(1234)
     rng, toy_data_rng = jax.random.split(rng, 2)
     X_train, X_test, mu_true = create_toy_data(toy_data_rng, args.num_samples, args.dimensions)
 
@@ -128,10 +128,12 @@ def main(args):
         d=args.dimensions, num_obs_total=args.num_samples
     )
 
-    rng, svi_init_rng, batchifier_rng = random.split(rng, 3)
+    rng, batchifier_rng = random.split(rng, 2) # todo: batchification also needs csprng randomness
     _, batchifier_state = train_init(rng_key=batchifier_rng)
     batch = train_fetch(0, batchifier_state)
-    svi_state = svi.init(svi_init_rng, *batch)
+
+    dpsvi_rng = d3p.random.PRNGKey()
+    svi_state = svi.init(dpsvi_rng , *batch)
 
     q = args.batch_size/args.num_samples
     eps = svi.get_epsilon(args.delta, q, num_epochs=args.num_epochs)
@@ -166,7 +168,7 @@ def main(args):
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng, data_fetch_rng = random.split(rng, 2)
+        rng, data_fetch_rng = random.split(rng, 2) # todo: csprng randomness
 
         num_train_batches, train_batchifier_state = train_init(rng_key=data_fetch_rng)
         svi_state, train_loss = epoch_train(
