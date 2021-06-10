@@ -112,8 +112,7 @@ def create_toy_data(rng_key: jnp.array, N: int, d: int):
     return X_train, X_test, mu_true
 
 def main(args):
-    rng = jax.random.PRNGKey(1234)
-    rng, toy_data_rng = jax.random.split(rng, 2)
+    toy_data_rng = jax.random.PRNGKey(1234)
     X_train, X_test, mu_true = create_toy_data(toy_data_rng, args.num_samples, args.dimensions)
 
     train_init, train_fetch = subsample_batchify_data((X_train,), batch_size=args.batch_size)
@@ -128,12 +127,11 @@ def main(args):
         d=args.dimensions, num_obs_total=args.num_samples
     )
 
-    rng, batchifier_rng = random.split(rng, 2) # todo: batchification also needs csprng randomness
+    dpsvi_rng = d3p.random.PRNGKey(0)
+    dpsvi_rng, svi_init_rng, batchifier_rng = d3p.random.split(dpsvi_rng, 3)
     _, batchifier_state = train_init(rng_key=batchifier_rng)
     batch = train_fetch(0, batchifier_state)
-
-    dpsvi_rng = d3p.random.PRNGKey()
-    svi_state = svi.init(dpsvi_rng , *batch)
+    svi_state = svi.init(svi_init_rng , *batch)
 
     q = args.batch_size/args.num_samples
     eps = svi.get_epsilon(args.delta, q, num_epochs=args.num_epochs)
@@ -168,7 +166,7 @@ def main(args):
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng, data_fetch_rng = random.split(rng, 2) # todo: csprng randomness
+        dpsvi_rng, data_fetch_rng = d3p.random.split(dpsvi_rng, 2)
 
         num_train_batches, train_batchifier_state = train_init(rng_key=data_fetch_rng)
         svi_state, train_loss = epoch_train(
@@ -178,7 +176,7 @@ def main(args):
         t_end = time.time()
 
         if (i % (args.num_epochs // 10) == 0):
-            rng, test_fetch_rng = random.split(rng, 2)
+            dpsvi_rng, test_fetch_rng = d3p.random.split(dpsvi_rng, 2)
             num_test_batches, test_batchifier_state = test_init(rng_key=test_fetch_rng)
             test_loss = eval_test(
                 svi_state, test_batchifier_state, num_test_batches

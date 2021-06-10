@@ -35,9 +35,8 @@ import time
 import matplotlib.pyplot as plt
 
 import jax.numpy as jnp
-from jax import jit, lax, random
+from jax import jit, lax
 from jax.experimental import stax
-from jax.random import PRNGKey
 import jax
 
 import numpy as np
@@ -166,7 +165,7 @@ def binarize(rng, batch):
     :param batch: Batch of data with continous values in interval [0, 1]
     :return: tuple(rng, binarized_batch).
     """
-    return random.bernoulli(rng, batch).astype(batch.dtype)
+    return jax.random.bernoulli(rng, batch).astype(batch.dtype)
 
 
 def main(args):
@@ -214,17 +213,18 @@ def main(args):
         )
 
     # preparing random number generators and initializing svi
-    rng = PRNGKey(0)
-    rng, binarize_rng, batchifier_rng = random.split(rng, 3)
-    _, batchifier_state = train_init(rng_key=batchifier_rng)
-    sample_batch = train_fetch(0, batchifier_state, binarize_rng)[0]
+    unsafe_rng = jax.random.PRNGKey(0)
+    unsafe_rng, binarize_rng, batchifier_rng = jax.random.split(unsafe_rng, 3)
 
     dpsvi_rng = d3p.random.PRNGKey()
-    svi_state = svi.init(dpsvi_rng, sample_batch)
+    dpsvi_rng, svi_init_rng, batchifier_rng = d3p.random.split(dpsvi_rng, 3)
+    _, batchifier_state = train_init(rng_key=batchifier_rng)
+    sample_batch = train_fetch(0, batchifier_state, binarize_rng)[0]
+    svi_state = svi.init(svi_init_rng, sample_batch)
 
     # functions for training tasks
     @jit
-    def epoch_train(svi_state, batchifier_state, num_batches, rng):
+    def epoch_train(svi_state, batchifier_state, num_batches, binarize_base_rng):
         """Trains one epoch
 
         :param svi_state: current state of the optimizer
@@ -235,7 +235,7 @@ def main(args):
 
         def body_fn(i, val):
             svi_state, loss = val
-            binarize_rng = random.fold_in(rng, i)
+            binarize_rng = jax.random.fold_in(binarize_base_rng, i)
             batch = train_fetch(i, batchifier_state, binarize_rng)[0]
             svi_state, batch_loss = svi.update(
                 svi_state, batch
@@ -247,7 +247,7 @@ def main(args):
         return svi_state, loss
 
     @jit
-    def eval_test(svi_state, batchifier_state, num_batches, rng):
+    def eval_test(svi_state, batchifier_state, num_batches, binarize_base_rng):
         """Evaluates current model state on test data.
 
         :param svi_state: current state of the optimizer
@@ -256,7 +256,7 @@ def main(args):
         :return: loss over the test split
         """
         def body_fn(i, loss_sum):
-            binarize_rng = random.fold_in(rng, i)
+            binarize_rng = jax.random.fold_in(binarize_base_rng, i)
             batch = test_fetch(i, batchifier_state, binarize_rng)[0]
             batch_loss = svi.evaluate(svi_state, batch)
             loss_sum += batch_loss / num_batches
@@ -285,13 +285,14 @@ def main(args):
             img,
             cmap='gray'
         )
-        rng, rng_binarize = random.split(rng, 2)
+        rng, rng_binarize = jax.random.split(rng, 2)
         test_sample = binarize(rng_binarize, img)
         test_sample = jnp.reshape(test_sample, (1, *jnp.shape(test_sample)))
         params = svi.get_params(svi_state)
 
+        rng, sampling_rng = jax.random.split(rng, 2)
         samples = sample_multi_posterior_predictive(
-            rng, 10, model, (1, args.z_dim, args.hidden_dim, np.prod(test_sample.shape[1:])),
+            sampling_rng, 10, model, (1, args.z_dim, args.hidden_dim, np.prod(test_sample.shape[1:])),
             guide, (test_sample, args.z_dim, args.hidden_dim), params
         )
 
@@ -315,15 +316,17 @@ def main(args):
     # main training loop
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng, data_fetch_rng, train_rng = random.split(rng, 3)
+        dpsvi_rng, data_fetch_rng = d3p.random.split(dpsvi_rng, 2)
+        unsafe_rng, train_binarize_rng = jax.random.split(unsafe_rng, 2)
         num_train_batches, train_batchifier_state, = train_init(rng_key=data_fetch_rng)
         svi_state, train_loss = epoch_train(
-            svi_state, train_batchifier_state, num_train_batches, train_rng
+            svi_state, train_batchifier_state, num_train_batches, train_binarize_rng
         )
 
-        rng, test_fetch_rng, test_rng, recons_rng = random.split(rng, 4)
+        dpsvi_rng, test_fetch_rng = d3p.random.split(dpsvi_rng, 2)
+        unsafe_rng, test_binarize_rng, recons_rng = jax.random.split(unsafe_rng, 3)
         num_test_batches, test_batchifier_state = test_init(rng_key=test_fetch_rng)
-        test_loss = eval_test(svi_state, test_batchifier_state, num_test_batches, test_rng)
+        test_loss = eval_test(svi_state, test_batchifier_state, num_test_batches, test_binarize_rng)
 
         reconstruct_img(i, args.num_epochs, test_batchifier_state, svi_state, recons_rng)
         print("Epoch {}: loss = {} (on training set: {}) ({:.2f} s.)".format(

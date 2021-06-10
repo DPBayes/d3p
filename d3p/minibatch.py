@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from d3p.util import example_count, sample_from_array
+import d3p.random
 import jax.numpy as jnp
 import jax
 
@@ -69,7 +70,7 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
         batch_size = q_to_batch_size(q, num_records)
 
     @jax.jit
-    def init(rng_key):
+    def init(rng_key: d3p.random.PRNGState):
         """ Initializes the batchifier for a new epoch.
 
         :param rng_key: The base PRNG key the batchifier will use for randomness.
@@ -87,19 +88,22 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
         :return: the batch
         """
         rng_key = batchifier_state
-        batch_rng_key = jax.random.fold_in(rng_key, i)
-        ret_idx = jax.random.randint(batch_rng_key, (batch_size,), 0, num_records)
+        batch_rng_key = d3p.random.fold_in(rng_key, i)
+        batch_jax_rng_key = d3p.random.convert_to_jax_rng_key(batch_rng_key)
+        # todo: introduce own randint to avoid falling back to jax randint here
+        ret_idx = jax.random.randint(batch_jax_rng_key, (batch_size,), 0, num_records)
         return tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
 
     @jax.jit
-    def get_batch_without_replacement(i, rng_key):
+    def get_batch_without_replacement(i, batchifier_state):
         """ Fetches the next batch for the current epoch.
 
         :param i: The number of the batch in the epoch.
         :param batchifier_state: The initialized state returned by init.
         :return: the batch
         """
-        batch_rng_key = jax.random.fold_in(rng_key, i)
+        rng_key = batchifier_state
+        batch_rng_key = d3p.random.fold_in(rng_key, i)
         ret_idx = sample_from_array(batch_rng_key, jnp.arange(num_records), batch_size, 0)
         return tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
 
@@ -143,7 +147,7 @@ def split_batchify_data(dataset, batch_size=None, q=None):
         batch_size = q_to_batch_size(q, num_records)
 
     @jax.jit
-    def init(rng_key):
+    def init(rng_key: d3p.random.PRNGState):
         """ Initializes the batchifier for a new epoch.
 
         :param rng_key: The base PRNG key the batchifier will use for randomness.
@@ -151,7 +155,8 @@ def split_batchify_data(dataset, batch_size=None, q=None):
             initialized state of the batchifier for the epoch
         """
         idxs = jnp.arange(num_records)
-        return num_records // batch_size, jax.random.permutation(rng_key, idxs)
+        shuffled_idxs = sample_from_array(rng_key, idxs, num_records, 0)
+        return num_records // batch_size, shuffled_idxs
 
     @jax.jit
     def get_batch(i, idxs):

@@ -16,6 +16,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+from d3p.random import random_bits
 from functools import reduce, wraps, partial
 
 __all__ = [
@@ -216,61 +217,90 @@ def unvectorize_shape_3d(a):
 
 @partial(jax.jit, static_argnums=(2, 3))
 def sample_from_array(rng_key, x, n, axis):
-    """ Samples n elements from a given array without replacement.
+    """ Samples n elements from array along given axis without replacement.
 
-    Uses the Feistel shuffle to uniformly draw
-    n unique elements from x along the given axis.
+    Implementation notes:
+      Internally implements the CUDA/Feistel shuffle: We apply a pseudo-random
+      permutation based on a Feistel network for each position index in the
+      output sample to obtain the index of the sampled element.
 
-    :param rng_key: jax prng key used for sampling.
-    :param x: the array from which elements are sampled
-    :param n: how many elements to return
-    :param axis: axis along which samples are drawn
+      The diffusion functions for the Feistel network follow the Philox
+      construction of Salmon et al., "Parallel Random Numbers: As Easy as 1, 2, 3",
+      but using randomly sampled multiplication constants.
     """
-    capacity = np.uint32(np.shape(x)[axis])
-    data = np.arange(n, dtype=np.uint32)
+    capacity = jnp.shape(x)[axis]
+    bits = (capacity - 1).bit_length()
+    idxs = jnp.arange(n, dtype=jnp.uint32)
 
-    seed = jax.random.randint(
-        rng_key, shape=(1,),
-        minval=0, maxval=capacity, dtype=np.uint32
-    ).squeeze()
+    num_feistel_rounds = 10
 
-    def permute32(vals):
-        def hash_func_in(x):
-            x = jnp.bitwise_xor(x, jnp.right_shift(x, jnp.uint32(16)))
-            x *= jnp.uint32(0x85ebca6b)
-            x = jnp.bitwise_xor(x, jnp.right_shift(x, jnp.uint32(13)))
-            x *= jnp.uint32(0xc2b2ae35)
-            x = jnp.bitwise_xor(x, jnp.right_shift(x, jnp.uint32(16)))
+    # Philox multiplication constants and xor'ed key for each Feistel round.
+    # We use separate multiplication constants for each multiplication in a round
+    # to increase the amount of random bits we use in the process;
+    # Using the same multiplicative constant in Philox seems to be mostly motivated
+    # from a performance perspective.
+    round_constants = random_bits(
+        rng_key, 32, (num_feistel_rounds, 3)
+    )
 
-            return x
+    # need to ensure that multiplication constants are odd so that scramble_lower is a bijection
+    make_first_odd = jnp.array([[1, 0, 0]], dtype=jnp.uint32)
+    round_constants = jnp.bitwise_or(round_constants, make_first_odd)
 
-        num_iters = np.uint32(8)
+    # masks to separate high and low bit regions
+    bits_lower = jnp.right_shift(bits, 1)
+    bits_upper = bits - bits_lower
+    mask_lower = jnp.left_shift(jnp.uint32(1), bits_lower) - 1
+    mask_upper = jnp.left_shift(jnp.uint32(1), bits_upper) - 1
 
-        bits = jnp.uint32(len(bin(capacity)) - 2)
-        bits_lower = jnp.right_shift(bits, 1)
-        bits_upper = bits - bits_lower
-        mask_lower = (jnp.left_shift(jnp.uint32(1), bits_lower)) - jnp.uint32(1)
+    def scramble_for_upper(x, key):
+        """ Scrambling / diffusion function for the diffusion path (lower to upper bits) Feistel network.
 
-        seed_offst = hash_func_in(seed)
-        position = vals
+        F_k in Salmon et al."""
+        # nonce = jnp.hstack((x, key))
+        # my_key = chacha.cipher.set_nonce(rng_key, nonce)
+        # x = d3p.random.random_bits(my_key, 32, ())
+        # return x
+        # rng_key = jnp.array((x, key))
+        # x = jax._src.random._random_bits(rng_key, 32, ())
+        # return x
 
-        def iter_func(position):
-            for j in range(num_iters):
-                j = jnp.uint32(j)
-                upper = jnp.right_shift(position, bits_lower)
-                lower = jnp.bitwise_and(position, mask_lower)
-                mixer = hash_func_in(upper + seed_offst + j)
+        return jnp.right_shift(x * key[1], bits_upper) ^ key[2]
 
-                tmp = jnp.bitwise_xor(lower, mixer)
-                position = upper + (jnp.left_shift(jnp.bitwise_and(tmp, mask_lower), bits_upper))
-            return position
+    def scramble_for_lower(x, key):
+        """ Scrambling / diffusion function for the bijective path (upper to lower bits) of the Feistel network.
 
-        position = iter_func(position)
-        position = jax.lax.while_loop(lambda position: position >= capacity, iter_func, position)
+        B_k in Salmon et al. """
+        return x * key[0]
+
+    def permute_idx_power_of_two_capacity(position):
+        """ Permutation for integers less than the next larger power-of-two from capacity, i.e., 2**(bits).
+
+        Essentially a Feistel network to build a permutation from some non-bijective scrambling/diffusion function
+        (scramble_for_upper).
+         """
+        def loop_body(j, x):
+            x_upper  = jnp.right_shift(x, bits_lower)
+            x_lower = jnp.bitwise_and(x, mask_lower)
+
+            y_upper = jnp.bitwise_and(scramble_for_upper(x_upper, round_constants[j]), mask_lower)
+            y_upper = jnp.bitwise_xor(x_lower, y_upper)
+
+            y_lower = jnp.bitwise_and(scramble_for_lower(x_upper, round_constants[j]), mask_upper)
+
+            y = jnp.bitwise_or(jnp.left_shift(y_upper, bits_upper), y_lower)
+            return y
+
+        position = jax.lax.fori_loop(0, num_feistel_rounds, loop_body, position)
+        return position
+
+    def permute_idx(position):
+        """ Permutation over {0, ..., capacity-1}. """
+
+        position = permute_idx_power_of_two_capacity(position)
+        position = jax.lax.while_loop(lambda position: position >= capacity, permute_idx_power_of_two_capacity, position)
 
         return position
 
-    func = jax.vmap(permute32)
-    a = func(data)
-
-    return jnp.take(x, a, axis=axis)
+    idxs = jax.vmap(permute_idx)(idxs)
+    return jnp.take(x, idxs, axis)

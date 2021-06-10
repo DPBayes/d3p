@@ -15,7 +15,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from typing import Tuple, Optional, Union
+from typing import Optional, Union, Sequence
 from functools import partial
 import secrets
 
@@ -24,6 +24,7 @@ from chacha.cipher import ChaChaKeySizeInBytes
 
 PRNGState = ccrng.RNGState
 split = ccrng.split
+fold_in = ccrng.fold_in
 random_bits = ccrng.random_bits
 uniform = ccrng.uniform
 
@@ -36,38 +37,38 @@ def PRNGKey(seed: Optional[Union[int, jnp.ndarray, int]] = None) -> PRNGState:
 
 
 def normal(key: ccrng.RNGState,
-           shape: Tuple[int] = (),
+           shape: Sequence[int] = (),
            dtype: np.dtype = jax.dtypes.float_) -> jnp.ndarray:
-  """Sample standard normal random values with given shape and float dtype
-     derived from a cryptographically-secure pseudo-random number generator.
+    """Sample standard normal random values with given shape and float dtype
+        derived from a cryptographically-secure pseudo-random number generator.
 
-  The sampling follows `jax.random.normal` exactly but uses jax-chacha-prng
-  as underlying generator instead of JAX's default generator.
+    The sampling follows `jax.random.normal` exactly but uses jax-chacha-prng
+    as underlying generator instead of JAX's default generator.
 
-  Note that this currently leaves this vulnerable to attacks on imprecise sampling
-  as described in Mironov, "On Significance of the Least Significant Bits For Differential Privacy".
+    Note that this currently leaves this vulnerable to attacks on imprecise sampling
+    as described in Mironov, "On Significance of the Least Significant Bits For Differential Privacy".
 
-  Args:
-    key: a PRNGKey used as the random key.
-    shape: optional, a tuple of nonnegative integers representing the result
-      shape. Default ().
-    dtype: optional, a float dtype for the returned values (default float64 if
-      jax_enable_x64 is true, otherwise float32).
+    Args:
+        key: a PRNGKey used as the random key.
+        shape: optional, a tuple of nonnegative integers representing the result
+        shape. Default ().
+        dtype: optional, a float dtype for the returned values (default float64 if
+        jax_enable_x64 is true, otherwise float32).
 
-  Returns:
-    A random array with the specified shape and dtype.
-  """
-  if not jax.dtypes.issubdtype(dtype, np.floating):
-    raise ValueError(f"dtype argument to `normal` must be a float dtype, got {dtype}")
-  dtype = jax.dtypes.canonicalize_dtype(dtype)
-  return _normal(key, shape, dtype)
+    Returns:
+        A random array with the specified shape and dtype.
+    """
+    if not jax.dtypes.issubdtype(dtype, np.floating):
+        raise ValueError(f"dtype argument to `normal` must be a float dtype, got {dtype}")
+    dtype = jax.dtypes.canonicalize_dtype(dtype)
+    return _normal(key, shape, dtype)
 
 @partial(jax.jit, static_argnums=(1, 2))
 def _normal(key, shape, dtype) -> jnp.ndarray:
-  lo = np.nextafter(np.array(-1., dtype), 0., dtype=dtype)
-  hi = np.array(1., dtype)
-  u = ccrng.uniform(key, shape, dtype, lo, hi)
-  return np.array(np.sqrt(2), dtype) * jax.lax.erf_inv(u)
+    lo = np.nextafter(np.array(-1., dtype), 0., dtype=dtype)
+    hi = np.array(1., dtype)
+    u = ccrng.uniform(key, shape, dtype, lo, hi)
+    return np.array(np.sqrt(2), dtype) * jax.lax.erf_inv(u)
 
 def convert_to_jax_rng_key(chacha_rng_key: ccrng.RNGState) -> jnp.array:
     return ccrng.random_bits(chacha_rng_key, 32, (2,))

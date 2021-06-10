@@ -31,8 +31,7 @@ import time
 
 import jax
 import jax.numpy as jnp
-from jax import jit, lax, random
-from jax.random import PRNGKey
+from jax import jit, lax
 import d3p.random
 
 import numpyro
@@ -116,9 +115,9 @@ def estimate_accuracy(X, y, params, rng, num_iterations=1):
     return jnp.average(samples['obs'] == y)
 
 def main(args):
-    rng = PRNGKey(123)
-    rng, toy_data_rng = jax.random.split(rng)
+    rng = jax.random.PRNGKey(123)
 
+    rng, toy_data_rng = jax.random.split(rng, 2)
     train_data, test_data, true_params = create_toy_data(
         toy_data_rng, args.num_samples, args.dimensions
     )
@@ -133,12 +132,11 @@ def main(args):
         dp_scale=0.01, clipping_threshold=20., num_obs_total=args.num_samples
     )
 
-    rng, data_fetch_rng = random.split(rng, 2)
+    dpsvi_rng = d3p.random.PRNGKey(0)
+    dpsvi_rng, svi_init_rng, data_fetch_rng = d3p.random.split(dpsvi_rng, 3)
     _, batchifier_state = train_init(rng_key=data_fetch_rng)
     sample_batch = train_fetch(0, batchifier_state)
-
-    dpsvi_rng = d3p.random.PRNGKey()
-    svi_state = svi.init(dpsvi_rng, *sample_batch)
+    svi_state = svi.init(svi_init_rng, *sample_batch)
 
     @jit
     def epoch_train(svi_state, batchifier_state, num_batch):
@@ -177,7 +175,7 @@ def main(args):
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
-        rng, data_fetch_rng = random.split(rng, 2)
+        dpsvi_rng, data_fetch_rng = d3p.random.split(dpsvi_rng, 2)
 
         num_train_batches, train_batchifier_state = train_init(rng_key=data_fetch_rng)
         svi_state, train_loss = epoch_train(
@@ -187,7 +185,8 @@ def main(args):
         t_end = time.time()
 
         if (i % (args.num_epochs//10)) == 0:
-            rng, test_rng, test_fetch_rng = random.split(rng, 3)
+            dpsvi_rng, test_rng, test_fetch_rng = d3p.random.split(dpsvi_rng, 3)
+            test_rng = d3p.random.convert_to_jax_rng_key(test_rng)
             num_test_batches, test_batchifier_state = test_init(rng_key=test_fetch_rng)
             test_loss, test_acc = eval_test(
                 svi_state, test_batchifier_state, num_test_batches, test_rng

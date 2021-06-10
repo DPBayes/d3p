@@ -22,6 +22,7 @@ import jax
 import numpy as np
 
 from d3p import util
+import d3p.random
 
 
 class UtilityTests(unittest.TestCase):
@@ -329,7 +330,7 @@ class UtilityTests(unittest.TestCase):
 
     def test_sample_from_array(self):
         x = jnp.arange(0, 1000000) + 100
-        rng_key = jax.random.PRNGKey(0)
+        rng_key = d3p.random.PRNGKey(0)
         n_vals = 978
         shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
         unq_vals = np.unique(shuffled)
@@ -338,7 +339,7 @@ class UtilityTests(unittest.TestCase):
 
     def test_sample_from_array_correct_shape(self):
         x = jax.random.uniform(jax.random.PRNGKey(124), shape=(1000, 200))
-        rng_key = jax.random.PRNGKey(0)
+        rng_key = d3p.random.PRNGKey(0)
         n_vals = 38
         shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
         self.assertEqual((n_vals, 200), jnp.shape(shuffled))
@@ -348,7 +349,7 @@ class UtilityTests(unittest.TestCase):
 
     def test_sample_from_array_full_shuffle(self):
         x = jnp.arange(0, 100) + 100
-        rng_key = jax.random.PRNGKey(0)
+        rng_key = d3p.random.PRNGKey(0)
         n_vals = 100
         shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
         unq_vals = np.unique(shuffled)
@@ -357,7 +358,7 @@ class UtilityTests(unittest.TestCase):
 
     def test_sample_from_array_almost_full_shuffle(self):
         x = jnp.arange(0, 100) + 100
-        rng_key = jax.random.PRNGKey(0)
+        rng_key = d3p.random.PRNGKey(0)
         n_vals = 99
         shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
         unq_vals = np.unique(shuffled)
@@ -366,7 +367,7 @@ class UtilityTests(unittest.TestCase):
 
     def test_sample_from_array_single_sample(self):
         x = jnp.arange(0, 100) + 100
-        rng_key = jax.random.PRNGKey(0)
+        rng_key = d3p.random.PRNGKey(0)
         n_vals = 1
         shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
         self.assertTrue(jnp.alltrue(shuffled >= 100))
