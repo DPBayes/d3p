@@ -20,7 +20,7 @@ from functools import reduce
 
 import jax.numpy as jnp
 import jax
-from numpyro.infer.svi import SVIState
+from numpyro.optim import SGD
 import numpy as np
 
 from d3p.svi import DPSVI, DPSVIState
@@ -39,7 +39,8 @@ class DPSVITest(unittest.TestCase):
         self.px_loss = jnp.arange(self.batch_size, dtype=jnp.float32)
         self.dp_scale = 1.
         self.clipping_threshold = 2.
-        self.svi = DPSVI(None, None, None, None, self.clipping_threshold,
+        optim = SGD(1.)
+        self.svi = DPSVI(None, None, optim, None, self.clipping_threshold,
             self.dp_scale, num_obs_total=self.num_obs_total
         )
 

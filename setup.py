@@ -10,12 +10,12 @@ PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
 setup(
     name='d3p',
     python_requires='>=3.6',
-    version='0.2.0-devel',
+    version='0.2.0-alpha',
     description='Differentially-Private Probabilistic Programming',
     packages=find_packages(include=['d3p', 'd3p.*']),
     author='PADS @ Helsinki University and Aalto University',
     install_requires=[
-        'numpyro >= 0.6.0, < 0.7.0',
+        'numpyro >= 0.6.0, < 0.8.0',
         'fourier-accountant >= 0.12.0, < 1.0.0'
     ],
     extras_require={
