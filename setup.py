@@ -5,7 +5,11 @@ import sys
 
 from setuptools import find_packages, setup
 
+_available_cuda_versions = ['101', '102', '110', '111']
+
 PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
+
+_numpyro_version_constraints = '>= 0.6.0, < 0.8.0'
 
 setup(
     name='d3p',
@@ -15,11 +19,17 @@ setup(
     packages=find_packages(include=['d3p', 'd3p.*']),
     author='PADS @ Helsinki University and Aalto University',
     install_requires=[
-        'numpyro >= 0.6.0, < 0.8.0',
+        f'numpyro {_numpyro_version_constraints}',
         'fourier-accountant >= 0.12.0, < 1.0.0'
     ],
     extras_require={
         'examples': ['matplotlib'],
+        'tpu': f"numpyro[tpu] {_numpyro_version_constraints}",
+        'cpu': f"numpyro[cpu] {_numpyro_version_constraints}",
+        **{
+            f'cuda{version}': [f'numpyro[cuda{version}] {_numpyro_version_constraints}']
+            for version in _available_cuda_versions
+        }
     },
     long_description="",
     long_description_content_type='text/markdown',

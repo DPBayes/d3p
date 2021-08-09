@@ -16,10 +16,28 @@ d3p is pure Python software. Simply clone this git repository and install with p
 ```
 git clone https://github.com/DPBayes/d3p
 cd d3p
-pip install -e .
+pip install .
 ```
 
-A packaged version of d3p will be available on pypi.org soon.
+This will install d3p with all required dependencies (NumPyro, JAX, ..) for CPU usage.
+
+### GPU installation
+If you want to run on CUDA devices, replace the last command with:
+
+```
+pip install .[cuda111] -f https://storage.googleapis.com/jax-releases/jax_releases.html
+```
+
+Adapt `cuda111` to your CUDA version, e.g., `cuda102` for CUDA 10.2 .
+
+### TPU installation
+Replace the installation command with
+```
+pip install .[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+```
+
+Refer to the [JAX installation instructions](https://github.com/google/jax#pip-installation-gpu-cuda)
+for more details.
 
 ## Usage
 
