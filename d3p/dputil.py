@@ -79,9 +79,12 @@ def get_bracketing_bounds(
                     break
                 except ValueError:
                     sig = np.mean([sig, sig_1])
-
-                if num_evals >= maxeval:
-                    raise RuntimeError("Could not establish bounds in given evaluation limit")
+                    sig *= 0.9
+                    if sig <= sig_1:
+                        raise RuntimeError("Could not establish bounds in given evaluation limit")
+                finally:
+                    if num_evals >= maxeval:
+                        raise RuntimeError("Could not establish bounds in given evaluation limit")
 
         return np.array([sig_1, sig]), np.array([eps_1, eps]), num_evals
     else:
@@ -93,10 +96,12 @@ def get_bracketing_bounds(
                     eps = compute_eps_fn(sig)
                     break
                 except ValueError:
-                    sig = np.mean([sig, sig_1])
-
-                if num_evals >= maxeval:
-                    raise RuntimeError("Could not establish bounds in given evaluation limit")
+                    sig *= 1.2
+                    if sig >= sig_1:
+                        raise RuntimeError("Could not establish bounds in given evaluation limit")
+                finally:
+                    if num_evals >= maxeval:
+                        raise RuntimeError("Could not establish bounds in given evaluation limit")
 
 
         return np.array([sig, sig_1]), np.array([eps, eps_1]), num_evals
