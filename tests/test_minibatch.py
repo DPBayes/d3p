@@ -21,12 +21,8 @@ import jax.numpy as jnp
 import jax
 import numpy as np
 
-import numpyro.distributions as dist
-from numpyro.infer.util import log_density
-from numpyro.handlers import seed, trace
-from numpyro.primitives import sample, deterministic
-
 from d3p.minibatch import split_batchify_data, subsample_batchify_data
+
 
 class SplitBatchifierTests(unittest.TestCase):
 
@@ -63,11 +59,15 @@ class SplitBatchifierTests(unittest.TestCase):
             batch = batch[0]
             unq_idxs, unq_counts = np.unique(batch, return_counts=True)
             counts[unq_idxs - 100] = unq_counts
-            self.assertTrue(np.alltrue(unq_counts <= 1)) # ensure each item occurs at most once in the batch
-            self.assertTrue(np.alltrue(batch >= 100) and np.alltrue(batch < 205)) # ensure batch was plausibly drawn from data
+            # ensure each item occurs at most once in the batch
+            self.assertTrue(np.alltrue(unq_counts <= 1))
+            # ensure batch was plausibly drawn from data
+            self.assertTrue(np.alltrue(batch >= 100) and np.alltrue(batch < 205))
 
-        self.assertTrue(np.alltrue(counts <= 1)) # ensure each item occurs at most once in the epoch
-        self.assertEqual(100, np.sum(counts)) # ensure that amount of elements in batches cover an epoch worth of data
+        # ensure each item occurs at most once in the epoch
+        self.assertTrue(np.alltrue(counts <= 1))
+        # ensure that amount of elements in batches cover an epoch worth of data
+        self.assertEqual(100, np.sum(counts))
 
     def test_split_batchify_batches_differ(self):
         data = np.arange(105) + 100
@@ -76,16 +76,19 @@ class SplitBatchifierTests(unittest.TestCase):
 
         batch_0 = fetch(3, batchifier_state)
         batch_1 = fetch(8, batchifier_state)
-        self.assertFalse(np.allclose(batch_0, batch_1)) # ensure batches are different
+        self.assertFalse(np.allclose(batch_0, batch_1))  # ensure batches are different
 
     def test_split_batchify_fetch_correct_shape(self):
         data = np.random.normal(size=(105, 3))
         init, fetch = split_batchify_data((data,), 10)
-        batchifier_state = jax.random.permutation(jax.random.PRNGKey(0), jnp.arange(0, 105))
+        batchifier_state = jax.random.permutation(
+            jax.random.PRNGKey(0), jnp.arange(0, 105)
+        )
 
         batch = fetch(6, batchifier_state)
         batch = batch[0]
-        self.assertEqual((10,3), jnp.shape(batch))
+        self.assertEqual((10, 3), jnp.shape(batch))
+
 
 class SubsamplingBatchifierTests(unittest.TestCase):
 
@@ -119,19 +122,19 @@ class SubsamplingBatchifierTests(unittest.TestCase):
             batch = fetch(i, batchifier_state)
             batch = batch[0]
             _, unq_counts = np.unique(batch, return_counts=True)
-            self.assertTrue(np.alltrue(unq_counts <= 1)) # ensure each item occurs at most once in the batch
-            self.assertTrue(np.alltrue(batch >= 100) and np.alltrue(batch < 205)) # ensure batch was plausibly drawn from data
+            # ensure each item occurs at most once in the batch
+            self.assertTrue(np.alltrue(unq_counts <= 1))
+            # ensure batch was plausibly drawn from data
+            self.assertTrue(np.alltrue(batch >= 100) and np.alltrue(batch < 205))
 
     def test_subsample_batchify_fetch_batches_differ_without_replacement(self):
         data = np.arange(105) + 100
         init, fetch = subsample_batchify_data((data,), 10)
         batchifier_state = jax.random.PRNGKey(2)
-        # num_batches = 10
 
         batch_0 = fetch(3, batchifier_state)
         batch_1 = fetch(8, batchifier_state)
-        self.assertFalse(np.allclose(batch_0, batch_1)) # ensure batches are different
-
+        self.assertFalse(np.allclose(batch_0, batch_1))  # ensure batches are different
 
     def test_subsample_batchify_fetch_correct_shape_without_replacement(self):
         data = np.random.normal(size=(105, 3))
@@ -141,8 +144,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
         batch = fetch(6, batchifier_state)
         batch = batch[0]
-        self.assertEqual((10,3), jnp.shape(batch))
-
+        self.assertEqual((10, 3), jnp.shape(batch))
 
     def test_subsample_batchify_fetch_with_replacement(self):
         data = np.arange(105) + 100
@@ -153,7 +155,8 @@ class SubsamplingBatchifierTests(unittest.TestCase):
         for i in range(num_batches):
             batch = fetch(i, batchifier_state)
             batch = batch[0]
-            self.assertTrue(np.alltrue(batch >= 100) and np.alltrue(batch < 205)) # ensure batch was plausibly drawn from data
+            # ensure batch was plausibly drawn from data
+            self.assertTrue(np.alltrue(batch >= 100) and np.alltrue(batch < 205))
 
     def test_subsample_batchify_fetch_batches_differ_with_replacement(self):
         data = np.arange(105) + 100
@@ -163,7 +166,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
         batch_0 = fetch(3, batchifier_state)
         batch_1 = fetch(8, batchifier_state)
-        self.assertFalse(np.allclose(batch_0, batch_1)) # ensure batches are different
+        self.assertFalse(np.allclose(batch_0, batch_1))  # ensure batches are different
 
     def test_subsample_batchify_fetch_correct_shape_with_replacement(self):
         data = np.random.normal(size=(105, 3))
@@ -173,7 +176,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
         batch = fetch(6, batchifier_state)
         batch = batch[0]
-        self.assertEqual((10,3), jnp.shape(batch))
+        self.assertEqual((10, 3), jnp.shape(batch))
 
 
 if __name__ == '__main__':

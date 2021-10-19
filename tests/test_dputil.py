@@ -18,7 +18,8 @@ import unittest
 
 import numpy as np
 
-from d3p.dputil import approximate_sigma, approximate_sigma_remove_relation, get_epsilon_R, get_epsilon_S
+from d3p.dputil import approximate_sigma_remove_relation, get_epsilon_R
+
 
 class ApproximateSigmaTests(unittest.TestCase):
 
@@ -31,13 +32,17 @@ class ApproximateSigmaTests(unittest.TestCase):
 
         failing_sig = 0.625
 
+        # ensure that get_epsilon_R fails for at least one query during approximation procedure
         with self.assertRaises(ValueError):
-            get_epsilon_R(delta, failing_sig, q, num_iter, nx=int(1e6)) # ensure that get_epsilon_R fails for at least one query during approximation procedure
+            get_epsilon_R(delta, failing_sig, q, num_iter, nx=int(1e6))
 
-        sigma, reached_eps, num_evals = approximate_sigma_remove_relation(epsilon, delta, q, 100000, maxeval=40, tol=tol)
+        sigma, reached_eps, num_evals = approximate_sigma_remove_relation(
+            epsilon, delta, q, 100000, maxeval=40, tol=tol
+        )
         self.assertTrue(np.allclose(reached_eps, epsilon, atol=tol))
         self.assertTrue(np.isfinite(sigma))
         self.assertLessEqual(num_evals, 40)
+
 
 if __name__ == '__main__':
     unittest.main()

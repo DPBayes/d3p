@@ -15,8 +15,8 @@
 from numpyro.optim import _NumPyroOptim, _add_doc
 from jax.experimental.optimizers import make_schedule
 import jax.numpy as jnp
-import numpy as np
 from jax import tree_map, tree_multimap, tree_leaves, lax
+
 
 def adadp(
         step_size=1e-3,
@@ -24,7 +24,7 @@ def adadp(
         stability_check=True,
         alpha_min=0.9,
         alpha_max=1.1
-    ):
+    ):  # noqa: E121, E125
     """Construct optimizer triple for the adaptive learning rate optimizer of
     Koskela and Honkela.
 
@@ -44,13 +44,14 @@ def adadp(
         An (init_fun, update_fun, get_params) triple.
     """
     step_size = make_schedule(step_size)
+
     def init(x0):
         lr = step_size(0)
         x_stepped = tree_map(lambda n: jnp.zeros_like(n), x0)
         return x0, lr, x_stepped, x0
 
     def _compute_update_step(x, g, step_size_):
-            return tree_multimap(lambda x_, g_: x_ - step_size_ * g_, x, g)
+        return tree_multimap(lambda x_, g_: x_ - step_size_ * g_, x, g)
 
     def _update_even_step(args):
         g, state, new_x = args
@@ -76,7 +77,7 @@ def adadp(
         #   not required here; the resulting array is partial squared sums
         #   of the l2-norm over all gradient elements (per gradient site)
 
-        err_e = jnp.sqrt(jnp.sum(err_e)) # summing partial gradient norm
+        err_e = jnp.sqrt(jnp.sum(err_e))  # summing partial gradient norm
 
         new_lr = lr * jnp.minimum(
             jnp.maximum(jnp.sqrt(tol/err_e), 0.9), 1.1
@@ -107,6 +108,7 @@ def adadp(
         x = state[0]
         return x
     return init, update, get_params
+
 
 @_add_doc(adadp)
 class ADADP(_NumPyroOptim):

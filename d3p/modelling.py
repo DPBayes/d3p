@@ -16,6 +16,7 @@ import jax
 from numpyro.handlers import seed, trace, substitute, condition
 from d3p.util import unvectorize_shape_2d
 
+
 def get_samples_from_trace(trace, with_intermediates=False):
     """ Extracts all sample values from a numpyro trace.
 
@@ -33,8 +34,15 @@ def get_samples_from_trace(trace, with_intermediates=False):
     }
     return samples
 
-def sample_prior_predictive(rng_key, model, model_args,
-        substitutes=None, with_intermediates=False, **kwargs):
+
+def sample_prior_predictive(
+        rng_key,
+        model,
+        model_args,
+        substitutes=None,
+        with_intermediates=False,
+        **kwargs
+    ):  # noqa: E121,E125
     """ Samples once from the prior predictive distribution.
 
     Individual sample sites, as designated by `sample`, can be frozen to
@@ -60,13 +68,23 @@ def sample_prior_predictive(rng_key, model, model_args,
         dictionary values are tuples where the first element is the final
         sample values and the second element is a list of intermediate values.
     """
-    if substitutes is None: substitutes = dict()
+    if substitutes is None:
+        substitutes = dict()
     model = seed(substitute(model, data=substitutes), rng_key)
     t = trace(model).get_trace(*model_args, **kwargs)
     return get_samples_from_trace(t, with_intermediates)
 
-def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args,
-        params, with_intermediates=False, **kwargs):
+
+def sample_posterior_predictive(
+        rng_key,
+        model,
+        model_args,
+        guide,
+        guide_args,
+        params,
+        with_intermediates=False,
+        **kwargs
+    ):  # noqa: E121, E125
     """ Samples once from the posterior predictive distribution.
 
     Note that if the model function is written in such a way that it returns, e.g.,
@@ -111,12 +129,21 @@ def sample_posterior_predictive(rng_key, model, model_args, guide, guide_args,
     guide_samples.update(model_samples)
     return guide_samples
 
+
 def _sample_a_lot(rng_key, n, single_sample_fn):
     rng_keys = jax.random.split(rng_key, n)
     return jax.vmap(single_sample_fn)(rng_keys)
 
-def sample_multi_prior_predictive(rng_key, n, model, model_args,
-        substitutes=None, with_intermediates=False, **kwargs):
+
+def sample_multi_prior_predictive(
+        rng_key,
+        n,
+        model,
+        model_args,
+        substitutes=None,
+        with_intermediates=False,
+        **kwargs
+    ):  # noqa: E121, E125
     """ Samples n times from the prior predictive distribution.
 
     Individual sample sites, as designated by `sample`, can be frozen to
@@ -144,14 +171,25 @@ def sample_multi_prior_predictive(rng_key, n, model, model_args,
         dictionary values are tuples where the first element is the final
         sample values and the second element is a list of intermediate values.
     """
-    single_sample_fn = lambda rng: sample_prior_predictive(
-        rng, model, model_args, substitutes=substitutes,
-        with_intermediates=with_intermediates, **kwargs
-    )
+    def single_sample_fn(rng):
+        return sample_prior_predictive(
+            rng, model, model_args, substitutes=substitutes,
+            with_intermediates=with_intermediates, **kwargs
+        )
     return _sample_a_lot(rng_key, n, single_sample_fn)
 
-def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide,
-        guide_args, params, with_intermediates=False, **kwargs):
+
+def sample_multi_posterior_predictive(
+        rng_key,
+        n,
+        model,
+        model_args,
+        guide,
+        guide_args,
+        params,
+        with_intermediates=False,
+        **kwargs
+    ):  # noqa: E121, E125
     """ Samples n times from the posterior predictive distribution.
 
     Note that if the model function is written in such a way that it returns, e.g.,
@@ -176,14 +214,17 @@ def sample_multi_posterior_predictive(rng_key, n, model, model_args, guide,
         dictionary values are tuples where the first element is the final
         sample values and the second element is a list of intermediate values.
     """
-    single_sample_fn = lambda rng: sample_posterior_predictive(
-        rng, model, model_args, guide, guide_args, params,
-        with_intermediates=with_intermediates, **kwargs
-    )
+    def single_sample_fn(rng):
+        return sample_posterior_predictive(
+            rng, model, model_args, guide, guide_args, params,
+            with_intermediates=with_intermediates, **kwargs
+        )
     return _sample_a_lot(rng_key, n, single_sample_fn)
+
 
 def map_args_obs_to_shape(obs, *args, **kwargs):
     return unvectorize_shape_2d(obs), kwargs, {'obs': obs}
+
 
 def make_observed_model(model, obs_to_model_args_fn):
     """ Transforms a generative model function into one with fixed observations

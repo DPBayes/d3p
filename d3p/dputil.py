@@ -19,12 +19,13 @@ import numpy as np
 __all__ = ['approximate_sigma', 'approximate_sigma_remove_relation']
 ComputeEpsFn = Callable[[float, Optional[float]], float]
 
-def get_bracketing_bounds(
+
+def get_bracketing_bounds(  # noqa: C901
         compute_eps_fn: ComputeEpsFn,
         target_eps: float,
         maxeval: int,
-        initial_sigma: Optional[float]=1.
-    ) -> Tuple[np.ndarray, np.ndarray, int]:
+        initial_sigma: Optional[float] = 1.
+    ) -> Tuple[np.ndarray, np.ndarray, int]:  # noqa:E121,E125
     """ Determines rough upper and lower bounds for sigma around a target privacy
     epsilon value.
 
@@ -57,7 +58,7 @@ def get_bracketing_bounds(
             # satisfied if the value is within .1
             num_evals += 1
             new_eps = compute_eps_fn(sig, precision=2.)
-            if (abs(1-eps/new_eps) <= .1):
+            if (abs(1 - eps/new_eps) <= .1):  # noqa: 226
                 break
             else:
                 sig *= 10
@@ -103,8 +104,8 @@ def get_bracketing_bounds(
                     if num_evals >= maxeval:
                         raise RuntimeError("Could not establish bounds in given evaluation limit")
 
-
         return np.array([sig, sig_1]), np.array([eps, eps_1]), num_evals
+
 
 def update_bounds(
         sig: float,
@@ -113,7 +114,7 @@ def update_bounds(
         bounds: np.ndarray,
         bound_eps: np.ndarray,
         consecutive_updates: int
-    ) -> Tuple[np.ndarray, np.ndarray, int]:
+    ) -> Tuple[np.ndarray, np.ndarray, int]:  # noqa:E121,E125
     """ Updates bounds for sigma around a target privacy epsilon.
 
     Updates the lower bound for sigma if `eps` is larger than `target_eps` and
@@ -143,14 +144,15 @@ def update_bounds(
 
     return bounds, bound_eps, consecutive_updates
 
+
 def _approximate_sigma(
         compute_eps_fn: ComputeEpsFn,
         target_eps: float,
         q: float,
-        tol: Optional[float]=1e-4,
-        force_smaller: Optional[bool]=False,
-        maxeval: Optional[int]=10
-    ) -> Tuple[float, float, int]:
+        tol: Optional[float] = 1e-4,
+        force_smaller: Optional[bool] = False,
+        maxeval: Optional[int] = 10
+    ) -> Tuple[float, float, int]:  # noqa:E121,E125
     """ Approximates the sigma corresponding to a target privacy epsilon.
 
     Uses a bracketing approach where an initial rough estimate of lower and upper
@@ -176,14 +178,16 @@ def _approximate_sigma(
         3) the number of function evaluations made
     """
 
-    initial_sigma = 1. / (0.01/q)
-    bounds, bound_eps, num_evals = get_bracketing_bounds(compute_eps_fn, target_eps, maxeval, initial_sigma=initial_sigma)
+    initial_sigma = 1. / (0.01 / q)  # heuristic: for q=0.01 sigma=1 is in stable range, so try to scale accordingly
+    bounds, bound_eps, num_evals = get_bracketing_bounds(
+        compute_eps_fn, target_eps, maxeval, initial_sigma=initial_sigma
+    )
     eps = bound_eps[1]
-    consecutive_updates = [0,0]
+    consecutive_updates = [0, 0]
 
     while abs(target_eps - eps) > tol and num_evals < maxeval:
-        assert(bound_eps[0] >= target_eps) # loop invariants
-        assert(bound_eps[1] <= target_eps) # these are the assumptions for the procedure to work
+        assert(bound_eps[0] >= target_eps)  # loop invariants
+        assert(bound_eps[1] <= target_eps)  # these are the assumptions for the procedure to work
 
         # fitting function eps -> sigma (sig = a-b*log(eps), shape determined empirically for Fourier Accountant)
         b = (bounds[1] - bounds[0]) / (np.log(bound_eps[0]) - np.log(bound_eps[1]))
@@ -204,8 +208,9 @@ def _approximate_sigma(
         # of consecutive updates for a bound and forcibly update the other if
         # that number exceeds a certain value.
         MAX_CONSECUTIVE_UPDATES = 2
-        if (consecutive_updates[0] > MAX_CONSECUTIVE_UPDATES or
-            consecutive_updates[1] > MAX_CONSECUTIVE_UPDATES) and num_evals < maxeval:
+        if num_evals < maxeval and (
+                consecutive_updates[0] > MAX_CONSECUTIVE_UPDATES or
+                consecutive_updates[1] > MAX_CONSECUTIVE_UPDATES):
 
             # In this case, the optimal sigma is very close to the often
             # updated bound and thus evaluating at the midpoint of the interval
@@ -227,15 +232,16 @@ def _approximate_sigma(
 
     return new_sig, eps, num_evals
 
+
 def approximate_sigma(
         target_eps: float,
         delta: float,
         q: float,
         num_iter: int,
-        tol: Optional[float]=1e-4,
-        force_smaller: Optional[bool]=False,
-        maxeval: Optional[int]=10
-    ) -> Tuple[float, float, int]:
+        tol: Optional[float] = 1e-4,
+        force_smaller: Optional[bool] = False,
+        maxeval: Optional[int] = 10
+    ) -> Tuple[float, float, int]:  # noqa:E121,E125
     """ Approximates the sigma corresponding to a target privacy epsilon using
     the Fourier Accountant for the substitute relation.
 
@@ -264,22 +270,26 @@ def approximate_sigma(
         2) the corresponding espilon
         3) the number of function evaluations made
     """
-    L = max(20, target_eps*2)
-    compute_eps = lambda sigma, precision=1: get_epsilon_S(
-        delta, sigma, q, ncomp=num_iter, L=L*precision, nx=1e6*(L*precision)/20
-    )
+    L = max(20, target_eps * 2)
+
+    def compute_eps(sigma, precision=1):
+        return get_epsilon_S(
+            delta, sigma, q, ncomp=num_iter, L=L * precision,
+            nx=1e6 * (L * precision) / 20
+        )
 
     return _approximate_sigma(compute_eps, target_eps, q, tol, force_smaller, maxeval)
+
 
 def approximate_sigma_remove_relation(
         target_eps: float,
         delta: float,
         q: float,
         num_iter: int,
-        tol: Optional[float]=1e-4,
-        force_smaller: Optional[bool]=False,
-        maxeval: Optional[int]=10
-    ) -> Tuple[float, float, int]:
+        tol: Optional[float] = 1e-4,
+        force_smaller: Optional[bool] = False,
+        maxeval: Optional[int] = 10
+    ) -> Tuple[float, float, int]:  # noqa:E121,E125
     """ Approximates the sigma corresponding to a target privacy epsilon using
     the Fourier Accountant for the add/remove relation.
 
@@ -308,42 +318,12 @@ def approximate_sigma_remove_relation(
         2) the corresponding espilon
         3) the number of function evaluations made
     """
-    L = max(20, target_eps*2)
-    compute_eps = lambda sigma, precision=1: get_epsilon_R(
-        delta, sigma, q, ncomp=num_iter, L=L*precision, nx=1e6*(L*precision)/20
-    )
+    L = max(20, target_eps * 2)
+
+    def compute_eps(sigma, precision=1.):
+        return get_epsilon_R(
+            delta, sigma, q, ncomp=num_iter, L=L * precision,
+            nx=1e6 * (L * precision) / 20
+        )
 
     return _approximate_sigma(compute_eps, target_eps, q, tol, force_smaller, maxeval)
-
-# import scipy.optimize
-# def _approximate_sigma(compute_eps_fn, target_eps, tol=1e-4, force_smaller=False, maxiter=10):
-#     cache = {}
-#     def loss_fn(sig):
-#         sig = sig[0]
-#         if sig in cache:
-#             return cache[sig]
-#         if sig <= 0.:
-#             eps = np.nan
-#         try:
-#             eps = compute_eps_fn(sig)
-#         except ValueError as e:
-#             eps = np.inf
-
-#         cache[sig] = eps
-#         #err = abs(1 - eps/target_eps)
-#         err = (eps-target_eps)**2
-#         print(sig, eps, err)
-#         return err
-#         # return abs(1 - eps/target_eps)
-
-#     # opt_res = scipy.optimize.minimize(loss_fn, 1, method="Nelder-Mead", options={'maxfev': maxiter, 'ftol': tol})
-#     opt_res = scipy.optimize.minimize(loss_fn, 1, method="Powell", options={'maxfev': maxiter, 'ftol': tol})
-
-#     sigma_opt = opt_res['x'][0]
-#     eps = compute_eps_fn(sigma_opt)
-
-#     if force_smaller and eps > target_eps:
-#         sigma_opt = opt_res['final_simplex'][0][1][0]
-#         eps = compute_eps_fn(sigma_opt)
-
-#     return sigma_opt, eps

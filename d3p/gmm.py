@@ -17,11 +17,12 @@ import jax.numpy as jnp
 from jax.scipy.special import logsumexp
 import numpyro.distributions as dist
 
+
 class GaussianMixture(dist.Distribution):
     arg_constraints = {
         '_locs': dist.constraints.real,
         '_scales': dist.constraints.positive,
-        '_pis' : dist.constraints.simplex
+        '_pis': dist.constraints.simplex
     }
     support = dist.constraints.real
 

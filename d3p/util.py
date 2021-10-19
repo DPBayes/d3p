@@ -17,11 +17,14 @@ import jax.numpy as jnp
 import numpy as np
 from functools import reduce, wraps, partial
 
-__all__ = ["map_over_secondary_dims", "has_shape", "is_array", "is_scalar",
+__all__ = [
+    "map_over_secondary_dims", "has_shape", "is_array", "is_scalar",
     "is_integer", "is_int_scalar", "example_count",
     "unvectorize_shape", "unvectorize_shape_1d", "unvectorize_shape_2d",
     "unvectorize_shape_3d", "expand_shape", "expand_shape_1d",
-    "expand_shape_2d", "expand_shape_3d"]
+    "expand_shape_2d", "expand_shape_3d"
+]
+
 
 def map_over_secondary_dims(f):
     """
@@ -71,7 +74,7 @@ def example_count(a):
     """
     try:
         return jnp.shape(a)[0]
-    except:
+    except IndexError:
         return 1
 
 
@@ -86,6 +89,7 @@ def has_shape(a):
         return True
     except AttributeError:
         return False
+
 
 def is_array(a):
     """Returns True if the input has is determined to be an array, i.e.,
@@ -133,6 +137,7 @@ def is_int_scalar(x):
     """
     return is_scalar(x) and is_integer(x)
 
+
 def normalize(x):
     """Normalizes a vector, i.e., returns a vector with unit lengths pointing
     in the same direction.
@@ -140,6 +145,7 @@ def normalize(x):
     :param x: The vector to normalize.
     """
     return x / jnp.linalg.norm(x)
+
 
 def unvectorize_shape(a, d):
     """Undoes the stripping of leading dimensions in the shape of a vectorized/
@@ -164,6 +170,7 @@ def unvectorize_shape(a, d):
     else:
         return shape
 
+
 def unvectorize_shape_1d(a):
     """Undoes the stripping of leading dimensions in the shape of a vectorized/
     vmapped 1-dimensional array.
@@ -175,6 +182,7 @@ def unvectorize_shape_1d(a):
     :param a: The vectorized/vmapped array.
     """
     return unvectorize_shape(a, 1)
+
 
 def unvectorize_shape_2d(a):
     """Undoes the stripping of leading dimensions in the shape of a vectorized/
@@ -190,6 +198,7 @@ def unvectorize_shape_2d(a):
     """
     return unvectorize_shape(a, 2)
 
+
 def unvectorize_shape_3d(a):
     """Undoes the stripping of leading dimensions in the shape of a vectorized/
     vmapped 3-dimensional array.
@@ -203,6 +212,7 @@ def unvectorize_shape_3d(a):
     :param a: The vectorized/vmapped array.
     """
     return unvectorize_shape(a, 3)
+
 
 def expand_shape(a, d):
     """Expands the shape of an array to a target dimensionality.
@@ -226,6 +236,7 @@ def expand_shape(a, d):
     else:
         return shape
 
+
 def expand_shape_1d(a):
     """Expands the shape of an array to a target dimensionality of at least 1.
 
@@ -236,6 +247,7 @@ def expand_shape_1d(a):
     :param a: The vectorized/vmapped array.
     """
     return expand_shape(a, 1)
+
 
 def expand_shape_2d(a):
     """Expands the shape of an array to a target dimensionality of at least 2.
@@ -251,6 +263,7 @@ def expand_shape_2d(a):
     """
     return expand_shape(a, 2)
 
+
 def expand_shape_3d(a):
     """Expands the shape of an array to a target dimensionality of at least 3.
 
@@ -264,13 +277,16 @@ def expand_shape_3d(a):
     """
     return expand_shape(a, 3)
 
-def _and_reduce(l):
-    return reduce(lambda x, y: x and y, l, True)
+
+def _and_reduce(iterable):
+    return reduce(lambda x, y: x and y, iterable, True)
+
 
 def do_trees_have_same_structure(a, b):
     """Returns True if two jax trees have the same structure.
     """
     return jax.tree_structure(a) == jax.tree_structure(b)
+
 
 def do_trees_have_same_shape(a, b):
     """Returns True if two jax trees have the same structure and the shapes of
@@ -286,12 +302,13 @@ def are_trees_close(a, b):
     """Returns True if two jax trees have the same structure and all values are
     close.
     """
-    return do_trees_have_same_shape(a,b) and _and_reduce(
+    return do_trees_have_same_shape(a, b) and _and_reduce(
         jnp.allclose(x, y)
         for x, y, in zip(jax.tree_leaves(a), jax.tree_leaves(b))
     )
 
-@partial(jax.jit, static_argnums=(2,3))
+
+@partial(jax.jit, static_argnums=(2, 3))
 def sample_from_array(rng_key, x, n, axis):
     """ Samples n elements from a given array without replacement.
 
@@ -307,9 +324,9 @@ def sample_from_array(rng_key, x, n, axis):
     data = np.arange(n, dtype=np.uint32)
 
     seed = jax.random.randint(
-            rng_key, shape=(1,),
-            minval=0, maxval=capacity, dtype=np.uint32
-         ).squeeze()
+        rng_key, shape=(1,),
+        minval=0, maxval=capacity, dtype=np.uint32
+    ).squeeze()
 
     def permute32(vals):
         def hash_func_in(x):

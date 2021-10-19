@@ -22,6 +22,7 @@ import numpy as np
 
 from d3p import util
 
+
 class UtilityTests(unittest.TestCase):
 
     def test_map_over_secondary_dims_with_sum(self):
@@ -231,7 +232,6 @@ class UtilityTests(unittest.TestCase):
         is_int_scalar_jitted = jax.jit(util.is_int_scalar)
         a = jnp.array([5, 4])
         self.assertFalse(is_int_scalar_jitted(a))
-
 
     #### example_count ####
 
@@ -483,6 +483,7 @@ class UtilityTests(unittest.TestCase):
         n_vals = 1
         shuffled = util.sample_from_array(rng_key, x, n_vals, 0)
         self.assertTrue(jnp.alltrue(shuffled >= 100))
+
 
 if __name__ == '__main__':
     unittest.main()

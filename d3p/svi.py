@@ -18,18 +18,17 @@
 import functools
 
 import jax
-from jax import random
 import jax.numpy as jnp
 import numpy as np
 
-from numpyro.infer.svi import SVI, SVIState
+from numpyro.infer.svi import SVI
 import numpyro.distributions as dist
 from numpyro.handlers import seed, trace, substitute, block
 
 from d3p.util import map_over_secondary_dims, example_count
 
-from fourier_accountant.compute_eps import get_epsilon_S, get_epsilon_R
-from fourier_accountant.compute_delta import get_delta_S, get_delta_R
+from fourier_accountant.compute_eps import get_epsilon_R
+from fourier_accountant.compute_delta import get_delta_R
 
 from collections import namedtuple
 
@@ -51,15 +50,19 @@ def get_observations_scale(model, model_args, model_kwargs, params):
     )
 
     if len(scales) > 1:
-        raise ValueError("The model received several observation sites with different example counts. This is not supported in DPSVI.")
+        raise ValueError(
+            "The model received several observation sites with different example counts."
+            " This is not supported in DPSVI."
+        )
     elif len(scales) == 0:
         return 1.
 
     return scales[0]
 
+
 class CombinedLoss(object):
 
-    def __init__(self, per_example_loss, combiner_fn = jnp.mean):
+    def __init__(self, per_example_loss, combiner_fn=jnp.mean):
         self.px_loss = per_example_loss
         self.combiner_fn = combiner_fn
 
@@ -93,6 +96,7 @@ def full_norm(list_of_parts_or_tree, ord=2):
     norm = jnp.linalg.norm(gradients, ord=ord)
     return norm
 
+
 def normalize_gradient(list_of_gradient_parts, ord=2):
     """Normalizes a gradient by its total norm.
 
@@ -108,7 +112,8 @@ def normalize_gradient(list_of_gradient_parts, ord=2):
     normalized = [norm_inv * g for g in list_of_gradient_parts]
     return normalized
 
-def clip_gradient(list_of_gradient_parts, c, rescale_factor = 1.):
+
+def clip_gradient(list_of_gradient_parts, c, rescale_factor=1.):
     """Clips the total norm of a gradient by a given value C.
 
     The norm is computed by interpreting the given list of parts as a single
@@ -125,11 +130,12 @@ def clip_gradient(list_of_gradient_parts, c, rescale_factor = 1.):
     """
     if c == 0.:
         raise ValueError("The clipping threshold must be greater than 0.")
-    norm = full_norm(list_of_gradient_parts) * rescale_factor # norm of rescale_factor * grad
+    norm = full_norm(list_of_gradient_parts) * rescale_factor  # norm of rescale_factor * grad
     normalization_constant = 1./jnp.maximum(1., norm/c)
-    f = rescale_factor * normalization_constant # to scale grad to max(rescale_factor * grad, C)
+    f = rescale_factor * normalization_constant  # to scale grad to max(rescale_factor * grad, C)
     clipped_grads = [f * g for g in list_of_gradient_parts]
     return clipped_grads
+
 
 def get_gradients_clipping_function(c, rescale_factor):
     """Factory function to obtain a gradient clipping function for a fixed
@@ -144,6 +150,7 @@ def get_gradients_clipping_function(c, rescale_factor):
     def gradient_clipping_fn_inner(list_of_gradient_parts):
         return clip_gradient(list_of_gradient_parts, c, rescale_factor)
     return gradient_clipping_fn_inner
+
 
 class DPSVI(SVI):
     """
@@ -180,13 +187,21 @@ class DPSVI(SVI):
         that remain constant during fitting.
     """
 
-    def __init__(self, model, guide, optim, per_example_loss,
-            clipping_threshold, dp_scale, **static_kwargs):
+    def __init__(
+            self,
+            model,
+            guide,
+            optim,
+            per_example_loss,
+            clipping_threshold,
+            dp_scale,
+            **static_kwargs
+        ):  # noqa: E121, E125
 
         self._clipping_threshold = clipping_threshold
         self._dp_scale = dp_scale
 
-        total_loss = CombinedLoss(per_example_loss, combiner_fn = jnp.mean)
+        total_loss = CombinedLoss(per_example_loss, combiner_fn=jnp.mean)
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
 
     @staticmethod
@@ -255,7 +270,7 @@ class DPSVI(SVI):
                 *new_args, **kwargs, **self.static_kwargs
             )
 
-        batch_size = jnp.shape(args[0])[0] # todo: need checks to ensure this indexing is okay
+        batch_size = jnp.shape(args[0])[0]  # todo: need checks to ensure this indexing is okay
         px_rng_keys = jax.random.split(rng_key_step, batch_size)
 
         px_value_and_grad = jax.vmap(jax.value_and_grad(wrapped_px_loss), in_axes=(None, 0, 0))
@@ -317,8 +332,9 @@ class DPSVI(SVI):
         #   per-example gradients and left-multiplies them with that jacobian
         #   to get the final combined gradient
         loss_jacobian = jnp.reshape(loss_combine_vjp(jnp.array(1.))[0], (1, -1))
-        # loss_vjp = lambda px_grads: jnp.sum(jnp.multiply(loss_jacobian, px_grads))
-        loss_vjp = lambda px_grads: jnp.matmul(loss_jacobian, px_grads)
+
+        def loss_vjp(px_grads):
+            return jnp.matmul(loss_jacobian, px_grads)
 
         # we map the loss combination vjp func over all secondary dimensions
         #   of gradient sites. This is necessary since some gradient

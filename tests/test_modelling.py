@@ -24,12 +24,13 @@ from numpyro.primitives import sample, param
 from d3p.modelling import sample_prior_predictive, sample_multi_prior_predictive, \
     sample_posterior_predictive, sample_multi_posterior_predictive
 
+
 class ModelSamplingTests(unittest.TestCase):
 
     def test_sample_prior_predictive(self):
         def model(N, d):
             mu = sample("mu", dist.Normal(jnp.zeros(d)))
-            x = sample("x", dist.Normal(mu), sample_shape=(N,))
+            sample("x", dist.Normal(mu), sample_shape=(N,))
 
         N, d = 100, 2
         rng_key = jax.random.PRNGKey(1836)
@@ -43,7 +44,7 @@ class ModelSamplingTests(unittest.TestCase):
     def test_sample_prior_predictive_with_substitute(self):
         def model(N, d):
             mu = sample("mu", dist.Normal(jnp.zeros(d)))
-            x = sample("x", dist.Normal(mu), sample_shape=(N,))
+            sample("x", dist.Normal(mu), sample_shape=(N,))
 
         N, d = 100, 2
         mu_fixed = jnp.array([1., -.5])
@@ -68,7 +69,7 @@ class ModelSamplingTests(unittest.TestCase):
     def test_sample_prior_predictive_without_intermediates(self):
 
         def model(N, d):
-            x = sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
+            sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
 
         N, d = 100, 2
         rng_key = jax.random.PRNGKey(3781)
@@ -78,7 +79,7 @@ class ModelSamplingTests(unittest.TestCase):
     def test_sample_prior_predictive_with_intermediates(self):
 
         def model(N, d):
-            x = sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
+            sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
 
         N, d = 100, 2
         rng_key = jax.random.PRNGKey(2)
@@ -91,7 +92,7 @@ class ModelSamplingTests(unittest.TestCase):
     def test_sample_multi_prior_predictive(self):
         def model(N, d):
             mu = sample("mu", dist.Normal(jnp.zeros(d)))
-            x = sample("x", dist.Normal(mu), sample_shape=(N,))
+            sample("x", dist.Normal(mu), sample_shape=(N,))
 
         N, d = 1, 3
         rng_key = jax.random.PRNGKey(375)
@@ -105,7 +106,7 @@ class ModelSamplingTests(unittest.TestCase):
 
     def test_sample_multi_prior_predictive_without_intermediates(self):
         def model(N, d):
-            x = sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
+            sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
 
         N, d = 1, 2
         rng_key = jax.random.PRNGKey(43)
@@ -115,7 +116,7 @@ class ModelSamplingTests(unittest.TestCase):
 
     def test_sample_multi_prior_predictive_with_intermediates(self):
         def model(N, d):
-            x = sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
+            sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
 
         N, d = 1, 2
         rng_key = jax.random.PRNGKey(46875)
@@ -129,11 +130,11 @@ class ModelSamplingTests(unittest.TestCase):
     def test_sample_posterior_predictive(self):
         def model(N, d):
             mu = sample("mu", dist.Normal(jnp.zeros(d)))
-            x = sample("x", dist.Normal(mu), sample_shape=(N,))
+            sample("x", dist.Normal(mu), sample_shape=(N,))
 
         def guide(d):
             mu_loc = param('mu_loc', jnp.zeros(d))
-            mu = sample('mu', dist.Normal(mu_loc))
+            sample('mu', dist.Normal(mu_loc))
 
         N, d = 100, 2
         mu_loc = jnp.array([7., 2.12])
@@ -145,15 +146,14 @@ class ModelSamplingTests(unittest.TestCase):
         self.assertTrue(np.allclose(jnp.mean(samples['x'], axis=0), samples['mu'], atol=3/jnp.sqrt(N)))
         self.assertTrue(np.allclose(samples['mu'], mu_loc, atol=3.))
 
-
     def test_sample_posterior_predictive_without_intermediates(self):
 
         def model(N, d):
-            x = sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
+            sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
 
         def guide(d):
-            mu_loc = param('mu_loc', jnp.zeros(1))
-            mu = sample('mu', self.DistWithIntermediate(), sample_shape=(1, d))
+            param('mu_loc', jnp.zeros(1))
+            sample('mu', self.DistWithIntermediate(), sample_shape=(1, d))
 
         N, d = 100, 2
         rng_key = jax.random.PRNGKey(275)
@@ -164,15 +164,17 @@ class ModelSamplingTests(unittest.TestCase):
     def test_sample_posterior_predictive_with_intermediates(self):
 
         def model(N, d):
-            x = sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
+            sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
 
         def guide(d):
-            mu_loc = param('mu_loc', jnp.zeros(1))
-            mu = sample('mu', self.DistWithIntermediate(), sample_shape=(1, d))
+            param('mu_loc', jnp.zeros(1))
+            sample('mu', self.DistWithIntermediate(), sample_shape=(1, d))
 
         N, d = 100, 2
         rng_key = jax.random.PRNGKey(7234)
-        samples = sample_posterior_predictive(rng_key, model, (N, d), guide, (d,), params={'mu_loc': 1.}, with_intermediates=True)
+        samples = sample_posterior_predictive(
+            rng_key, model, (N, d), guide, (d,), params={'mu_loc': 1.}, with_intermediates=True
+        )
         self.assertEqual((N, d), jnp.shape(samples['x'][0]))
         self.assertEqual(2, len(samples['x']))
         self.assertEqual(1, len(samples['x'][1]))
@@ -186,17 +188,19 @@ class ModelSamplingTests(unittest.TestCase):
     def test_sample_multi_posterior_predictive(self):
         def model(N, d):
             mu = sample("mu", dist.Normal(jnp.zeros(d)))
-            x = sample("x", dist.Normal(mu), sample_shape=(N,))
+            sample("x", dist.Normal(mu), sample_shape=(N,))
 
         def guide(d):
             mu_loc = param('mu_loc', jnp.zeros(d))
-            mu = sample('mu', dist.Normal(mu_loc))
+            sample('mu', dist.Normal(mu_loc))
 
         N, d = 1, 2
         N_total = 100
         mu_loc = jnp.array([7., 2.12])
         rng_key = jax.random.PRNGKey(98347)
-        samples = sample_multi_posterior_predictive(rng_key, N_total, model, (N, d), guide, (d,), params={'mu_loc': mu_loc})
+        samples = sample_multi_posterior_predictive(
+            rng_key, N_total, model, (N, d), guide, (d,), params={'mu_loc': mu_loc}
+        )
         self.assertEqual((N_total, d), jnp.shape(samples['mu']))
         self.assertEqual((N_total, N, d), jnp.shape(samples['x']))
         # crude test that samples are from model distribution (mean is within 3 times stddev)
@@ -206,11 +210,11 @@ class ModelSamplingTests(unittest.TestCase):
     def test_sample_multi_posterior_predictive_without_intermediates(self):
 
         def model(N, d):
-            x = sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
+            sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
 
         def guide(d):
-            mu_loc = param('mu_loc', jnp.zeros(1))
-            mu = sample('mu', self.DistWithIntermediate(), sample_shape=(1, d))
+            param('mu_loc', jnp.zeros(1))
+            sample('mu', self.DistWithIntermediate(), sample_shape=(1, d))
 
         N, d = 10, 2
         rng_key = jax.random.PRNGKey(35786)
@@ -222,16 +226,18 @@ class ModelSamplingTests(unittest.TestCase):
     def test_sample_multi_posterior_predictive_with_intermediates(self):
 
         def model(N, d):
-            x = sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
+            sample("x", self.DistWithIntermediate(), sample_shape=(N, d))
 
         def guide(d):
-            mu_loc = param('mu_loc', jnp.zeros(1))
-            mu = sample('mu', self.DistWithIntermediate(), sample_shape=(1, d))
+            param('mu_loc', jnp.zeros(1))
+            sample('mu', self.DistWithIntermediate(), sample_shape=(1, d))
 
         N, d = 10, 2
         rng_key = jax.random.PRNGKey(35786)
         N_total = 10
-        samples = sample_multi_posterior_predictive(rng_key, N_total, model, (N, d), guide, (d,), params={'mu_loc': 1.}, with_intermediates=True)
+        samples = sample_multi_posterior_predictive(
+            rng_key, N_total, model, (N, d), guide, (d,), params={'mu_loc': 1.}, with_intermediates=True
+        )
         self.assertEqual((N_total, N, d), jnp.shape(samples['x'][0]))
         self.assertEqual(2, len(samples['x']))
         self.assertEqual(1, len(samples['x'][1]))
@@ -242,9 +248,6 @@ class ModelSamplingTests(unittest.TestCase):
         self.assertEqual(1, len(samples['mu'][1]))
         self.assertEqual((N_total, 1, d, 2), jnp.shape(samples['mu'][1][0]))
 
+
 if __name__ == '__main__':
     unittest.main()
-
-
-
-

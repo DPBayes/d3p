@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from d3p.util import is_int_scalar, is_array, example_count, sample_from_array
-from numpyro.handlers import scale
+from d3p.util import example_count, sample_from_array
 import jax.numpy as jnp
 import jax
 
@@ -21,6 +20,7 @@ __all__ = [
     'subsample_batchify_data', 'split_batchify_data',
     'q_to_batch_size', 'batch_size_to_q'
 ]
+
 
 def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=False):
     """Returns functions to fetch (randomized) batches of a given dataset by
@@ -165,9 +165,11 @@ def split_batchify_data(dataset, batch_size=None, q=None):
 
     return init, get_batch
 
+
 def q_to_batch_size(q, N):
     """ Returns the batch size for a given subsampling ratio q. """
     return int(N * q)
+
 
 def batch_size_to_q(batch_size, N):
     """ Returns the subsampling ratio q corresponding to a given batch size. """

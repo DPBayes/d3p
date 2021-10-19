@@ -21,6 +21,7 @@ import numpy as np
 
 from d3p.svi import clip_gradient, full_norm, normalize_gradient
 
+
 class GradientManipulatorsTests(unittest.TestCase):
 
     def assert_array_tuple_close(self, expected, actual):
@@ -70,7 +71,7 @@ class GradientManipulatorsTests(unittest.TestCase):
         gradient_tree = (
             jnp.ones(shape=(17, 2, 3)),
             jnp.ones(shape=(2, 54)),
-            (jnp.ones(shape=(2,3)), jnp.ones(shape=(3,4,5))),
+            (jnp.ones(shape=(2, 3)), jnp.ones(shape=(3, 4, 5))),
             ()
         )
         norm = full_norm(gradient_tree)
@@ -106,6 +107,7 @@ class GradientManipulatorsTests(unittest.TestCase):
         self.assert_gradient_direction(self.gradient_parts, normalized_gradient_parts)
         normalized_norm = full_norm(normalized_gradient_parts)
         self.assertTrue(np.allclose(1., normalized_norm))
+
 
 if __name__ == '__main__':
     unittest.main()

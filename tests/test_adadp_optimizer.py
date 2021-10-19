@@ -23,6 +23,7 @@ import numpy as np
 from d3p.optimizers import ADADP
 import d3p.util
 
+
 class ADADPTests(unittest.TestCase):
 
     def assertTreeStructure(self, expected, actual):
@@ -124,10 +125,10 @@ class ADADPTests(unittest.TestCase):
 
         i, (x, lr, x_stepped, x_prev) = adadp.update(gradient, opt_state)
 
-        expected_lr = .9 # 0.72005267 clipped by alpha_min
+        expected_lr = .9  # 0.72005267 clipped by alpha_min
 
         self.assertEqual(2, i)
-        self.assertTreeAllClose(value, x) # update rejected
+        self.assertTreeAllClose(value, x)  # update rejected
         self.assertTrue(np.allclose(expected_lr, lr))
 
     def test_init_with_jit(self):
@@ -208,11 +209,12 @@ class ADADPTests(unittest.TestCase):
 
         i, (x, lr, x_stepped, x_prev) = jax.jit(adadp.update)(gradient, opt_state)
 
-        expected_lr = .9 # 0.72005267 clipped by alpha_min
+        expected_lr = .9  # 0.72005267 clipped by alpha_min
 
         self.assertEqual(2, i)
-        self.assertTreeAllClose(value, x) # update rejected
+        self.assertTreeAllClose(value, x)  # update rejected
         self.assertTrue(np.allclose(expected_lr, lr))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -25,6 +25,7 @@ import numpy as np
 
 from d3p.svi import DPSVI, DPSVIState
 
+
 class DPSVITest(unittest.TestCase):
 
     def setUp(self):
@@ -40,13 +41,12 @@ class DPSVITest(unittest.TestCase):
         self.dp_scale = 1.
         self.clipping_threshold = 2.
         optim = SGD(1.)
-        self.svi = DPSVI(None, None, optim, None, self.clipping_threshold,
+        self.svi = DPSVI(
+            None, None, optim, None, self.clipping_threshold,
             self.dp_scale, num_obs_total=self.num_obs_total
         )
 
     def test_px_gradient_aggregation(self):
-        svi_state = DPSVIState(None, self.rng, .3)
-
         np.random.seed(0)
         px_grads_list, _testMethodDoc = jax.tree_flatten((
             np.random.normal(1, 1, size=(self.batch_size, 10000)),
@@ -59,7 +59,10 @@ class DPSVITest(unittest.TestCase):
         loss, grads_list = self.svi._combine_gradients(px_grads_list, self.px_loss)
 
         self.assertTrue(np.allclose(expected_loss, loss), f"expected loss {expected_loss} but was {loss}")
-        self.assertTrue(np.allclose(expected_grads_list, grads_list), f"expected gradients {expected_grads_list} but was {grads_list}")
+        self.assertTrue(
+            np.allclose(expected_grads_list, grads_list),
+            f"expected gradients {expected_grads_list} but was {grads_list}"
+        )
 
     def test_dp_noise_perturbation(self):
         svi_state = DPSVIState(None, self.rng, .3)
@@ -79,7 +82,8 @@ class DPSVITest(unittest.TestCase):
         for site, px_site in zip(jax.tree_leaves(grads), jax.tree_leaves(self.px_grads_list)):
             self.assertEqual(px_site.shape[1:], site.shape)
             self.assertTrue(
-                np.allclose(expected_std, jnp.std(site), atol=1e-2), f"expected stdev {expected_std} but was {jnp.std(site)}"
+                np.allclose(expected_std, jnp.std(site), atol=1e-2),
+                f"expected stdev {expected_std} but was {jnp.std(site)}"
             )
             self.assertTrue(np.allclose(0., jnp.mean(site), atol=1e-2))
 
@@ -99,7 +103,8 @@ class DPSVITest(unittest.TestCase):
                 new_svi_state, grads_list, self.batch_size, self.tree_def
             )
 
-        some_gradient_noise_is_equal = reduce(lambda are_equal, acc: are_equal or acc,
+        some_gradient_noise_is_equal = reduce(
+            lambda are_equal, acc: are_equal or acc,
             jax.tree_leaves(
                 jax.tree_multimap(
                     lambda x, y: jnp.allclose(x, y), first_grads, second_grads
