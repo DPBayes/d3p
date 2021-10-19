@@ -72,9 +72,9 @@ Version numbers adhere to [Semantic Versioning](https://semver.org/). Changes be
 ## License
 
 d3p is licensed under the Apache 2.0 License. The full license text is available
-in `LICENSE.txt`. Copyright holder of each contribution are the respective
+in `LICENSES/Apache-2.0.txt`. Copyright holder of each contribution are the respective
 contributing developer or his or her assignee (i.e., universities or companies
-owning the copyright of software contributes by their employees).
+owning the copyright of software contributed by their employees).
 
 ## Acknowledgements
 

@@ -1,5 +1,7 @@
-from __future__ import absolute_import, division, print_function
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © 2019- d3p Developers and their Assignees
 
+from __future__ import absolute_import, division, print_function
 import os
 
 from setuptools import find_packages, setup

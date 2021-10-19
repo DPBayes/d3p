@@ -1,5 +1,6 @@
-# Copyright -2019 Copyright Contributors to the Pyro project.
-# Copyright 2019- d3p Developers and their Assignees
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © -2019 Copyright Contributors to the Pyro project.
+# SPDX-FileCopyrightText: © 2019- d3p Developers and their Assignees
 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
