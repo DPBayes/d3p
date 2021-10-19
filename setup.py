@@ -39,8 +39,8 @@ setup(
     extras_require={
         'examples': ['matplotlib'],
         'compatible-dependencies': [
-            "numpyro == 0.8.0",
-            "jax[minimum-jaxlib]==0.2.22"
+            "numpyro[cpu] == 0.8.0",
+            "jax==0.2.22"
         ],
         'tpu': f"numpyro[tpu]",
         'cpu': f"numpyro[cpu]",
