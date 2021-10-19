@@ -27,7 +27,7 @@ _numpyro_version_optimistic_upper_constraint = ', < 2.0.0'
 
 setup(
     name='d3p',
-    python_requires='>=3.6',
+    python_requires='>=3.7',
     version=_version,
     description='Differentially-Private Probabilistic Programming',
     packages=find_packages(include=['d3p', 'd3p.*']),
@@ -60,7 +60,6 @@ setup(
         'Intended Audience :: Science/Research',
         'Operating System :: POSIX :: Linux',
         'Operating System :: MacOS :: MacOS X',
-        'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
