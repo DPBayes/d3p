@@ -45,7 +45,7 @@ class UtilityTests(unittest.TestCase):
 
         mapped_sum = util.map_over_secondary_dims(jnp.sum)
         result = mapped_sum(x)
-        self.assertTrue(jnp.allclose(expected, result))
+        self.assertTrue(np.allclose(expected, result))
 
     #### has_shape ####
 
@@ -279,7 +279,7 @@ class UtilityTests(unittest.TestCase):
     def test_normalize_correct(self):
         x = jnp.arange(7)
         res = util.normalize(x)
-        self.assertTrue(jnp.allclose(1., jnp.linalg.norm(res)))
+        self.assertTrue(np.allclose(1., jnp.linalg.norm(res)))
 
     def test_normalize_correct_for_scalar(self):
         x = 8.

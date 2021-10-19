@@ -12,7 +12,12 @@ Since both NumPyro and JAX are evolving rapdily, some convenience features imple
 
 ## Installing
 
-d3p is pure Python software. Simply clone this git repository and install with pip:
+d3p is pure Python software. You can install it via pip with the following command:
+```
+pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p
+```
+
+Alternatively, you can clone this git repository and install with pip locally:
 ```
 git clone https://github.com/DPBayes/d3p
 cd d3p
@@ -21,11 +26,26 @@ pip install .
 
 This will install d3p with all required dependencies (NumPyro, JAX, ..) for CPU usage.
 
+### Note about dependency versions
+
+NumPyro and JAX are still under ongoing development and its developers currently give no
+guarantee that the API remains stable between releases. In order to allow for users
+of d3p to benefit from latest features of NumPyro, we did not put a strict upper bound
+on the NumPyro dependency version. This may lead to problems if newer NumPyro versions
+introduce breaking API changes.
+
+If you encounter such issues at some point,
+you can use the `compatible-dependencies` installation target of d3p to force usage of the latest
+known set of dependency versions known to be compatible with d3p:
+```
+pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[compatible-dependencies]
+```
+
 ### GPU installation
 If you want to run on CUDA devices, replace the last command with:
 
 ```
-pip install .[cuda111] -f https://storage.googleapis.com/jax-releases/jax_releases.html
+pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[cuda111] -f https://storage.googleapis.com/jax-releases/jax_releases.html
 ```
 
 Adapt `cuda111` to your CUDA version, e.g., `cuda102` for CUDA 10.2 .
@@ -33,7 +53,7 @@ Adapt `cuda111` to your CUDA version, e.g., `cuda102` for CUDA 10.2 .
 ### TPU installation
 Replace the installation command with
 ```
-pip install .[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 ```
 
 Refer to the [JAX installation instructions](https://github.com/google/jax#pip-installation-gpu-cuda)
@@ -45,11 +65,9 @@ For now, see the examples in `examples/`.
 
 ## Versioning Policy
 
-The `master` branch contains the latest stable development version of d3p.
+The `master` branch contains the latest development version of d3p which may introduce breaking changes.
 
-In the future, we will adopt semantic versioning. Commits corresponding to version releases will be tagged accordingly.
-
-A list of important changes between releases will be available in `ChangeLog.txt`.
+Version numbers adhere to [Semantic Versioning](https://semver.org/). Changes between releases are tracked in `ChangeLog.txt`.
 
 ## License
 

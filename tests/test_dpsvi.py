@@ -58,8 +58,8 @@ class DPSVITest(unittest.TestCase):
 
         loss, grads_list = self.svi._combine_gradients(px_grads_list, self.px_loss)
 
-        self.assertTrue(jnp.allclose(expected_loss, loss), f"expected loss {expected_loss} but was {loss}")
-        self.assertTrue(jnp.allclose(expected_grads_list, grads_list), f"expected gradients {expected_grads_list} but was {grads_list}")
+        self.assertTrue(np.allclose(expected_loss, loss), f"expected loss {expected_loss} but was {loss}")
+        self.assertTrue(np.allclose(expected_grads_list, grads_list), f"expected gradients {expected_grads_list} but was {grads_list}")
 
     def test_dp_noise_perturbation(self):
         svi_state = DPSVIState(None, self.rng, .3)
@@ -72,16 +72,16 @@ class DPSVITest(unittest.TestCase):
             )
 
         self.assertIs(svi_state.optim_state, new_svi_state.optim_state)
-        self.assertFalse(jnp.allclose(svi_state.rng_key, new_svi_state.rng_key))
+        self.assertFalse(np.allclose(svi_state.rng_key, new_svi_state.rng_key))
         self.assertEqual(self.tree_def, jax.tree_structure(grads))
 
         expected_std = (self.dp_scale * self.clipping_threshold / self.batch_size) * svi_state.observation_scale
         for site, px_site in zip(jax.tree_leaves(grads), jax.tree_leaves(self.px_grads_list)):
             self.assertEqual(px_site.shape[1:], site.shape)
             self.assertTrue(
-                jnp.allclose(expected_std, jnp.std(site), atol=1e-2), f"expected stdev {expected_std} but was {jnp.std(site)}"
+                np.allclose(expected_std, jnp.std(site), atol=1e-2), f"expected stdev {expected_std} but was {jnp.std(site)}"
             )
-            self.assertTrue(jnp.allclose(0., jnp.mean(site), atol=1e-2))
+            self.assertTrue(np.allclose(0., jnp.mean(site), atol=1e-2))
 
     def test_dp_noise_perturbation_not_deterministic_over_calls(self):
         """ verifies that different randomness is used in subsequent calls """
@@ -121,7 +121,7 @@ class DPSVITest(unittest.TestCase):
 
         noise_sites = jax.tree_leaves(grads)
 
-        self.assertFalse(jnp.allclose(noise_sites[0], noise_sites[1]))
+        self.assertFalse(np.allclose(noise_sites[0], noise_sites[1]))
 
 
 if __name__ == '__main__':

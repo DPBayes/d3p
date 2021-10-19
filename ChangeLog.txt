@@ -1,4 +1,4 @@
-- current(0.2.0-alpha):
+- master:
     - ! Renamed main package 'dppp' to 'd3p' !
     - Fix: DPSVI perturbation was too large (scaled by minibatch size)
     - Fix: dputil.approximate_sigma could enter an infinite loop for some parameters

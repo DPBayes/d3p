@@ -18,6 +18,7 @@ import unittest
 
 import jax.numpy as jnp
 import jax
+import numpy as np
 
 from d3p.optimizers import ADADP
 import d3p.util
@@ -103,7 +104,7 @@ class ADADPTests(unittest.TestCase):
 
         self.assertEqual(2, i)
         self.assertTreeAllClose(two_half_step_results, x)
-        self.assertTrue(jnp.allclose(expected_lr, lr))
+        self.assertTrue(np.allclose(expected_lr, lr))
 
     def test_update_step_2_with_stability_check(self):
         learning_rate = 1.
@@ -127,7 +128,7 @@ class ADADPTests(unittest.TestCase):
 
         self.assertEqual(2, i)
         self.assertTreeAllClose(value, x) # update rejected
-        self.assertTrue(jnp.allclose(expected_lr, lr))
+        self.assertTrue(np.allclose(expected_lr, lr))
 
     def test_init_with_jit(self):
         learning_rate = 1.
@@ -187,7 +188,7 @@ class ADADPTests(unittest.TestCase):
 
         self.assertEqual(2, i)
         self.assertTreeAllClose(two_half_step_results, x)
-        self.assertTrue(jnp.allclose(expected_lr, lr))
+        self.assertTrue(np.allclose(expected_lr, lr))
 
     def test_update_step_2_with_stability_check_with_jit(self):
         learning_rate = 1.
@@ -211,7 +212,7 @@ class ADADPTests(unittest.TestCase):
 
         self.assertEqual(2, i)
         self.assertTreeAllClose(value, x) # update rejected
-        self.assertTrue(jnp.allclose(expected_lr, lr))
+        self.assertTrue(np.allclose(expected_lr, lr))
 
 if __name__ == '__main__':
     unittest.main()

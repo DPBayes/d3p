@@ -76,7 +76,7 @@ class SplitBatchifierTests(unittest.TestCase):
 
         batch_0 = fetch(3, batchifier_state)
         batch_1 = fetch(8, batchifier_state)
-        self.assertFalse(jnp.allclose(batch_0, batch_1)) # ensure batches are different
+        self.assertFalse(np.allclose(batch_0, batch_1)) # ensure batches are different
 
     def test_split_batchify_fetch_correct_shape(self):
         data = np.random.normal(size=(105, 3))
@@ -97,7 +97,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
         num_batches, batchifier_state = init(rng_key)
 
         self.assertEqual(10, num_batches)
-        self.assertTrue(jnp.allclose(rng_key, batchifier_state))
+        self.assertTrue(np.allclose(rng_key, batchifier_state))
 
     def test_subsample_batchify_init_non_divisiable_size(self):
         data = jnp.arange(0, 105)
@@ -107,7 +107,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
         num_batches, batchifier_state = init(rng_key)
 
         self.assertEqual(10, num_batches)
-        self.assertTrue(jnp.allclose(rng_key, batchifier_state))
+        self.assertTrue(np.allclose(rng_key, batchifier_state))
 
     def test_subsample_batchify_fetch_without_replacement(self):
         data = np.arange(105) + 100
@@ -130,7 +130,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
         batch_0 = fetch(3, batchifier_state)
         batch_1 = fetch(8, batchifier_state)
-        self.assertFalse(jnp.allclose(batch_0, batch_1)) # ensure batches are different
+        self.assertFalse(np.allclose(batch_0, batch_1)) # ensure batches are different
 
 
     def test_subsample_batchify_fetch_correct_shape_without_replacement(self):
@@ -163,7 +163,7 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
         batch_0 = fetch(3, batchifier_state)
         batch_1 = fetch(8, batchifier_state)
-        self.assertFalse(jnp.allclose(batch_0, batch_1)) # ensure batches are different
+        self.assertFalse(np.allclose(batch_0, batch_1)) # ensure batches are different
 
     def test_subsample_batchify_fetch_correct_shape_with_replacement(self):
         data = np.random.normal(size=(105, 3))

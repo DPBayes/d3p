@@ -27,7 +27,7 @@ class GradientManipulatorsTests(unittest.TestCase):
         self.assertEqual(len(expected), len(actual))
         for e, a in zip(expected, actual):
             self.assertEqual(e.shape, a.shape)
-            self.assertTrue(jnp.allclose(a, e))
+            self.assertTrue(np.allclose(a, e))
 
     def assert_gradient_direction(self, expected_gradient_parts, actual_gradient_parts):
         self.assertEqual(len(expected_gradient_parts), len(actual_gradient_parts))
@@ -37,7 +37,7 @@ class GradientManipulatorsTests(unittest.TestCase):
             self.assertEqual(g_expected.shape, g_actual.shape)
             g_expected_normalized = g_expected / norm_expected
             g_actual_normalized = g_actual / norm_actual
-            self.assertTrue(jnp.allclose(g_expected_normalized, g_actual_normalized))
+            self.assertTrue(np.allclose(g_expected_normalized, g_actual_normalized))
 
     def assert_clipping_results(self, gradient_parts, clipped_gradient_parts, clip_threshold):
         self.assert_gradient_direction(gradient_parts, clipped_gradient_parts)
@@ -56,7 +56,7 @@ class GradientManipulatorsTests(unittest.TestCase):
         expectedNorm = jnp.sqrt(
             jnp.sum(jnp.array(tuple(jnp.sum(jnp.square(x)) for x in self.gradient_parts)))
         )
-        self.assertTrue(jnp.allclose(expectedNorm, norm))
+        self.assertTrue(np.allclose(expectedNorm, norm))
 
     def test_full_norm_deals_with_empty_input_gracefully(self):
         norm = full_norm(None)
@@ -75,7 +75,7 @@ class GradientManipulatorsTests(unittest.TestCase):
         )
         norm = full_norm(gradient_tree)
         expectedNorm = 16.613247
-        self.assertTrue(jnp.allclose(expectedNorm, norm))
+        self.assertTrue(np.allclose(expectedNorm, norm))
 
     def test_clip_gradient_gives_input_when_threshold_equals_norm(self):
         clip_threshold = full_norm(self.gradient_parts)
@@ -105,7 +105,7 @@ class GradientManipulatorsTests(unittest.TestCase):
         normalized_gradient_parts = normalize_gradient(self.gradient_parts)
         self.assert_gradient_direction(self.gradient_parts, normalized_gradient_parts)
         normalized_norm = full_norm(normalized_gradient_parts)
-        self.assertTrue(jnp.allclose(1., normalized_norm))
+        self.assertTrue(np.allclose(1., normalized_norm))
 
 if __name__ == '__main__':
     unittest.main()

@@ -16,6 +16,7 @@ import unittest
 
 import jax.numpy as jnp
 import jax
+import numpy as np
 
 import numpyro.distributions as dist
 from numpyro.primitives import sample, param
@@ -36,8 +37,8 @@ class ModelSamplingTests(unittest.TestCase):
         self.assertEqual((d,), jnp.shape(samples['mu']))
         self.assertEqual((N, d), jnp.shape(samples['x']))
         # crude test that samples are from model distribution (mean is within 3 times stddev)
-        self.assertTrue(jnp.allclose(jnp.mean(samples['x'], axis=0), samples['mu'], atol=3/jnp.sqrt(N)))
-        self.assertTrue(jnp.allclose(samples['mu'], 0, atol=3.))
+        self.assertTrue(np.allclose(jnp.mean(samples['x'], axis=0), samples['mu'], atol=3/jnp.sqrt(N)))
+        self.assertTrue(np.allclose(samples['mu'], 0, atol=3.))
 
     def test_sample_prior_predictive_with_substitute(self):
         def model(N, d):
@@ -51,8 +52,8 @@ class ModelSamplingTests(unittest.TestCase):
         self.assertEqual((d,), jnp.shape(samples['mu']))
         self.assertEqual((N, d), jnp.shape(samples['x']))
         # crude test that samples are from model distribution (mean is within 3 times stddev)
-        self.assertTrue(jnp.allclose(jnp.mean(samples['x'], axis=0), mu_fixed, atol=3/jnp.sqrt(N)))
-        self.assertTrue(jnp.allclose(samples['mu'], mu_fixed))
+        self.assertTrue(np.allclose(jnp.mean(samples['x'], axis=0), mu_fixed, atol=3/jnp.sqrt(N)))
+        self.assertTrue(np.allclose(samples['mu'], mu_fixed))
 
     class DistWithIntermediate(dist.Distribution):
 
@@ -99,8 +100,8 @@ class ModelSamplingTests(unittest.TestCase):
         self.assertEqual((N_total, d), jnp.shape(samples['mu']))
         self.assertEqual((N_total, N, d), jnp.shape(samples['x']))
         # crude test that samples are from model distribution (mean is within 3 times stddev)
-        self.assertTrue(jnp.allclose(jnp.mean(samples['x'], axis=0), 0., atol=3/jnp.sqrt(N_total)))
-        self.assertTrue(jnp.allclose(jnp.mean(samples['mu'], axis=0), 0., atol=3/jnp.sqrt(N_total)))
+        self.assertTrue(np.allclose(jnp.mean(samples['x'], axis=0), 0., atol=3/jnp.sqrt(N_total)))
+        self.assertTrue(np.allclose(jnp.mean(samples['mu'], axis=0), 0., atol=3/jnp.sqrt(N_total)))
 
     def test_sample_multi_prior_predictive_without_intermediates(self):
         def model(N, d):
@@ -141,8 +142,8 @@ class ModelSamplingTests(unittest.TestCase):
         self.assertEqual((d,), jnp.shape(samples['mu']))
         self.assertEqual((N, d), jnp.shape(samples['x']))
         # crude test that samples are from model distribution (mean is within 3 times stddev)
-        self.assertTrue(jnp.allclose(jnp.mean(samples['x'], axis=0), samples['mu'], atol=3/jnp.sqrt(N)))
-        self.assertTrue(jnp.allclose(samples['mu'], mu_loc, atol=3.))
+        self.assertTrue(np.allclose(jnp.mean(samples['x'], axis=0), samples['mu'], atol=3/jnp.sqrt(N)))
+        self.assertTrue(np.allclose(samples['mu'], mu_loc, atol=3.))
 
 
     def test_sample_posterior_predictive_without_intermediates(self):
@@ -199,8 +200,8 @@ class ModelSamplingTests(unittest.TestCase):
         self.assertEqual((N_total, d), jnp.shape(samples['mu']))
         self.assertEqual((N_total, N, d), jnp.shape(samples['x']))
         # crude test that samples are from model distribution (mean is within 3 times stddev)
-        self.assertTrue(jnp.allclose(jnp.mean(samples['x'], axis=0), mu_loc, atol=3/jnp.sqrt(N_total)))
-        self.assertTrue(jnp.allclose(jnp.mean(samples['mu'], axis=0), mu_loc, atol=3/jnp.sqrt(N_total)))
+        self.assertTrue(np.allclose(jnp.mean(samples['x'], axis=0), mu_loc, atol=3/jnp.sqrt(N_total)))
+        self.assertTrue(np.allclose(jnp.mean(samples['mu'], axis=0), mu_loc, atol=3/jnp.sqrt(N_total)))
 
     def test_sample_multi_posterior_predictive_without_intermediates(self):
 

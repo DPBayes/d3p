@@ -71,11 +71,11 @@ class GaussianMixtureTests(unittest.TestCase):
         unq_counts = unq_counts / n_total
         # crude test that samples are from mixture (ratio of samples per component is plausible)
         pis_stddev = jnp.sqrt(pis*(1-pis)/n_total)
-        self.assertTrue(jnp.allclose(unq_counts, pis, atol=3*pis_stddev))
+        self.assertTrue(np.allclose(unq_counts, pis, atol=3*pis_stddev))
 
         for i in range(3):
             # crude test that samples are from mixture (mean is within 3 times stddev per component)
-            self.assertTrue(jnp.allclose(locs[i], jnp.mean(vals[zs == i], axis=0), atol=3*scales[i]/jnp.sqrt(n_total)))
+            self.assertTrue(np.allclose(locs[i], jnp.mean(vals[zs == i], axis=0), atol=3*scales[i]/jnp.sqrt(n_total)))
 
     def test_log_prob(self):
         locs = jnp.array([[-5., -5.], [0., 0.], [5., 5.]])
@@ -97,7 +97,7 @@ class GaussianMixtureTests(unittest.TestCase):
         actual = mix.log_prob(x)
 
         self.assertEqual((2,), jnp.shape(expected))
-        self.assertTrue(jnp.allclose(expected, actual), "expected {}, actual {}".format(expected, actual))
+        self.assertTrue(np.allclose(expected, actual), "expected {}, actual {}".format(expected, actual))
 
 
 if __name__ == '__main__':
