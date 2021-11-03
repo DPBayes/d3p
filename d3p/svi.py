@@ -202,6 +202,9 @@ class DPSVI(SVI):
         self._clipping_threshold = clipping_threshold
         self._dp_scale = dp_scale
 
+        if (not np.isfinite(clipping_threshold)):
+            raise ValueError("clipping_threshold must be finite!")
+
         total_loss = CombinedLoss(per_example_loss, combiner_fn=jnp.mean)
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
 
