@@ -1,6 +1,7 @@
 - master:
     - ! Renamed main package 'dppp' to 'd3p' !
     - Upgraded stable numpyro dependency to 0.8.0
+    - Change: DPSVI now errors if model has mutable state
     - Dropped support for Python 3.6
     - Fix: DPSVI perturbation was too large (scaled by minibatch size)
     - Fix: dputil.approximate_sigma could enter an infinite loop for some parameters

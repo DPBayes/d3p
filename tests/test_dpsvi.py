@@ -167,13 +167,16 @@ class DPSVITest(unittest.TestCase):
 
         from d3p.util import are_trees_close
 
+        dpsvi_params_at_init = dpsvi.get_params(dpsvi_state)
+        svi_params_at_init = svi.get_params(svi_state)
+
         self.assertTrue(
-            are_trees_close(dpsvi.get_params(dpsvi_state), svi.get_params(svi_state)),
+            are_trees_close(dpsvi_params_at_init, svi_params_at_init),
             "Failed to set up identical parameters for DPSVI and SVI."
         )
 
-        dpsvi_loss_at_init = loss.loss(self.rng, dpsvi.get_params(dpsvi_state), model, guide, x, num_obs_total=N)
-        svi_loss_at_init = loss.loss(self.rng, svi.get_params(svi_state), model, guide, x, num_obs_total=N)
+        dpsvi_loss_at_init = loss.loss(self.rng, dpsvi_params_at_init, model, guide, x, num_obs_total=N)
+        svi_loss_at_init = loss.loss(self.rng, svi_params_at_init, model, guide, x, num_obs_total=N)
 
         self.assertTrue(
             np.allclose(dpsvi_loss_at_init, svi_loss_at_init),

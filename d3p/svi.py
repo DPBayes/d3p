@@ -23,6 +23,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from numpyro.infer.svi import SVI
+from numpyro.infer.elbo import ELBO
 import numpyro.distributions as dist
 from numpyro.handlers import seed, trace, substitute, block
 
@@ -63,7 +64,7 @@ def get_observations_scale(model, model_args, model_kwargs, params):
 
 class CombinedLoss(object):
 
-    def __init__(self, per_example_loss, combiner_fn=jnp.mean):
+    def __init__(self, per_example_loss: ELBO, combiner_fn=jnp.mean):
         self.px_loss = per_example_loss
         self.combiner_fn = combiner_fn
 
@@ -233,7 +234,8 @@ class DPSVI(SVI):
     def init(self, rng_key, *args, **kwargs):
         svi_state = super().init(rng_key, *args, **kwargs)
 
-        params = self.optim.get_params(svi_state.optim_state)
+        if svi_state.mutable_state is not None:
+            raise RuntimeError("Mutable state is not supported.")
 
         model_kwargs = dict(kwargs)
         model_kwargs.update(self.static_kwargs)
@@ -242,6 +244,9 @@ class DPSVI(SVI):
             jnp.expand_dims(a[0], 0) for a in args
         ]
 
+        # note: DO use super().get_params here to get constrained/transformed params
+        #  for use in get_observations_scale (svi_state.optim_state holds unconstrained params)
+        params = super().get_params(svi_state)
         observation_scale = get_observations_scale(
             self.model, one_element_batch, model_kwargs, params
         )
@@ -261,6 +266,9 @@ class DPSVI(SVI):
             per parameter site (each site's gradients have shape (batch_size, *parameter_shape))
         """
         dp_svi_state, rng_key_step = self._split_rng_key(dp_svi_state)
+
+        # note: do NOT use self.get_params here; that applies constraint transforms for end-consumers of the parameters
+        # but internally we maintain and optimize on unconstrained params
         params = self.optim.get_params(dp_svi_state.optim_state)
 
         # we wrap the per-example loss (ELBO) to make it easier "digestable"
