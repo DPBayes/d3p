@@ -25,7 +25,6 @@ import numpy as np
 
 from numpyro.infer.svi import SVI, SVIState
 from numpyro.infer.elbo import ELBO
-import numpyro.distributions as dist
 from numpyro.handlers import seed, trace, substitute, block
 
 from d3p.util import example_count
@@ -394,8 +393,9 @@ class DPSVI(SVI):
         :returns: tuple consisting of the updated svi state.
         """
         optim_state = dp_svi_state.optim_state
-        optim_state = self.optim.update(batch_gradient, optim_state)
-        dp_svi_state = self._update_state_optim_state(dp_svi_state, optim_state)
+        new_optim_state = self.optim.update(batch_gradient, optim_state)
+
+        dp_svi_state = self._update_state_optim_state(dp_svi_state, new_optim_state)
         return dp_svi_state
 
     def update(self, svi_state, *args, **kwargs):
@@ -434,8 +434,8 @@ class DPSVI(SVI):
         """
         # we split to have the same seed as `update_fn` given an svi_state
         jax_rng_key = d3p.random.convert_to_jax_rng_key(d3p.random.split(svi_state.rng_key, 1)[0])
-        jax_svi_state = SVIState(svi_state.optim_state, jax_rng_key)
-        return super().evaluate(jax_svi_state, *args, **kwargs)
+        numpyro_svi_state = SVIState(svi_state.optim_state, None, jax_rng_key)
+        return super().evaluate(numpyro_svi_state, *args, **kwargs)
 
     def _validate_epochs_and_iter(self, num_epochs, num_iter, q):
         if num_epochs is not None:

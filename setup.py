@@ -35,7 +35,7 @@ setup(
     install_requires=[
         f'numpyro {_numpyro_version_lower_constraint}{_numpyro_version_optimistic_upper_constraint}',
         'fourier-accountant >= 0.12.0, < 1.0.0',
-        'jax-chacha-prng @ git+https://github.com/DPBayes/jax-chacha-prng.git@1.0.0-rc.2#egg=jax-chacha-prng',
+        'jax-chacha-prng @ git+https://github.com/DPBayes/jax-chacha-prng.git@1.0.0-rc.3#egg=jax-chacha-prng',
     ],
     extras_require={
         'examples': ['matplotlib'],

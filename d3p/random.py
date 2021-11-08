@@ -20,7 +20,7 @@ from functools import partial
 import secrets
 
 import chacha.random as ccrng
-from chacha.cipher import ChaChaKeySizeInBytes
+from chacha.defs import ChaChaKeySizeInBytes
 
 PRNGState = ccrng.RNGState
 split = ccrng.split
@@ -38,7 +38,7 @@ def PRNGKey(seed: Optional[Union[int, jnp.ndarray, int]] = None) -> PRNGState:
 
 def normal(key: ccrng.RNGState,
            shape: Sequence[int] = (),
-           dtype: np.dtype = jax.dtypes.float_) -> jnp.ndarray:
+           dtype: np.dtype = jnp.float_) -> jnp.ndarray:
     """Sample standard normal random values with given shape and float dtype
         derived from a cryptographically-secure pseudo-random number generator.
 

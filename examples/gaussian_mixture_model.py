@@ -167,7 +167,7 @@ def main(args):
     k = args.num_components
     d = args.dimensions
 
-    toy_data_rng = PRNGKey(1234)
+    toy_data_rng = jax.random.PRNGKey(1234)
 
     X_train, X_test, latent_vals = create_toy_data(toy_data_rng, N, d)
     train_init, train_fetch = subsample_batchify_data((X_train,), batch_size=args.batch_size)
