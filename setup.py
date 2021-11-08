@@ -22,7 +22,7 @@ _available_cuda_versions = ['101', '102', '110', '111']
 
 PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
 
-_numpyro_version_lower_constraint = '>=0.6.0'
+_numpyro_version_lower_constraint = '>=0.8.0'
 _numpyro_version_optimistic_upper_constraint = ', < 2.0.0'
 
 setup(

@@ -1,6 +1,6 @@
 - master:
     - ! Renamed main package 'dppp' to 'd3p' !
-    - Upgraded stable numpyro dependency to 0.8.0
+    - Upgraded stable numpyro dependency to 0.8.0, removed supported for earlier versions
     - Change: DPSVI now errors if model has mutable state
     - Dropped support for Python 3.6
     - Fix: DPSVI perturbation was too large (scaled by minibatch size)
