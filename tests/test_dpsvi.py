@@ -29,6 +29,7 @@ import numpy as np
 
 from d3p.svi import DPSVI, DPSVIState
 
+from tests.util import are_trees_close
 
 class DPSVITest(unittest.TestCase):
 
@@ -164,8 +165,6 @@ class DPSVITest(unittest.TestCase):
 
         dpsvi_state = dpsvi.init(self.rng, x, num_obs_total=N)
         svi_state = svi.init(self.rng, x, num_obs_total=N)
-
-        from d3p.util import are_trees_close
 
         dpsvi_params_at_init = dpsvi.get_params(dpsvi_state)
         svi_params_at_init = svi.get_params(svi_state)

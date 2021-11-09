@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""tests the implementations in the d3p.svi utils package
+"""tests the implementations in the d3p.utils package
 """
 import unittest
 
@@ -324,120 +324,6 @@ class UtilityTests(unittest.TestCase):
         expected = (1, 1)
         res = util.unvectorize_shape(a, 2)
         self.assertEqual(expected, res)
-
-    #### expand_shape ####
-
-    def test_expand_shape_input_has_expected_amount_of_dims(self):
-        a = jnp.array([[3, 4], [5, 6], [7, 8]])
-        expected = (3, 2)
-        res = util.expand_shape(a, 2)
-        self.assertEqual(expected, res)
-
-    def test_expand_shape_input_has_more_dims(self):
-        a = jnp.array([[3, 4], [5, 6], [7, 8]])
-        expected = (3, 2)
-        res = util.expand_shape(a, 1)
-        self.assertEqual(expected, res)
-
-    def test_expand_shape_input_has_one_missing_dim(self):
-        a = jnp.array([[3, 4], [5, 6], [7, 8]])
-        expected = (3, 2, 1)
-        res = util.expand_shape(a, 3)
-        self.assertEqual(expected, res)
-
-    def test_expand_shape_input_has_two_missing_dims(self):
-        a = jnp.array([[3, 4], [5, 6], [7, 8]])
-        expected = (3, 2, 1, 1)
-        res = util.expand_shape(a, 4)
-        self.assertEqual(expected, res)
-
-    def test_expand_shape_input_is_scalar_and_one_dim_expected(self):
-        a = 3
-        expected = (1,)
-        res = util.expand_shape(a, 1)
-        self.assertEqual(expected, res)
-
-    def test_expand_shape_input_is_scalar_and_two_dims_expected(self):
-        a = 3
-        expected = (1, 1)
-        res = util.expand_shape(a, 2)
-        self.assertEqual(expected, res)
-
-    #### do_trees_have_same_structure ####
-
-    def test_do_trees_have_same_structure(self):
-        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        b = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        self.assertTrue(util.do_trees_have_same_structure(a, b))
-
-    def test_do_trees_have_same_structure_empty(self):
-        a = ()
-        b = ()
-        self.assertTrue(util.do_trees_have_same_structure(a, b))
-
-    def test_do_trees_have_same_structure_different_shape_dimensions(self):
-        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        b = ((jnp.ones((8, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        self.assertTrue(util.do_trees_have_same_structure(a, b))
-
-    def test_do_trees_have_same_structure_different_shape_lengths(self):
-        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        b = ((jnp.ones((3)), jnp.ones((7, 6))), jnp.ones(7))
-        self.assertTrue(util.do_trees_have_same_structure(a, b))
-
-    def test_do_trees_have_same_structure_different_values(self):
-        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        b = ((jnp.zeros((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        self.assertTrue(util.do_trees_have_same_structure(a, b))
-
-    #### do_trees_have_same_shape ####
-
-    def test_do_trees_have_same_shape(self):
-        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        b = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        self.assertTrue(util.do_trees_have_same_shape(a, b))
-
-    def test_do_trees_have_same_shape_empty(self):
-        a = ()
-        b = ()
-        self.assertTrue(util.do_trees_have_same_shape(a, b))
-
-    def test_do_trees_have_same_shape_different_shape_dimensions(self):
-        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        b = ((jnp.ones((8, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        self.assertFalse(util.do_trees_have_same_shape(a, b))
-
-    def test_do_trees_have_same_shape_different_shape_lengths(self):
-        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        b = ((jnp.ones((3)), jnp.ones((7, 6))), jnp.ones(7))
-        self.assertFalse(util.do_trees_have_same_shape(a, b))
-
-    def test_do_trees_have_same_shape_different_values(self):
-        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        b = ((jnp.zeros((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        self.assertTrue(util.do_trees_have_same_shape(a, b))
-
-    #### are_trees_close ####
-
-    def test_are_trees_close(self):
-        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        b = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        self.assertTrue(util.are_trees_close(a, b))
-
-    def test_are_trees_close_empty(self):
-        a = ()
-        b = ()
-        self.assertTrue(util.are_trees_close(a, b))
-
-    def test_are_trees_close_different_shape_dimensions(self):
-        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        b = ((jnp.ones((8, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        self.assertFalse(util.are_trees_close(a, b))
-
-    def test_are_trees_close_different_shape_lengths(self):
-        a = ((jnp.ones((3, 4)), jnp.ones((7, 6, 3))), jnp.ones(7))
-        b = ((jnp.ones((3)), jnp.ones((7, 6))), jnp.ones(7))
-        self.assertFalse(util.are_trees_close(a, b))
 
     ### shuffle
 

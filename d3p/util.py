@@ -22,8 +22,7 @@ __all__ = [
     "map_over_secondary_dims", "has_shape", "is_array", "is_scalar",
     "is_integer", "is_int_scalar", "example_count",
     "unvectorize_shape", "unvectorize_shape_1d", "unvectorize_shape_2d",
-    "unvectorize_shape_3d", "expand_shape", "expand_shape_1d",
-    "expand_shape_2d", "expand_shape_3d"
+    "unvectorize_shape_3d"
 ]
 
 
@@ -213,101 +212,6 @@ def unvectorize_shape_3d(a):
     :param a: The vectorized/vmapped array.
     """
     return unvectorize_shape(a, 3)
-
-
-def expand_shape(a, d):
-    """Expands the shape of an array to a target dimensionality.
-
-    Accepts a target number of dimensions and returns a shape of at least that
-    length. If the original shape of the array is smaller than that, it will
-    be filled with dimensions of size 1 from the back. If the input array
-    already has as least as many dimensions as specified, its shape is returned
-    unmodified.
-
-    Similar to `jnp.shape(jnp.atleast_xd(a))` but guaranteed to fill the shape
-    from the back.
-
-    :param a: The vectorized/vmapped array.
-    :param d: The minimum number of dimensions included in the output shape.
-    """
-    shape = jnp.shape(a)
-    ndim = len(shape)
-    if ndim < d:
-        return shape + (1,) * (d - ndim)
-    else:
-        return shape
-
-
-def expand_shape_1d(a):
-    """Expands the shape of an array to a target dimensionality of at least 1.
-
-    If the original shape of the array is smaller than 1, it will
-    be filled with dimensions of size 1 from the back. If the input array
-    already has dimensionality 1 or greater, its shape is returned unmodified.
-
-    :param a: The vectorized/vmapped array.
-    """
-    return expand_shape(a, 1)
-
-
-def expand_shape_2d(a):
-    """Expands the shape of an array to a target dimensionality of at least 2.
-
-    If the original shape of the array is smaller than 2, it will
-    be filled with dimensions of size 1 from the back. If the input array
-    already has dimensionality 2 or greater, its shape is returned unmodified.
-
-    Similar to `jnp.shape(jnp.atleast_2d(a))` but fills the returned shape from
-    the back.
-
-    :param a: The vectorized/vmapped array.
-    """
-    return expand_shape(a, 2)
-
-
-def expand_shape_3d(a):
-    """Expands the shape of an array to a target dimensionality of at least 3.
-
-    If the original shape of the array is smaller than 3, it will
-    be filled with dimensions of size 1 from the back. If the input array
-    already has dimensionality 3 or greater, its shape is returned unmodified.
-
-    Similar to `jnp.shape(jnp.atleast_3d(a))`.
-
-    :param a: The vectorized/vmapped array.
-    """
-    return expand_shape(a, 3)
-
-
-def _and_reduce(iterable):
-    return reduce(lambda x, y: x and y, iterable, True)
-
-
-def do_trees_have_same_structure(a, b):
-    """Returns True if two jax trees have the same structure.
-    """
-    return jax.tree_structure(a) == jax.tree_structure(b)
-
-
-def do_trees_have_same_shape(a, b):
-    """Returns True if two jax trees have the same structure and the shapes of
-        all corresponding leaves are identical.
-    """
-    return do_trees_have_same_structure(a, b) and _and_reduce(
-        jnp.shape(x) == jnp.shape(y)
-        for x, y, in zip(jax.tree_leaves(a), jax.tree_leaves(b))
-    )
-
-
-def are_trees_close(a, b):
-    """Returns True if two jax trees have the same structure and all values are
-    close.
-    """
-    return do_trees_have_same_shape(a, b) and _and_reduce(
-        jnp.allclose(x, y)
-        for x, y, in zip(jax.tree_leaves(a), jax.tree_leaves(b))
-    )
-
 
 @partial(jax.jit, static_argnums=(2, 3))
 def sample_from_array(rng_key, x, n, axis):
