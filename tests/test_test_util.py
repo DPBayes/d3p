@@ -18,8 +18,6 @@
 import unittest
 
 import jax.numpy as jnp
-import jax
-import numpy as np
 
 from tests import util
 

@@ -18,18 +18,14 @@
 import unittest
 
 from functools import reduce
-from jax import tree_util
 
 import jax.numpy as jnp
 import jax
-from numpyro import distributions
-from numpyro.infer.elbo import Trace_ELBO
 from numpyro.optim import SGD
 import numpy as np
 
-from d3p.svi import DPSVI, DPSVIState
+from d3p.svi import DPSVI, DPSVIState, full_norm
 
-from tests.util import are_trees_close
 
 class DPSVITest(unittest.TestCase):
 
@@ -50,6 +46,32 @@ class DPSVITest(unittest.TestCase):
             None, None, optim, None, self.clipping_threshold,
             self.dp_scale, num_obs_total=self.num_obs_total
         )
+
+    def test_px_gradient_clipping(self):
+        svi_state = DPSVIState(None, self.rng, 0.8)
+
+        px_grads = ((
+            jnp.array([[1., 0.], [0., 0.]]) @ jnp.ones((2, 10)),
+            jnp.array([[0., 0.], [0., 1.]]) @ jnp.ones((2, 2)),
+        ))
+
+        px_norms = jax.vmap(full_norm)(px_grads)
+        expected_px_norms = np.array([np.sqrt(10), np.sqrt(2)])
+        self.assertTrue(np.allclose(px_norms, expected_px_norms))
+
+        new_svi_state, clipped_px_grads, px_grads_tree_def = \
+            self.svi._clip_gradients(svi_state, px_grads)
+
+        self.assertEqual(new_svi_state, svi_state)
+        self.assertEqual(px_grads_tree_def, self.tree_def)
+
+        clipped_px_norms = jax.vmap(full_norm)(clipped_px_grads)
+        expected_clipped_px_norms = np.array([2., np.sqrt(2)/svi_state.observation_scale])
+        self.assertTrue(np.allclose(clipped_px_norms, expected_clipped_px_norms))
+
+        _, clipped_grad = self.svi._combine_gradients(clipped_px_grads, jnp.ones((2,)))
+        clipped_norm = full_norm(clipped_grad)
+        self.assertTrue(clipped_norm < self.clipping_threshold)
 
     def test_px_gradient_aggregation(self):
         np.random.seed(0)
@@ -132,79 +154,6 @@ class DPSVITest(unittest.TestCase):
         noise_sites = jax.tree_leaves(grads)
 
         self.assertFalse(np.allclose(noise_sites[0], noise_sites[1]))
-
-    def test_dpsvi_same_as_svi_if_zero_noise_batch(self):
-        self._internal_test_dpsvi_same_as_svi_if_zero_noise(10)
-
-    def test_dpsvi_same_as_svi_if_zero_noise_single(self):
-        self._internal_test_dpsvi_same_as_svi_if_zero_noise(1)
-
-    def _internal_test_dpsvi_same_as_svi_if_zero_noise(self, batch_size):
-        """ Tests that DPSVI behavior is identical to numpyro SVI if DP noise is zero
-            and with so-large-as-to-be-irrelevant clipping threshold.
-        """
-        from numpyro import sample, plate
-        from numpyro.infer.autoguide import AutoDiagonalNormal
-        from numpyro.infer import SVI
-
-        def model(X, num_obs_total):
-            batch_size = len(X)
-            mu = sample("mu", distributions.Normal(0, 1))
-            with plate("batch", num_obs_total, batch_size):
-                sample("x", distributions.Normal(mu, 1), obs=X)
-
-        guide = AutoDiagonalNormal(model)
-        optim = SGD(1e-8)
-        loss = Trace_ELBO()
-        dpsvi = DPSVI(model, guide, optim, loss, clipping_threshold=1000, dp_scale=0.)
-        svi = SVI(model, guide, optim, loss)
-
-        np.random.seed(0)
-        x = np.random.randn(batch_size) + 3.
-        N = 100
-
-        dpsvi_state = dpsvi.init(self.rng, x, num_obs_total=N)
-        svi_state = svi.init(self.rng, x, num_obs_total=N)
-
-        dpsvi_params_at_init = dpsvi.get_params(dpsvi_state)
-        svi_params_at_init = svi.get_params(svi_state)
-
-        self.assertTrue(
-            are_trees_close(dpsvi_params_at_init, svi_params_at_init),
-            "Failed to set up identical parameters for DPSVI and SVI."
-        )
-
-        dpsvi_loss_at_init = loss.loss(self.rng, dpsvi_params_at_init, model, guide, x, num_obs_total=N)
-        svi_loss_at_init = loss.loss(self.rng, svi_params_at_init, model, guide, x, num_obs_total=N)
-
-        self.assertTrue(
-            np.allclose(dpsvi_loss_at_init, svi_loss_at_init),
-            "Initial loss differs between DPSVI and SVI."
-        )
-
-        new_dpsvi_state, dpsvi_loss = dpsvi.update(dpsvi_state, x, num_obs_total=N)
-        new_svi_state, svi_loss = svi.update(svi_state, x, num_obs_total=N)
-
-        loss_ratio = dpsvi_loss / svi_loss
-
-        self.assertTrue(
-            np.abs(loss_ratio - 1) <= 0.5,
-            "Loss after update differs between DPSVI and SVI."
-        )
-
-        dpsvi_params_diff = np.array(tree_util.tree_leaves(dpsvi.get_params(new_dpsvi_state))) -\
-            np.array(tree_util.tree_leaves(dpsvi.get_params(dpsvi_state)))
-
-        svi_params_diff = np.array(tree_util.tree_leaves(svi.get_params(new_svi_state))) -\
-            np.array(tree_util.tree_leaves(svi.get_params(svi_state)))
-
-        param_diff_ratio = dpsvi_params_diff / svi_params_diff
-        param_diff_ratio = np.where(np.isclose(param_diff_ratio, 0.), 1., param_diff_ratio)
-
-        self.assertTrue(
-            np.all(np.abs(np.array(tree_util.tree_leaves(param_diff_ratio)) - 1) <= 0.5 ),
-            "Parameters after update differ between DPSVI and SVI (i.e., gradients were different)."
-        )
 
 
 if __name__ == '__main__':

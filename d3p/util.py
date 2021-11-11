@@ -213,6 +213,7 @@ def unvectorize_shape_3d(a):
     """
     return unvectorize_shape(a, 3)
 
+
 @partial(jax.jit, static_argnums=(2, 3))
 def sample_from_array(rng_key, x, n, axis):
     """ Samples n elements from a given array without replacement.

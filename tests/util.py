@@ -15,8 +15,7 @@
 
 import jax
 import jax.numpy as jnp
-import numpy as np
-from functools import reduce, wraps, partial
+from functools import reduce
 
 
 def _and_reduce(iterable):

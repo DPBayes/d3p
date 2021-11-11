@@ -27,7 +27,7 @@ from numpyro.infer.elbo import ELBO
 import numpyro.distributions as dist
 from numpyro.handlers import seed, trace, substitute, block
 
-from d3p.util import map_over_secondary_dims, example_count
+from d3p.util import example_count
 
 from fourier_accountant.compute_eps import get_epsilon_R
 from fourier_accountant.compute_delta import get_delta_R
@@ -335,28 +335,10 @@ class DPSVI(SVI):
             the batch and a jax tree of batch gradients per parameter site.
         """
 
-        # get total loss and loss combiner vjp func
-        loss_val, loss_combine_vjp = jax.vjp(self.loss.combiner_fn, px_loss)
+        assert(self.loss.combiner_fn == jnp.mean)
 
-        # loss_combine_vjp gives us the backward differentiation function
-        #   from combined loss to per-example losses. we use it to get the
-        #   (1xbatch_size) Jacobian and construct a function that takes
-        #   per-example gradients and left-multiplies them with that jacobian
-        #   to get the final combined gradient
-        loss_jacobian = jnp.reshape(loss_combine_vjp(jnp.array(1.))[0], (1, -1))
-
-        def loss_vjp(px_grads):
-            return jnp.matmul(loss_jacobian, px_grads)
-
-        # we map the loss combination vjp func over all secondary dimensions
-        #   of gradient sites. This is necessary since some gradient
-        #   sites might be matrices in itself (e.g., for NN layers), so a stack
-        #   of those would be 3-dimensional and not admittable to jnp.matmul
-        loss_vjp = map_over_secondary_dims(loss_vjp)
-
-        # combine gradients for all parameters in the gradient jax tree
-        #   according to the loss combination vjp func
-        grads_list = tuple(map(loss_vjp, px_grads_list))
+        loss_val = jnp.mean(px_loss, axis=0)
+        grads_list = tuple(map(lambda px_grad_site: jnp.mean(px_grad_site, axis=0), px_grads_list))
 
         return loss_val, grads_list
 
