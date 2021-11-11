@@ -53,7 +53,7 @@ from d3p.modelling import sample_multi_posterior_predictive
 from d3p.minibatch import split_batchify_data, subsample_batchify_data
 from d3p.dputil import approximate_sigma
 from d3p.util import is_int_scalar
-import d3p.random
+import d3p.random as rng_suite
 
 from datasets import MNIST, load_dataset
 
@@ -216,8 +216,8 @@ def main(args):
     unsafe_rng = jax.random.PRNGKey(0)
     unsafe_rng, binarize_rng, batchifier_rng = jax.random.split(unsafe_rng, 3)
 
-    dpsvi_rng = d3p.random.PRNGKey()
-    dpsvi_rng, svi_init_rng, batchifier_rng = d3p.random.split(dpsvi_rng, 3)
+    dpsvi_rng = rng_suite.PRNGKey()
+    dpsvi_rng, svi_init_rng, batchifier_rng = rng_suite.split(dpsvi_rng, 3)
     _, batchifier_state = train_init(rng_key=batchifier_rng)
     sample_batch = train_fetch(0, batchifier_state, binarize_rng)[0]
     svi_state = svi.init(svi_init_rng, sample_batch)
@@ -316,14 +316,14 @@ def main(args):
     # main training loop
     for i in range(args.num_epochs):
         t_start = time.time()
-        dpsvi_rng, data_fetch_rng = d3p.random.split(dpsvi_rng, 2)
+        dpsvi_rng, data_fetch_rng = rng_suite.split(dpsvi_rng, 2)
         unsafe_rng, train_binarize_rng = jax.random.split(unsafe_rng, 2)
         num_train_batches, train_batchifier_state, = train_init(rng_key=data_fetch_rng)
         svi_state, train_loss = epoch_train(
             svi_state, train_batchifier_state, num_train_batches, train_binarize_rng
         )
 
-        dpsvi_rng, test_fetch_rng = d3p.random.split(dpsvi_rng, 2)
+        dpsvi_rng, test_fetch_rng = rng_suite.split(dpsvi_rng, 2)
         unsafe_rng, test_binarize_rng, recons_rng = jax.random.split(unsafe_rng, 3)
         num_test_batches, test_batchifier_state = test_init(rng_key=test_fetch_rng)
         test_loss = eval_test(svi_state, test_batchifier_state, num_test_batches, test_binarize_rng)

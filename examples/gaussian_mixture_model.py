@@ -45,7 +45,7 @@ from d3p.svi import DPSVI
 from d3p.modelling import sample_prior_predictive
 from d3p.minibatch import split_batchify_data, subsample_batchify_data
 from d3p.gmm import GaussianMixture
-import d3p.random
+import d3p.random as rng_suite
 
 def model(k, obs=None, num_obs_total=None, d=None):
     # this is our model function using the GaussianMixture distribution
@@ -190,8 +190,8 @@ def main(args):
         dp_scale=0.01,  clipping_threshold=20., num_obs_total=args.num_samples
     )
 
-    dpsvi_rng = d3p.random.PRNGKey(0)
-    dpsvi_rng, svi_init_rng, fetch_rng = d3p.random.split(dpsvi_rng, 3)
+    dpsvi_rng = rng_suite.PRNGKey(0)
+    dpsvi_rng, svi_init_rng, fetch_rng = rng_suite.split(dpsvi_rng, 3)
     _, batchifier_state = train_init(fetch_rng)
     batch = train_fetch(0, batchifier_state)
     svi_state = svi.init(svi_init_rng, *batch)
@@ -222,7 +222,7 @@ def main(args):
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
-        dpsvi_rng, data_fetch_rng = d3p.random.split(dpsvi_rng, 2)
+        dpsvi_rng, data_fetch_rng = rng_suite.split(dpsvi_rng, 2)
 
         num_train_batches, train_batchifier_state = train_init(rng_key=data_fetch_rng)
         svi_state, train_loss = epoch_train(
@@ -232,7 +232,7 @@ def main(args):
         t_end = time.time()
 
         if i % 100 == 0:
-            dpsvi_rng, test_fetch_rng = d3p.random.split(dpsvi_rng, 2)
+            dpsvi_rng, test_fetch_rng = rng_suite.split(dpsvi_rng, 2)
             num_test_batches, test_batchifier_state = test_init(rng_key=test_fetch_rng)
             test_loss = eval_test(
                 svi_state, test_batchifier_state, num_test_batches

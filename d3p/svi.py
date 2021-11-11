@@ -28,15 +28,17 @@ from numpyro.infer.elbo import ELBO
 from numpyro.handlers import seed, trace, substitute, block
 
 from d3p.util import example_count
-from d3p.random import normal as dpnormal
-import d3p.random
+import d3p.random as strong_rng
 
 from fourier_accountant.compute_eps import get_epsilon_R
 from fourier_accountant.compute_delta import get_delta_R
 
+PRNGState = Any
+
+
 class DPSVIState(NamedTuple):
     optim_state: Any
-    rng_key: d3p.random.PRNGState
+    rng_key: PRNGState
     observation_scale: float
 
 
@@ -200,11 +202,13 @@ class DPSVI(SVI):
             per_example_loss,
             clipping_threshold,
             dp_scale,
+            rng_suite=strong_rng,
             **static_kwargs
         ):  # noqa: E121, E125
 
         self._clipping_threshold = clipping_threshold
         self._dp_scale = dp_scale
+        self._rng_suite = rng_suite
 
         if (not np.isfinite(clipping_threshold)):
             raise ValueError("clipping_threshold must be finite!")
@@ -213,7 +217,7 @@ class DPSVI(SVI):
         super().__init__(model, guide, optim, total_loss, **static_kwargs)
 
     @staticmethod
-    def _update_state_rng(dp_svi_state: DPSVIState, rng_key: d3p.random.PRNGState) -> DPSVIState:
+    def _update_state_rng(dp_svi_state: DPSVIState, rng_key: PRNGState) -> DPSVIState:
         return DPSVIState(
             dp_svi_state.optim_state,
             rng_key,
@@ -228,15 +232,13 @@ class DPSVI(SVI):
             dp_svi_state.observation_scale
         )
 
-    @staticmethod
-    def _split_rng_key(dp_svi_state: DPSVIState) -> Tuple[DPSVIState, d3p.random.PRNGState] :
+    def _split_rng_key(self, dp_svi_state: DPSVIState) -> Tuple[DPSVIState, PRNGState]:
         rng_key = dp_svi_state.rng_key
-        rng_key, split_key = d3p.random.split(rng_key)
+        rng_key, split_key = self._rng_suite.split(rng_key)
         return DPSVI._update_state_rng(dp_svi_state, rng_key), split_key
 
     def init(self, rng_key, *args, **kwargs):
-        rng_key, jax_rng_key = d3p.random.split(rng_key)
-        jax_rng_key = d3p.random.convert_to_jax_rng_key(jax_rng_key)
+        jax_rng_key = self._rng_suite.convert_to_jax_rng_key(rng_key)
         svi_state = super().init(jax_rng_key, *args, **kwargs)
 
         if svi_state.mutable_state is not None:
@@ -271,10 +273,12 @@ class DPSVI(SVI):
             per parameter site (each site's gradients have shape (batch_size, *parameter_shape))
         """
         dp_svi_state, rng_key_step = self._split_rng_key(dp_svi_state)
-        jax_rng_key = d3p.random.convert_to_jax_rng_key(rng_key_step)
+        jax_rng_key = self._rng_suite.convert_to_jax_rng_key(rng_key_step)
 
         # note: do NOT use self.get_params here; that applies constraint transforms for end-consumers of the parameters
         # but internally we maintain and optimize on unconstrained params
+        # (they are constrained in the loss function so that we get the correct
+        # effect of the constraint transformation in the gradient)
         params = self.optim.get_params(dp_svi_state.optim_state)
 
         # we wrap the per-example loss (ELBO) to make it easier "digestable"
@@ -363,7 +367,7 @@ class DPSVI(SVI):
 
         perturbation_scale = self._dp_scale * self._clipping_threshold / batch_size
         perturbed_grads_list = self.perturbation_function(
-            perturbation_rng, gradient_list, perturbation_scale
+            self._rng_suite, perturbation_rng, gradient_list, perturbation_scale
         )
 
         # we multiply each parameter site by obs_scale to revert the downscaling
@@ -433,7 +437,7 @@ class DPSVI(SVI):
             (held within `svi_state.optim_state`).
         """
         # we split to have the same seed as `update_fn` given an svi_state
-        jax_rng_key = d3p.random.convert_to_jax_rng_key(d3p.random.split(svi_state.rng_key, 1)[0])
+        jax_rng_key = self._rng_suite.convert_to_jax_rng_key(self._rng_suite.split(svi_state.rng_key, 1)[0])
         numpyro_svi_state = SVIState(svi_state.optim_state, None, jax_rng_key)
         return super().evaluate(numpyro_svi_state, *args, **kwargs)
 
@@ -458,8 +462,8 @@ class DPSVI(SVI):
 
     @staticmethod
     def perturbation_function(
-            rng: d3p.random.PRNGState, values: Sequence[jnp.ndarray], perturbation_scale: float
-        ) -> Sequence[jnp.ndarray]:
+            rng_suite, rng: PRNGState, values: Sequence[jnp.ndarray], perturbation_scale: float
+        ) -> Sequence[jnp.ndarray]:  # noqa: E121, E125
         """ Perturbs given values using Gaussian noise.
 
         `values` can be a list of array-like objects. Each value is independently
@@ -471,11 +475,12 @@ class DPSVI(SVI):
         :param perturbation_scale: The scale/standard deviation of the noise
             distribution.
         """
-        def perturb_one(a: jnp.ndarray, site_rng: d3p.random.PRNGState) -> jnp.ndarray:
-            noise = dpnormal(site_rng, a.shape) * perturbation_scale
+        def perturb_one(a: jnp.ndarray, site_rng: PRNGState) -> jnp.ndarray:
+            """ perturbs a single gradient site """
+            noise = rng_suite.normal(site_rng, a.shape) * perturbation_scale
             return a + noise
 
-        per_site_rngs = d3p.random.split(rng, len(values))
+        per_site_rngs = rng_suite.split(rng, len(values))
         values = tuple(
             perturb_one(grad, site_rng)
             for grad, site_rng in zip(values, per_site_rngs)

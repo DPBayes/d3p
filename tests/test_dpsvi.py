@@ -23,15 +23,20 @@ import jax.numpy as jnp
 import jax
 from numpyro.optim import SGD
 import d3p.random
+import d3p.random.debug
 import numpy as np
 
 from d3p.svi import DPSVI, DPSVIState, full_norm
 
 
-class DPSVITest(unittest.TestCase):
+class DPSVITestBase:
+
+    def get_rng_suite(self):
+        raise NotImplementedError()
 
     def setUp(self):
-        self.rng = d3p.random.PRNGKey(9782346)
+        self.rng_suite = self.get_rng_suite()
+        self.rng = self.rng_suite.PRNGKey(9782346)
         self.batch_size = 10
         self.num_obs_total = 100
         self.px_grads = ((
@@ -45,7 +50,8 @@ class DPSVITest(unittest.TestCase):
         optim = SGD(1.)
         self.svi = DPSVI(
             None, None, optim, None, self.clipping_threshold,
-            self.dp_scale, num_obs_total=self.num_obs_total
+            self.dp_scale, num_obs_total=self.num_obs_total,
+            rng_suite=self.rng_suite
         )
 
     def test_px_gradient_clipping(self):
@@ -155,6 +161,18 @@ class DPSVITest(unittest.TestCase):
         noise_sites = jax.tree_leaves(grads)
 
         self.assertFalse(np.allclose(noise_sites[0], noise_sites[1]))
+
+
+class DPSVIStrongRNGTests(DPSVITestBase, unittest.TestCase):
+
+    def get_rng_suite(self):
+        return d3p.random
+
+
+class DPSVIDebugRNGTests(DPSVITestBase, unittest.TestCase):
+
+    def get_rng_suite(self):
+        return d3p.random.debug
 
 
 if __name__ == '__main__':

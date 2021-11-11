@@ -32,7 +32,7 @@ import time
 import jax
 import jax.numpy as jnp
 from jax import jit, lax
-import d3p.random
+import d3p.random as rng_suite
 
 import numpyro
 import numpyro.distributions as dist
@@ -122,18 +122,18 @@ def main(args):
         toy_data_rng, args.num_samples, args.dimensions
     )
 
-    train_init, train_fetch = subsample_batchify_data(train_data, batch_size=args.batch_size)
-    test_init, test_fetch = split_batchify_data(test_data, batch_size=args.batch_size)
+    train_init, train_fetch = subsample_batchify_data(train_data, batch_size=args.batch_size, rng_suite=rng_suite)
+    test_init, test_fetch = split_batchify_data(test_data, batch_size=args.batch_size, rng_suite=rng_suite)
 
     ## Init optimizer and training algorithms
     optimizer = optimizers.Adam(args.learning_rate)
 
     svi = DPSVI(model, guide, optimizer, ELBO(),
-        dp_scale=0.01, clipping_threshold=20., num_obs_total=args.num_samples
+        dp_scale=0.01, clipping_threshold=20., num_obs_total=args.num_samples, rng_suite=rng_suite
     )
 
-    dpsvi_rng = d3p.random.PRNGKey(0)
-    dpsvi_rng, svi_init_rng, data_fetch_rng = d3p.random.split(dpsvi_rng, 3)
+    dpsvi_rng = rng_suite.PRNGKey(0)
+    dpsvi_rng, svi_init_rng, data_fetch_rng = rng_suite.split(dpsvi_rng, 3)
     _, batchifier_state = train_init(rng_key=data_fetch_rng)
     sample_batch = train_fetch(0, batchifier_state)
     svi_state = svi.init(svi_init_rng, *sample_batch)
@@ -175,7 +175,7 @@ def main(args):
 	## Train model
     for i in range(args.num_epochs):
         t_start = time.time()
-        dpsvi_rng, data_fetch_rng = d3p.random.split(dpsvi_rng, 2)
+        dpsvi_rng, data_fetch_rng = rng_suite.split(dpsvi_rng, 2)
 
         num_train_batches, train_batchifier_state = train_init(rng_key=data_fetch_rng)
         svi_state, train_loss = epoch_train(
@@ -185,8 +185,8 @@ def main(args):
         t_end = time.time()
 
         if (i % (args.num_epochs//10)) == 0:
-            dpsvi_rng, test_rng, test_fetch_rng = d3p.random.split(dpsvi_rng, 3)
-            test_rng = d3p.random.convert_to_jax_rng_key(test_rng)
+            dpsvi_rng, test_rng, test_fetch_rng = rng_suite.split(dpsvi_rng, 3)
+            test_rng = rng_suite.convert_to_jax_rng_key(test_rng)
             num_test_batches, test_batchifier_state = test_init(rng_key=test_fetch_rng)
             test_loss, test_acc = eval_test(
                 svi_state, test_batchifier_state, num_test_batches, test_rng

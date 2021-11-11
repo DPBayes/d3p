@@ -28,6 +28,7 @@ fold_in = ccrng.fold_in
 random_bits = ccrng.random_bits
 uniform = ccrng.uniform
 
+
 def PRNGKey(seed: Optional[Union[int, jnp.ndarray, int]] = None) -> PRNGState:
     if seed is None:
         nonopt_seed = secrets.token_bytes(ChaChaKeySizeInBytes)
@@ -63,12 +64,14 @@ def normal(key: ccrng.RNGState,
     dtype = jax.dtypes.canonicalize_dtype(dtype)
     return _normal(key, shape, dtype)
 
+
 @partial(jax.jit, static_argnums=(1, 2))
 def _normal(key, shape, dtype) -> jnp.ndarray:
     lo = np.nextafter(np.array(-1., dtype), 0., dtype=dtype)
     hi = np.array(1., dtype)
     u = ccrng.uniform(key, shape, dtype, lo, hi)
     return np.array(np.sqrt(2), dtype) * jax.lax.erf_inv(u)
+
 
 def convert_to_jax_rng_key(chacha_rng_key: ccrng.RNGState) -> jnp.array:
     return ccrng.random_bits(chacha_rng_key, 32, (2,))

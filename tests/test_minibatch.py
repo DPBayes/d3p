@@ -24,15 +24,16 @@ import numpy as np
 
 from d3p.minibatch import split_batchify_data, subsample_batchify_data
 import d3p.random
+import d3p.random.debug
 
 
-class SplitBatchifierTests(unittest.TestCase):
+class SplitBatchifierTestsBase:
 
     def test_split_batchify_init(self):
         data = jnp.arange(0, 100)
-        init, _ = split_batchify_data((data,), 10)
+        init, _ = split_batchify_data((data,), 10, rng_suite=self.rng_suite)
 
-        rng_key = d3p.random.PRNGKey(0)
+        rng_key = self.rng_suite.PRNGKey(0)
         num_batches, batchifier_state = init(rng_key)
 
         self.assertEqual(10, num_batches)
@@ -41,9 +42,9 @@ class SplitBatchifierTests(unittest.TestCase):
 
     def test_split_batchify_init_non_divisiable_size(self):
         data = jnp.arange(0, 105)
-        init, _ = split_batchify_data((data,), 10)
+        init, _ = split_batchify_data((data,), 10, rng_suite=self.rng_suite)
 
-        rng_key = d3p.random.PRNGKey(0)
+        rng_key = self.rng_suite.PRNGKey(0)
         num_batches, batchifier_state = init(rng_key)
 
         self.assertEqual(10, num_batches)
@@ -51,7 +52,7 @@ class SplitBatchifierTests(unittest.TestCase):
 
     def test_split_batchify_fetch(self):
         data = np.arange(105) + 100
-        _, fetch = split_batchify_data((data,), 10)
+        _, fetch = split_batchify_data((data,), 10, rng_suite=self.rng_suite)
         batchifier_state = jax.random.permutation(jax.random.PRNGKey(0), jnp.arange(0, 105))
         num_batches = 10
 
@@ -73,8 +74,8 @@ class SplitBatchifierTests(unittest.TestCase):
 
     def test_split_batchify_batches_differ(self):
         data = np.arange(105) + 100
-        init, fetch = split_batchify_data((data,), 10)
-        _, batchifier_state = init(d3p.random.PRNGKey(10))
+        init, fetch = split_batchify_data((data,), 10, rng_suite=self.rng_suite)
+        _, batchifier_state = init(self.rng_suite.PRNGKey(10))
 
         batch_0 = fetch(3, batchifier_state)
         batch_1 = fetch(8, batchifier_state)
@@ -82,7 +83,7 @@ class SplitBatchifierTests(unittest.TestCase):
 
     def test_split_batchify_fetch_correct_shape(self):
         data = np.random.normal(size=(105, 3))
-        _, fetch = split_batchify_data((data,), 10)
+        _, fetch = split_batchify_data((data,), 10, rng_suite=self.rng_suite)
         batchifier_state = jax.random.permutation(jax.random.PRNGKey(0), jnp.arange(0, 105))
 
         batch = fetch(6, batchifier_state)
@@ -90,13 +91,25 @@ class SplitBatchifierTests(unittest.TestCase):
         self.assertEqual((10, 3), jnp.shape(batch))
 
 
-class SubsamplingBatchifierTests(unittest.TestCase):
+class SplitBatchifierStrongRNGTests(SplitBatchifierTestsBase, unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.rng_suite = d3p.random
+
+
+class SplitBatchifierDebugRNGTests(SplitBatchifierTestsBase, unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.rng_suite = d3p.random.debug
+
+
+class SubsamplingBatchifierTestsBase:
 
     def test_subsample_batchify_init(self):
         data = jnp.arange(0, 100)
-        init, _ = subsample_batchify_data((data,), 10)
+        init, _ = subsample_batchify_data((data,), 10, rng_suite=self.rng_suite)
 
-        rng_key = d3p.random.PRNGKey(0)
+        rng_key = self.rng_suite.PRNGKey(0)
         num_batches, batchifier_state = init(rng_key)
 
         self.assertEqual(10, num_batches)
@@ -104,9 +117,9 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
     def test_subsample_batchify_init_non_divisiable_size(self):
         data = jnp.arange(0, 105)
-        init, _ = subsample_batchify_data((data,), 10)
+        init, _ = subsample_batchify_data((data,), 10, rng_suite=self.rng_suite)
 
-        rng_key = d3p.random.PRNGKey(0)
+        rng_key = self.rng_suite.PRNGKey(0)
         num_batches, batchifier_state = init(rng_key)
 
         self.assertEqual(10, num_batches)
@@ -114,8 +127,8 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
     def test_subsample_batchify_fetch_without_replacement(self):
         data = np.arange(105) + 100
-        _, fetch = subsample_batchify_data((data,), 10)
-        batchifier_state = d3p.random.PRNGKey(2)
+        _, fetch = subsample_batchify_data((data,), 10, rng_suite=self.rng_suite)
+        batchifier_state = self.rng_suite.PRNGKey(2)
         num_batches = 10
 
         for i in range(num_batches):
@@ -129,8 +142,8 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
     def test_subsample_batchify_fetch_batches_differ_without_replacement(self):
         data = np.arange(105) + 100
-        _, fetch = subsample_batchify_data((data,), 10)
-        batchifier_state = d3p.random.PRNGKey(2)
+        _, fetch = subsample_batchify_data((data,), 10, rng_suite=self.rng_suite)
+        batchifier_state = self.rng_suite.PRNGKey(2)
         # num_batches = 10
 
         batch_0 = fetch(3, batchifier_state)
@@ -139,8 +152,8 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
     def test_subsample_batchify_fetch_correct_shape_without_replacement(self):
         data = np.random.normal(size=(105, 3))
-        _, fetch = subsample_batchify_data((data,), 10)
-        batchifier_state = d3p.random.PRNGKey(2)
+        _, fetch = subsample_batchify_data((data,), 10, rng_suite=self.rng_suite)
+        batchifier_state = self.rng_suite.PRNGKey(2)
         # num_batches = 10
 
         batch = fetch(6, batchifier_state)
@@ -149,8 +162,8 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
     def test_subsample_batchify_fetch_with_replacement(self):
         data = np.arange(105) + 100
-        _, fetch = subsample_batchify_data((data,), 10, with_replacement=True)
-        batchifier_state = d3p.random.PRNGKey(2)
+        _, fetch = subsample_batchify_data((data,), 10, with_replacement=True, rng_suite=self.rng_suite)
+        batchifier_state = self.rng_suite.PRNGKey(2)
         num_batches = 10
 
         for i in range(num_batches):
@@ -161,8 +174,8 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
     def test_subsample_batchify_fetch_batches_differ_with_replacement(self):
         data = np.arange(105) + 100
-        _, fetch = subsample_batchify_data((data,), 10, with_replacement=True)
-        batchifier_state = d3p.random.PRNGKey(2)
+        _, fetch = subsample_batchify_data((data,), 10, with_replacement=True, rng_suite=self.rng_suite)
+        batchifier_state = self.rng_suite.PRNGKey(2)
         # num_batches = 10
 
         batch_0 = fetch(3, batchifier_state)
@@ -171,13 +184,25 @@ class SubsamplingBatchifierTests(unittest.TestCase):
 
     def test_subsample_batchify_fetch_correct_shape_with_replacement(self):
         data = np.random.normal(size=(105, 3))
-        _, fetch = subsample_batchify_data((data,), 10, with_replacement=True)
-        batchifier_state = d3p.random.PRNGKey(2)
+        _, fetch = subsample_batchify_data((data,), 10, with_replacement=True, rng_suite=self.rng_suite)
+        batchifier_state = self.rng_suite.PRNGKey(2)
         # num_batches = 10
 
         batch = fetch(6, batchifier_state)
         batch = batch[0]
         self.assertEqual((10, 3), jnp.shape(batch))
+
+
+class SubsamplingBatchifierStrongRNGTests(SubsamplingBatchifierTestsBase, unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.rng_suite = d3p.random
+
+
+class SubsamplingBatchifierDebugRNGTests(SubsamplingBatchifierTestsBase, unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.rng_suite = d3p.random.debug
 
 
 if __name__ == '__main__':

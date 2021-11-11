@@ -15,8 +15,7 @@
 
 import jax
 import jax.numpy as jnp
-import numpy as np
-from d3p.random import random_bits
+import d3p.random as strong_rng
 from functools import reduce, wraps, partial
 
 __all__ = [
@@ -215,8 +214,8 @@ def unvectorize_shape_3d(a):
     return unvectorize_shape(a, 3)
 
 
-@partial(jax.jit, static_argnums=(2, 3))
-def sample_from_array(rng_key, x, n, axis):
+@partial(jax.jit, static_argnums=(2, 3, 4))
+def sample_from_array(rng_key, x, n, axis, rng_suite=strong_rng):
     """ Samples n elements from array along given axis without replacement.
 
     Implementation notes:
@@ -239,7 +238,7 @@ def sample_from_array(rng_key, x, n, axis):
     # to increase the amount of random bits we use in the process;
     # Using the same multiplicative constant in Philox seems to be mostly motivated
     # from a performance perspective.
-    round_constants = random_bits(
+    round_constants = rng_suite.random_bits(
         rng_key, 32, (num_feistel_rounds, 3)
     )
 
@@ -280,7 +279,7 @@ def sample_from_array(rng_key, x, n, axis):
         (scramble_for_upper).
          """
         def loop_body(j, x):
-            x_upper  = jnp.right_shift(x, bits_lower)
+            x_upper = jnp.right_shift(x, bits_lower)
             x_lower = jnp.bitwise_and(x, mask_lower)
 
             y_upper = jnp.bitwise_and(scramble_for_upper(x_upper, round_constants[j]), mask_lower)
@@ -298,7 +297,11 @@ def sample_from_array(rng_key, x, n, axis):
         """ Permutation over {0, ..., capacity-1}. """
 
         position = permute_idx_power_of_two_capacity(position)
-        position = jax.lax.while_loop(lambda position: position >= capacity, permute_idx_power_of_two_capacity, position)
+        position = jax.lax.while_loop(
+            lambda position: position >= capacity,
+            permute_idx_power_of_two_capacity,
+            position
+        )
 
         return position
 

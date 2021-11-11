@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""tests the implementations in the d3p.utils package
+"""tests the implementations in the d3p.util package
 """
 import unittest
 
