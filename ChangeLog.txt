@@ -1,4 +1,4 @@
-- 1.0.0-rc.1:
+- 1.0.0:
     - ! Renamed main package 'dppp' to 'd3p' !
     - Upgraded stable numpyro dependency to 0.8.0, removed supported for earlier versions
     - Change: DPSVI now errors if model has mutable state

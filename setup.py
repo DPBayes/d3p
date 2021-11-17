@@ -45,6 +45,7 @@ setup(
         ],
         'tpu': f"numpyro[tpu]",
         'cpu': f"numpyro[cpu]",
+        'cuda': "numpyro[cuda]", # after numpyro v0.8.0 (and some time after jax v0.2.13)
         **{
             f'cuda{version}': [f'numpyro[cuda{version}]']
             for version in _available_cuda_versions
