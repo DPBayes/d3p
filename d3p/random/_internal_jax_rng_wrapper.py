@@ -13,25 +13,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import warnings
-from d3p.random._internal_jax_rng_wrapper import KeyRandomnessInBytes, PRNGState, PRNGKey,\
-    convert_to_jax_rng_key, split, fold_in, random_bits, uniform, normal
+import jax.numpy as jnp
+from typing import Optional
+import secrets
 
-warnings.warn(
-    "d3p is currently using a non-cryptographic random number generator!\n"
-    "This is intended for debugging only! Please make sure to switch to using d3p.random to"
-    " ensure privacy guarantees hold!",
-    stacklevel=2
-)
+import jax.random as jrng
+import jax
 
-__all__ = [
-    KeyRandomnessInBytes,
-    PRNGState,
-    PRNGKey,
-    convert_to_jax_rng_key,
-    split,
-    fold_in,
-    random_bits,
-    uniform,
-    normal
-]
+PRNGState = jrng.KeyArray
+split = jrng.split
+fold_in = jrng.fold_in
+random_bits = jax._src.random._random_bits
+uniform = jrng.uniform
+normal = jrng.normal
+
+KeyRandomnessInBytes = 4
+
+
+def PRNGKey(seed: Optional[int] = None) -> PRNGState:
+    if seed is None:
+        nonopt_seed = int.from_bytes(secrets.token_bytes(KeyRandomnessInBytes), 'big', signed=False)
+    else:
+        nonopt_seed = seed
+    return jrng.PRNGKey(nonopt_seed)
+
+
+def convert_to_jax_rng_key(chacha_rng_key: PRNGState) -> jnp.array:
+    return chacha_rng_key

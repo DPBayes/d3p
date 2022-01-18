@@ -29,6 +29,7 @@ from numpyro.handlers import seed, trace, substitute, block
 
 from d3p.util import example_count
 import d3p.random as strong_rng
+import d3p.random._internal_jax_rng_wrapper as jax_rng_wrapper
 
 from fourier_accountant.compute_eps import get_epsilon_R
 from fourier_accountant.compute_delta import get_delta_R
@@ -135,7 +136,7 @@ def clip_gradient(list_of_gradient_parts, c, rescale_factor=1.):
     :return: Clipped gradients given in the same format/layout/shape as
         list_of_gradient_parts.
     """
-    if c == 0.:
+    if c <= 0.:
         raise ValueError("The clipping threshold must be greater than 0.")
     norm = full_norm(list_of_gradient_parts) * rescale_factor  # norm of rescale_factor * grad
     normalization_constant = 1./jnp.maximum(1., norm/c)
@@ -161,7 +162,7 @@ def get_gradients_clipping_function(c, rescale_factor):
 
 class DPSVI(SVI):
     """
-    Differentially-Private Stochastic Variational Inference given a per-example
+    Differentially-Private Stochastic Variational Inference [1] given a per-example
     loss objective and a gradient clipping threshold.
 
     This is identical to numpyro's `SVI` but adds differential privacy by
@@ -180,6 +181,16 @@ class DPSVI(SVI):
     (use e.g. the `numpyro.scale` or the convenience `minibatch` context managers
     in the `model` and `guide` functions where appropriate).
 
+    The user can also provide `pre_clipping_noise_scale` to apply additional
+    perturbation before clipping the per-example gradients to mitigate
+    potential clipping-induced bias, as proposed in [2].
+
+    [1]: Jälkö, Dikmen, Honkela: Differentially Private Variational Inference for Non-conjugate Models
+        https://arxiv.org/abs/1610.08749
+
+    [2]: Chen, Wu, Hong: Understanding Gradient Clipping in Private SGD: A Geometric Perspective
+        https://arxiv.org/abs/2006.15429
+
     :param model: Python callable with Pyro primitives for the model.
     :param guide: Python callable with Pyro primitives for the guide
         (recognition network).
@@ -190,6 +201,10 @@ class DPSVI(SVI):
         of each per-example gradient is clipped.
     :param dp_scale: Scale parameter for the Gaussian mechanism applied to
         each dimension of the batch gradients.
+    :param rng_suite:
+    :param pre_clipping_noise_scale: Scale parameter for Gaussian noise applied
+        to per-example gradients BEFORE clipping to mitigate clipping-induced bias.
+        Leave as None to perform no pre-clipping perturbation.
     :param static_kwargs: static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     """
@@ -203,10 +218,12 @@ class DPSVI(SVI):
             clipping_threshold,
             dp_scale,
             rng_suite=strong_rng,
+            pre_clipping_noise_scale=None,
             **static_kwargs
         ):  # noqa: E121, E125
 
         self._clipping_threshold = clipping_threshold
+        self._pre_clipping_noise_scale = pre_clipping_noise_scale
         self._dp_scale = dp_scale
         self._rng_suite = rng_suite
 
@@ -300,7 +317,7 @@ class DPSVI(SVI):
 
         return dp_svi_state, per_example_loss, per_example_grads
 
-    def _clip_gradients(self, dp_svi_state, px_gradients):
+    def _clip_gradients(self, dp_svi_state, px_gradients, batch_size):
         """ Clips each per-example gradient.
 
         This is the second step in a full update iteration.
@@ -308,6 +325,7 @@ class DPSVI(SVI):
         :param dp_svi_state: The current state of the DPSVI algorithm.
         :param px_gradients: Jax tuple tree of per-example gradients as returned
             by `_compute_per_example_gradients`
+        :param batch_size: Size of the training batch.
         :returns: tuple consisting of the updated svi state, a list of
             transformed per-example gradients per site and the jax tree structure
             definition. The list is a flattened representation of the jax tree,
@@ -316,10 +334,24 @@ class DPSVI(SVI):
         obs_scale = dp_svi_state.observation_scale
 
         # px_gradients is a jax tree of jax jnp.arrays of shape
-        #   [batch_size, (param_shape)] for each parameter. flatten it out!
+        #   [batch_size, *param_shape] for each parameter. flatten it out!
         px_grads_list, px_grads_tree_def = jax.tree_flatten(
             px_gradients
         )
+
+        # if a pre-clipping noise scale was provided we will perturb the per-example gradients
+        #  before clipping.
+        if self._pre_clipping_noise_scale is not None:
+            dp_svi_state, clip_perturbation_rng = self._split_rng_key(dp_svi_state)
+            clip_perturbation_jax_rng = self._rng_suite.convert_to_jax_rng_key(clip_perturbation_rng)
+            clip_perturbation_jax_rng = jax_rng_wrapper.split(clip_perturbation_jax_rng, batch_size)
+
+            def px_pre_clipping_fn(px_grad, rng):
+                return self.perturbation_function(
+                    jax_rng_wrapper, rng, px_grad, self._pre_clipping_noise_scale
+                )
+
+            px_grads_list = jax.vmap(px_pre_clipping_fn, in_axes=0)(px_grads_list, clip_perturbation_jax_rng)
 
         # scale the gradients by 1/obs_scale then clip them:
         #  in the loss, every single examples loss contribution is scaled by obs_scale
@@ -410,7 +442,7 @@ class DPSVI(SVI):
 
         svi_state, per_example_grads, tree_def = \
             self._clip_gradients(
-                svi_state, per_example_grads
+                svi_state, per_example_grads, batch_size
             )
 
         loss, gradient = self._combine_gradients(

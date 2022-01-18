@@ -47,9 +47,9 @@ class DPSVITestBase:
         self.px_loss = jnp.arange(self.batch_size, dtype=jnp.float32)
         self.dp_scale = 1.
         self.clipping_threshold = 2.
-        optim = SGD(1.)
+        self.optim = SGD(1.)
         self.svi = DPSVI(
-            None, None, optim, None, self.clipping_threshold,
+            None, None, self.optim, None, self.clipping_threshold,
             self.dp_scale, num_obs_total=self.num_obs_total,
             rng_suite=self.rng_suite
         )
@@ -57,9 +57,10 @@ class DPSVITestBase:
     def test_px_gradient_clipping(self):
         svi_state = DPSVIState(None, self.rng, 0.8)
 
+        batch_size = 2
         px_grads = ((
-            jnp.array([[1., 0.], [0., 0.]]) @ jnp.ones((2, 10)),
-            jnp.array([[0., 0.], [0., 1.]]) @ jnp.ones((2, 2)),
+            jnp.array([[1., 0.], [0., 0.]]) @ jnp.ones((batch_size, 10)),
+            jnp.array([[0., 0.], [0., 1.]]) @ jnp.ones((batch_size, 2)),
         ))
 
         px_norms = jax.vmap(full_norm)(px_grads)
@@ -67,7 +68,7 @@ class DPSVITestBase:
         self.assertTrue(np.allclose(px_norms, expected_px_norms))
 
         new_svi_state, clipped_px_grads, px_grads_tree_def = \
-            self.svi._clip_gradients(svi_state, px_grads)
+            self.svi._clip_gradients(svi_state, px_grads, batch_size)
 
         self.assertEqual(new_svi_state, svi_state)
         self.assertEqual(px_grads_tree_def, self.tree_def)
@@ -80,9 +81,47 @@ class DPSVITestBase:
         clipped_norm = full_norm(clipped_grad)
         self.assertTrue(clipped_norm < self.clipping_threshold)
 
+    def test_px_gradient_clipping_with_bias_mitigating_perturbation(self):
+        clipping_threshold = 3
+        svi = DPSVI(
+            None, None, self.optim, None, clipping_threshold,
+            self.dp_scale, num_obs_total=self.num_obs_total,
+            rng_suite=self.rng_suite,
+            pre_clipping_noise_scale=0.1
+        )
+        svi_state = DPSVIState(None, self.rng, 0.8)
+
+        batch_size = 2
+        px_grads = ((
+            jnp.array([[1., 0.], [0., 0.]]) @ jnp.ones((batch_size, 20)),
+            jnp.array([[0., 0.], [0., 1.]]) @ jnp.ones((batch_size, 2)),
+        ))
+
+        px_norms = jax.vmap(full_norm)(px_grads)
+        expected_px_norms = np.array([np.sqrt(20), np.sqrt(2)])
+        self.assertTrue(np.allclose(px_norms, expected_px_norms))
+
+        new_svi_state, clipped_px_grads, px_grads_tree_def = \
+            svi._clip_gradients(svi_state, px_grads, batch_size)
+
+        self.assertEqual(new_svi_state.optim_state, svi_state.optim_state)
+        self.assertEqual(new_svi_state.observation_scale, svi_state.observation_scale)
+        self.assertFalse(np.all(new_svi_state.rng_key == svi_state.rng_key))
+        self.assertEqual(px_grads_tree_def, self.tree_def)
+
+        clipped_px_norms = jax.vmap(full_norm)(clipped_px_grads)
+        expected_clipped_px_norms = np.array([clipping_threshold, np.sqrt(2)/svi_state.observation_scale])
+        self.assertTrue(np.allclose(expected_clipped_px_norms[0], clipped_px_norms[0]))
+        self.assertFalse(np.allclose(expected_clipped_px_norms[1], clipped_px_norms[1]))
+        self.assertTrue(np.abs(expected_clipped_px_norms[1] - clipped_px_norms[1]) < 0.6)
+
+        _, clipped_grad = self.svi._combine_gradients(clipped_px_grads, jnp.ones((2,)))
+        clipped_norm = full_norm(clipped_grad)
+        self.assertTrue(clipped_norm < self.clipping_threshold)
+
     def test_px_gradient_aggregation(self):
         np.random.seed(0)
-        px_grads_list, _testMethodDoc = jax.tree_flatten((
+        px_grads_list, _ = jax.tree_flatten((
             np.random.normal(1, 1, size=(self.batch_size, 10000)),
             np.random.normal(1, 1, size=(self.batch_size, 10000))
         ))
