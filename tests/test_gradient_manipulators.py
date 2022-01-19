@@ -45,9 +45,8 @@ class GradientManipulatorsTests(unittest.TestCase):
         self.assert_gradient_direction(gradient_parts, clipped_gradient_parts)
         norm_clipped = full_norm(clipped_gradient_parts)
         norm = full_norm(gradient_parts)
-        self.assertLessEqual(norm_clipped, clip_threshold)
-        self.assertLessEqual(norm_clipped, norm)
-        self.assertLessEqual(norm_clipped, norm)
+        self.assertLessEqual(norm_clipped, clip_threshold + 1e-6)
+        self.assertLessEqual(norm_clipped, norm + 1e-6)
 
     def setUp(self):
         np.random.seed(0)
