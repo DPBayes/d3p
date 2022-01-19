@@ -266,6 +266,7 @@ class DPSVI(SVI):
         This is the first step in a full update iteration.
 
         :param dp_svi_state: The current state of the DPSVI algorithm.
+        :param step_rng_key: RNG key for this step.
         :param args: Arguments to the loss function.
         :param kwargs: All keyword arguments to model or guide.
         :returns: tuple consisting of the updated DPSVI state, an array of loss
@@ -357,6 +358,7 @@ class DPSVI(SVI):
         This is the fourth step of a full update iteration.
 
         :param dp_svi_state: The current state of the DPSVI algorithm.
+        :param step_rng_key: RNG key for this step.
         :param gradient_list: List of batch gradients for each parameter site
         :param batch_size: Size of the training batch.
         :param px_grads_tree_def: Jax tree definition for the gradient tree as
