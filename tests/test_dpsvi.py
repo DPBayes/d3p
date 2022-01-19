@@ -68,9 +68,9 @@ class DPSVITestBase:
         self.assertTrue(np.allclose(px_norms, expected_px_norms))
 
         new_svi_state, clipped_px_grads, px_grads_tree_def = \
-            self.svi._clip_gradients(svi_state, px_grads, batch_size)
+            self.svi._clip_gradients(svi_state, self.rng, px_grads, batch_size)
 
-        self.assertEqual(new_svi_state, svi_state)
+        self.assertIs(new_svi_state, svi_state)
         self.assertEqual(px_grads_tree_def, self.tree_def)
 
         clipped_px_norms = jax.vmap(full_norm)(clipped_px_grads)
@@ -102,11 +102,9 @@ class DPSVITestBase:
         self.assertTrue(np.allclose(px_norms, expected_px_norms))
 
         new_svi_state, clipped_px_grads, px_grads_tree_def = \
-            svi._clip_gradients(svi_state, px_grads, batch_size)
+            svi._clip_gradients(svi_state, self.rng, px_grads, batch_size)
 
-        self.assertEqual(new_svi_state.optim_state, svi_state.optim_state)
-        self.assertEqual(new_svi_state.observation_scale, svi_state.observation_scale)
-        self.assertFalse(np.all(new_svi_state.rng_key == svi_state.rng_key))
+        self.assertIs(new_svi_state.optim_state, svi_state.optim_state)
         self.assertEqual(px_grads_tree_def, self.tree_def)
 
         clipped_px_norms = jax.vmap(full_norm)(clipped_px_grads)

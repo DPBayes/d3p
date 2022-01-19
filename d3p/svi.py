@@ -317,12 +317,13 @@ class DPSVI(SVI):
 
         return dp_svi_state, per_example_loss, per_example_grads
 
-    def _clip_gradients(self, dp_svi_state, px_gradients, batch_size):
+    def _clip_gradients(self, dp_svi_state, step_rng_key, px_gradients, batch_size):
         """ Clips each per-example gradient.
 
         This is the second step in a full update iteration.
 
         :param dp_svi_state: The current state of the DPSVI algorithm.
+        :param step_rng_key: RNG key for this step.
         :param px_gradients: Jax tuple tree of per-example gradients as returned
             by `_compute_per_example_gradients`
         :param batch_size: Size of the training batch.
@@ -342,7 +343,7 @@ class DPSVI(SVI):
         # if a pre-clipping noise scale was provided we will perturb the per-example gradients
         #  before clipping.
         if self._pre_clipping_noise_scale is not None:
-            dp_svi_state, clip_perturbation_rng = self._split_rng_key(dp_svi_state)
+            clip_perturbation_rng = step_rng_key
             clip_perturbation_jax_rng = self._rng_suite.convert_to_jax_rng_key(clip_perturbation_rng)
             clip_perturbation_jax_rng = jax_rng_wrapper.split(clip_perturbation_jax_rng, batch_size)
 
@@ -435,8 +436,8 @@ class DPSVI(SVI):
 
     def update(self, svi_state, *args, **kwargs):
 
-        svi_state, update_rng_keys = self._split_rng_key(svi_state, 2)
-        gradient_rng_key, perturbation_rng_key = update_rng_keys
+        svi_state, update_rng_keys = self._split_rng_key(svi_state, 3)
+        gradient_rng_key, perturbation_rng_key, pre_clipping_rng_key = update_rng_keys
 
         svi_state, per_example_loss, per_example_grads = \
             self._compute_per_example_gradients(svi_state, gradient_rng_key, *args, **kwargs)
@@ -445,7 +446,7 @@ class DPSVI(SVI):
 
         svi_state, per_example_grads, tree_def = \
             self._clip_gradients(
-                svi_state, per_example_grads, batch_size
+                svi_state, pre_clipping_rng_key, per_example_grads, batch_size
             )
 
         loss, gradient = self._combine_gradients(
