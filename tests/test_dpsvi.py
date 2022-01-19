@@ -144,11 +144,10 @@ class DPSVITestBase:
 
         new_svi_state, grads = \
             self.svi._perturb_and_reassemble_gradients(
-                svi_state, grads_list, self.batch_size, self.tree_def
+                svi_state, self.rng, grads_list, self.batch_size, self.tree_def
             )
 
         self.assertIs(svi_state.optim_state, new_svi_state.optim_state)
-        self.assertFalse(np.allclose(svi_state.rng_key, new_svi_state.rng_key))
         self.assertEqual(self.tree_def, jax.tree_structure(grads))
 
         expected_std = (self.dp_scale * self.clipping_threshold / self.batch_size) * svi_state.observation_scale
@@ -160,20 +159,21 @@ class DPSVITestBase:
             )
             self.assertTrue(np.allclose(0., jnp.mean(site), atol=1e-2))
 
-    def test_dp_noise_perturbation_not_deterministic_over_calls(self):
+    def test_dp_noise_perturbation_not_deterministic_over_rngs(self):
         """ verifies that different randomness is used in subsequent calls """
         svi_state = DPSVIState(None, self.rng, .3)
+        first_rng, second_rng = self.rng_suite.split(self.rng)
 
         grads_list = [jnp.mean(px_grads, axis=0) for px_grads in self.px_grads_list]
 
         new_svi_state, first_grads = \
             self.svi._perturb_and_reassemble_gradients(
-                svi_state, grads_list, self.batch_size, self.tree_def
+                svi_state, first_rng, grads_list, self.batch_size, self.tree_def
             )
 
         _, second_grads = \
             self.svi._perturb_and_reassemble_gradients(
-                new_svi_state, grads_list, self.batch_size, self.tree_def
+                new_svi_state, second_rng, grads_list, self.batch_size, self.tree_def
             )
 
         some_gradient_noise_is_equal = reduce(
@@ -194,7 +194,7 @@ class DPSVITestBase:
 
         _, grads = \
             self.svi._perturb_and_reassemble_gradients(
-                svi_state, grads_list, self.batch_size, self.tree_def
+                svi_state, self.rng, grads_list, self.batch_size, self.tree_def
             )
 
         noise_sites = jax.tree_leaves(grads)

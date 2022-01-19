@@ -41,7 +41,8 @@ setup(
         'examples': ['matplotlib'],
         'compatible-dependencies': [
             "numpyro[cpu] == 0.8.0",
-            "jax==0.2.22"
+            "jax==0.2.27",
+            "jaxlib==0.1.75"
         ],
         'tpu': f"numpyro[tpu]",
         'cpu': f"numpyro[cpu]",

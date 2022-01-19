@@ -249,10 +249,10 @@ class DPSVI(SVI):
             dp_svi_state.observation_scale
         )
 
-    def _split_rng_key(self, dp_svi_state: DPSVIState) -> Tuple[DPSVIState, PRNGState]:
+    def _split_rng_key(self, dp_svi_state: DPSVIState, count: int=1) -> Tuple[DPSVIState, Sequence[PRNGState]]:
         rng_key = dp_svi_state.rng_key
-        rng_key, split_key = self._rng_suite.split(rng_key)
-        return DPSVI._update_state_rng(dp_svi_state, rng_key), split_key
+        split_keys = self._rng_suite.split(rng_key, count+1)
+        return DPSVI._update_state_rng(dp_svi_state, split_keys[0]), split_keys[1:]
 
     def init(self, rng_key, *args, **kwargs):
         jax_rng_key = self._rng_suite.convert_to_jax_rng_key(rng_key)
@@ -277,20 +277,20 @@ class DPSVI(SVI):
 
         return DPSVIState(svi_state.optim_state, rng_key, observation_scale)
 
-    def _compute_per_example_gradients(self, dp_svi_state, *args, **kwargs):
+    def _compute_per_example_gradients(self, dp_svi_state, step_rng_key, *args, **kwargs):
         """ Computes the raw per-example gradients of the model.
 
         This is the first step in a full update iteration.
 
         :param dp_svi_state: The current state of the DPSVI algorithm.
+        :param step_rng_key: RNG key for this step.
         :param args: Arguments to the loss function.
         :param kwargs: All keyword arguments to model or guide.
         :returns: tuple consisting of the updated DPSVI state, an array of loss
             values per example, and a jax tuple tree of per-example gradients
             per parameter site (each site's gradients have shape (batch_size, *parameter_shape))
         """
-        dp_svi_state, rng_key_step = self._split_rng_key(dp_svi_state)
-        jax_rng_key = self._rng_suite.convert_to_jax_rng_key(rng_key_step)
+        jax_rng_key = self._rng_suite.convert_to_jax_rng_key(step_rng_key)
 
         # note: do NOT use self.get_params here; that applies constraint transforms for end-consumers of the parameters
         # but internally we maintain and optimize on unconstrained params
@@ -384,22 +384,21 @@ class DPSVI(SVI):
 
         return loss_val, grads_list
 
-    def _perturb_and_reassemble_gradients(self, dp_svi_state, gradient_list, batch_size, px_grads_tree_def):
+    def _perturb_and_reassemble_gradients(self, dp_svi_state, step_rng_key, gradient_list, batch_size, px_grads_tree_def):
         """ Perturbs the gradients using Gaussian noise and reassembles the gradient tree.
 
         This is the fourth step of a full update iteration.
 
         :param dp_svi_state: The current state of the DPSVI algorithm.
+        :param step_rng_key: RNG key for this step.
         :param gradient_list: List of batch gradients for each parameter site
         :param batch_size: Size of the training batch.
         :param px_grads_tree_def: Jax tree definition for the gradient tree as
             returned by `_apply_per_example_gradient_transformations`.
         """
-        dp_svi_state, perturbation_rng = self._split_rng_key(dp_svi_state)
-
         perturbation_scale = self._dp_scale * self._clipping_threshold / batch_size
         perturbed_grads_list = self.perturbation_function(
-            self._rng_suite, perturbation_rng, gradient_list, perturbation_scale
+            self._rng_suite, step_rng_key, gradient_list, perturbation_scale
         )
 
         # we multiply each parameter site by obs_scale to revert the downscaling
@@ -435,8 +434,12 @@ class DPSVI(SVI):
         return dp_svi_state
 
     def update(self, svi_state, *args, **kwargs):
+
+        svi_state, update_rng_keys = self._split_rng_key(svi_state, 2)
+        gradient_rng_key, perturbation_rng_key = update_rng_keys
+
         svi_state, per_example_loss, per_example_grads = \
-            self._compute_per_example_gradients(svi_state, *args, **kwargs)
+            self._compute_per_example_gradients(svi_state, gradient_rng_key, *args, **kwargs)
 
         batch_size = example_count(per_example_loss)
 
@@ -450,7 +453,7 @@ class DPSVI(SVI):
         )
 
         svi_state, gradient = self._perturb_and_reassemble_gradients(
-            svi_state, gradient, batch_size, tree_def
+            svi_state, perturbation_rng_key, gradient, batch_size, tree_def
         )
 
         svi_state = self._apply_gradient(svi_state, gradient)
