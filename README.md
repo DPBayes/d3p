@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.com/DPBayes/d3p.svg?branch=master)](https://travis-ci.com/DPBayes/d3p)
 
-d3p is an implementation of the differentially private variational inference algorithm [1] for [NumPyro](https://github.com/pyro-ppl/numpyro), using [JAX](https://github.com/google/jax/) for auto-differentiation and fast execution on CPU and GPU.
+d3p is an implementation of the differentially private variational inference algorithm [2] for [NumPyro](https://github.com/pyro-ppl/numpyro), using [JAX](https://github.com/google/jax/) for auto-differentiation and fast execution on CPU and GPU.
 
 ## Current Status
 
@@ -80,8 +80,16 @@ owning the copyright of software contributed by their employees).
 
 We thank the NVIDIA AI Technology Center Finland for their contribution of GPU performance benchmarking and optimisation.
 
-## References
+## References and Citing
 
-1. J. Jälkö, O. Dikmen, A. Honkela:
-Differentially Private Variational Inference for Non-conjugate Models
-https://arxiv.org/abs/1610.08749
+When using d3p, please cite the following papers:
+
+1. L. Prediger, N. Loppi, S. Kaski, A. Honkela.
+d3p - A Python Package for Differentially-Private Probabilistic Programming
+*arXiv preprint 2103.11648*
+Link: https://arxiv.org/abs/2103.11648
+
+1. J. Jälkö, O. Dikmen, A. Honkela. Differentially Private Variational Inference for Non-conjugate Models
+In *Uncertainty in Artificial Intelligence 2017 Proceedings of the 33rd Conference, UAI 2017.*
+The Association for Uncertainty in Artificial Intelligence, 2017.
+Link: http://auai.org/uai2017/proceedings/papers/152.pdf
