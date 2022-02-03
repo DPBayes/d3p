@@ -26,14 +26,13 @@ def adadp(
         alpha_min=0.9,
         alpha_max=1.1
     ):  # noqa: E121, E125
-    """Constructs optimizer triple for the adaptive learning rate optimizer of
+    """ Constructs optimizer triple for the adaptive learning rate optimizer of
     Koskela and Honkela.
 
     Reference:
     A. Koskela, A. Honkela: Learning Rate Adaptation for Federated and
     Differentially Private Learning (https://arxiv.org/abs/1809.03832).
 
-    Args:
     :param step_size: The initial step size.
     :param tol: Error tolerance for the discretized gradient steps.
     :param stability_check: Settings to True rejects some updates in favor of a more

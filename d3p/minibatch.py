@@ -25,7 +25,7 @@ __all__ = [
 
 
 def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=False, rng_suite=strong_rng):
-    """Returns functions to fetch (randomized) batches of a given dataset by
+    """ Returns functions to fetch (randomized) batches of a given dataset by
     uniformly random subsampling.
 
     As `split_batchify_data`, takes the common epoch viewpoint to training,
@@ -113,7 +113,7 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
 
 
 def split_batchify_data(dataset, batch_size=None, q=None, rng_suite=strong_rng):
-    """Returns functions to fetch (randomized) batches of a given data set by
+    """ Returns functions to fetch (randomized) batches of a given data set by
     shuffling and splitting the data set.
 
     Takes the common epoch viewpoint to training, where an epoch is understood

@@ -44,8 +44,7 @@ class GaussianMixture(dists.Distribution):
     reparametrized_params = ["mixture_probabilities", "locs", "scales"]
 
     def __init__(self, locs, scales, mixture_probabilities, validate_args=None):
-        """
-        Initializes the Gaussian mixture model with given probabilities/weights, locations
+        """ Initializes the Gaussian mixture model with given probabilities/weights, locations
         and scales for all components. Parameters are given in form of arrays and must
         have identical length along the first dimension, which corresponds to the
         individual mixture components.

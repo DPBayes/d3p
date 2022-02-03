@@ -27,8 +27,7 @@ __all__ = [
 
 
 def map_over_secondary_dims(f):
-    """
-    Maps a function taking a over all secondary axes of an array.
+    """ Maps a function taking a over all secondary axes of an array.
 
     f is assumed to take a vector of shape (a,) and output a scalar.
     Returns a function f_mapped that for an input T with shape
@@ -67,7 +66,7 @@ def map_over_secondary_dims(f):
 
 
 def example_count(a):
-    """Returns the amount of examples/observations in an array interpreted
+    """ Returns the amount of examples/observations in an array interpreted
     as multi-example data set.
 
     :param a: The data set from which to extract the example count.
@@ -79,7 +78,7 @@ def example_count(a):
 
 
 def has_shape(a):
-    """Returns True if the input has the shape attribute, indicating that it is
+    """ Returns True if the input has the shape attribute, indicating that it is
     of a numpy array type.
 
     Note that this also applies to scalars in jax.jit decorated functions.
@@ -92,7 +91,7 @@ def has_shape(a):
 
 
 def is_array(a):
-    """Returns True if the input has is determined to be an array, i.e.,
+    """ Returns True if the input has is determined to be an array, i.e.,
     has more than 0 dimensions and a shape attribute.
 
     Note that this does not apply to scalars in jax.jit decorated functions.
@@ -103,7 +102,7 @@ def is_array(a):
 
 
 def is_scalar(x):
-    """Returns True if the input can be interpreted as a scalar.
+    """ Returns True if the input can be interpreted as a scalar.
 
     This fits actual scalars as well as arrays that contain only one element
     (regardless of their number of dimensions). I.e., a (jax.)numpy array
@@ -119,7 +118,7 @@ def is_scalar(x):
 
 
 def is_integer(x):
-    """Returns True if the input value(s) (a scalar or (jax.)numpy array) have integer type.
+    """ Returns True if the input value(s) (a scalar or (jax.)numpy array) have integer type.
 
     Works with jax.jit.
 
@@ -129,7 +128,7 @@ def is_integer(x):
 
 
 def is_int_scalar(x):
-    """Returns True if the input can be interepreted as a scalar integer value.
+    """ Returns True if the input can be interepreted as a scalar integer value.
 
     Works with jax.jit.
 
@@ -139,7 +138,7 @@ def is_int_scalar(x):
 
 
 def normalize(x):
-    """Normalizes a vector, i.e., returns a vector with unit lengths pointing
+    """ Normalizes a vector, i.e., returns a vector with unit lengths pointing
     in the same direction.
 
     :param x: The vector to normalize.
@@ -148,7 +147,7 @@ def normalize(x):
 
 
 def unvectorize_shape(a, d):
-    """Undoes the stripping of leading dimensions in the shape of a vectorized/
+    """ Undoes the stripping of leading dimensions in the shape of a vectorized/
     vmapped array.
 
     Accepts a target number of dimensions and returns a shape of at least that
@@ -172,7 +171,7 @@ def unvectorize_shape(a, d):
 
 
 def unvectorize_shape_1d(a):
-    """Undoes the stripping of leading dimensions in the shape of a vectorized/
+    """ Undoes the stripping of leading dimensions in the shape of a vectorized/
     vmapped 1-dimensional array.
 
     If the shape of the vectorized array is smaller than 1, it will
@@ -185,7 +184,7 @@ def unvectorize_shape_1d(a):
 
 
 def unvectorize_shape_2d(a):
-    """Undoes the stripping of leading dimensions in the shape of a vectorized/
+    """ Undoes the stripping of leading dimensions in the shape of a vectorized/
     vmapped 2-dimensional array.
 
     If the shape of the vectorized array is smaller than 2, it will
@@ -200,7 +199,7 @@ def unvectorize_shape_2d(a):
 
 
 def unvectorize_shape_3d(a):
-    """Undoes the stripping of leading dimensions in the shape of a vectorized/
+    """ Undoes the stripping of leading dimensions in the shape of a vectorized/
     vmapped 3-dimensional array.
 
     If the shape of the vectorized array is smaller than 3, it will

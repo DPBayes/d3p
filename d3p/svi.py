@@ -160,8 +160,7 @@ def get_gradients_clipping_function(c, rescale_factor):
 
 
 class DPSVI(SVI):
-    """
-    Differentially-Private Stochastic Variational Inference given a per-example
+    """ Differentially-Private Stochastic Variational Inference given a per-example
     loss objective and a gradient clipping threshold.
 
     This is identical to numpyro's `SVI` but adds differential privacy by
