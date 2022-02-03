@@ -12,6 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+""" Cryptographically secure PRNG interface used by d3p to sample DP perturbation noise.
+"""
 
 import jax
 import jax.numpy as jnp
@@ -30,7 +32,14 @@ random_bits = ccrng.random_bits
 uniform = ccrng.uniform
 
 
-def PRNGKey(seed: Optional[Union[int, jnp.ndarray, int]] = None) -> PRNGState:
+def PRNGKey(seed: Optional[Union[jnp.ndarray, int, bytes]] = None) -> PRNGState:
+    """Initializes a PRNGKey for the d3p.random secure random number generator.
+
+    :param seed: Optional. A seed to derive randomness from, equivalent to a cryptographic
+        key. Its length in bits determines the cryptographic strength of the generated random numbers.
+        It can be up to 256 bit long. Default: None. In this case, a full length seed is randomly sampled
+        from the `secrets` module.
+    """
     if seed is None:
         nonopt_seed = secrets.token_bytes(ChaChaKeySizeInBytes)
     else:
@@ -41,24 +50,22 @@ def PRNGKey(seed: Optional[Union[int, jnp.ndarray, int]] = None) -> PRNGState:
 def normal(key: ccrng.RNGState,
            shape: Sequence[int] = (),
            dtype: np.dtype = jnp.float_) -> jnp.ndarray:
-    """Sample standard normal random values with given shape and float dtype
+    """Samples standard normal random values with given shape and float dtype
         derived from a cryptographically-secure pseudo-random number generator.
 
-    The sampling follows `jax.random.normal` exactly but uses jax-chacha-prng
+    The sampling follows `jax.random.normal` exactly but uses `jax-chacha-prng`
     as underlying generator instead of JAX's default generator.
 
     Note that this currently leaves this vulnerable to attacks on imprecise sampling
     as described in Mironov, "On Significance of the Least Significant Bits For Differential Privacy".
 
-    Args:
-        key: a PRNGKey used as the random key.
-        shape: optional, a tuple of nonnegative integers representing the result
+    :param key: A PRNGKey used as the random key.
+    :param shape: Optional. A tuple of nonnegative integers representing the result
         shape. Default ().
-        dtype: optional, a float dtype for the returned values (default float64 if
-        jax_enable_x64 is true, otherwise float32).
+    :param dtype: Optional. A float dtype for the returned values (default `float64` if
+        `jax_enable_x64` is `true`, otherwise `float32`).
 
-    Returns:
-        A random array with the specified shape and dtype.
+    :return: A random array with the specified shape and dtype.
     """
     if not jax.dtypes.issubdtype(dtype, np.floating):
         raise ValueError(f"dtype argument to `normal` must be a float dtype, got {dtype}")
@@ -74,5 +81,10 @@ def _normal(key, shape, dtype) -> jnp.ndarray:
     return np.array(np.sqrt(2), dtype) * jax.lax.erf_inv(u)
 
 
-def convert_to_jax_rng_key(chacha_rng_key: ccrng.RNGState) -> jnp.array:
-    return ccrng.random_bits(chacha_rng_key, 32, (2,))
+def convert_to_jax_rng_key(rng_key: ccrng.RNGState) -> jnp.array:
+    """Converts a give d3p.random RNG key to a jax.random RNG key.
+
+    :param rng_key: d3p.random RNG key.
+    :return: jax.random RNG key derived from `rng_key`.
+    """
+    return ccrng.random_bits(rng_key, 32, (2,))

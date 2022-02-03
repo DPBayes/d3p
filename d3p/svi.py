@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """ Stochastic Variational Inference implementation with per-example gradient
-    manipulation capability.
+    clipping and differnetially-private perturbation.
 """
 import functools
 from typing import Any, NamedTuple, Sequence, Tuple
@@ -190,7 +190,9 @@ class DPSVI(SVI):
         of each per-example gradient is clipped.
     :param dp_scale: Scale parameter for the Gaussian mechanism applied to
         each dimension of the batch gradients.
-    :param static_kwargs: static arguments for the model / guide, i.e. arguments
+    :param rng_suite: Optional. The PRNG suite to use. Defaults to the
+        cryptographically-secure d3p.random.
+    :param static_kwargs: Static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     """
 
@@ -232,7 +234,7 @@ class DPSVI(SVI):
             dp_svi_state.observation_scale
         )
 
-    def _split_rng_key(self, dp_svi_state: DPSVIState, count: int=1) -> Tuple[DPSVIState, Sequence[PRNGState]]:
+    def _split_rng_key(self, dp_svi_state: DPSVIState, count: int = 1) -> Tuple[DPSVIState, Sequence[PRNGState]]:
         rng_key = dp_svi_state.rng_key
         split_keys = self._rng_suite.split(rng_key, count+1)
         return DPSVI._update_state_rng(dp_svi_state, split_keys[0]), split_keys[1:]
@@ -352,7 +354,9 @@ class DPSVI(SVI):
 
         return loss_val, grads_list
 
-    def _perturb_and_reassemble_gradients(self, dp_svi_state, step_rng_key, gradient_list, batch_size, px_grads_tree_def):
+    def _perturb_and_reassemble_gradients(
+            self, dp_svi_state, step_rng_key, gradient_list, batch_size, px_grads_tree_def
+        ):  # noqa: E121, E125
         """ Perturbs the gradients using Gaussian noise and reassembles the gradient tree.
 
         This is the fourth step of a full update iteration.
@@ -402,6 +406,18 @@ class DPSVI(SVI):
         return dp_svi_state
 
     def update(self, svi_state, *args, **kwargs):
+        """ Takes a single step of SVI (possibly on a batch / minibatch of data),
+        using the optimizer.
+
+        :param svi_state: Current state of SVI.
+        :param args: Arguments to the model / guide (these can possibly vary during
+            the course of fitting).
+        :param kwargs: Keyword arguments to the model / guide (these can possibly vary
+            during the course of fitting).
+        :return: Tuple of `(svi_state, loss)`, where `svi_state` is the updated
+            DPSVI state and `loss` the value of the ELBO on the training batch for
+            the given `svi_state`.
+        """
 
         svi_state, update_rng_keys = self._split_rng_key(svi_state, 2)
         gradient_rng_key, perturbation_rng_key = update_rng_keys
@@ -429,14 +445,13 @@ class DPSVI(SVI):
         return svi_state, loss
 
     def evaluate(self, svi_state: DPSVIState, *args, **kwargs):
-        """
-        Take a single step of SVI (possibly on a batch / minibatch of data).
+        """ Evaluates the ELBO given the current parameter values / DPSVI state
+        and (a minibatch of) data.
 
-        :param svi_state: current state of DPSVI.
-        :param args: arguments to the model / guide (these can possibly vary during
-            the course of fitting).
-        :param kwargs: keyword arguments to the model / guide.
-        :return: evaluate ELBO loss given the current parameter values
+        :param svi_state: Current state of DPSVI.
+        :param args: Arguments to the model / guide.
+        :param kwargs: Keyword arguments to the model / guide.
+        :return: ELBO loss given the current parameter values
             (held within `svi_state.optim_state`).
         """
         # we split to have the same seed as `update_fn` given an svi_state

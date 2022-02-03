@@ -216,7 +216,7 @@ def unvectorize_shape_3d(a):
 
 @partial(jax.jit, static_argnums=(2, 3, 4))
 def sample_from_array(rng_key, x, n, axis, rng_suite=strong_rng):
-    """ Samples n elements from array along given axis without replacement.
+    """ Samples `n` elements from array `x` along given `axis` without replacement.
 
     Implementation notes:
       Internally implements the CUDA/Feistel shuffle: We apply a pseudo-random
@@ -253,30 +253,23 @@ def sample_from_array(rng_key, x, n, axis, rng_suite=strong_rng):
     mask_upper = jnp.left_shift(jnp.uint32(1), bits_upper) - 1
 
     def scramble_for_upper(x, key):
-        """ Scrambling / diffusion function for the diffusion path (lower to upper bits) Feistel network.
+        """ Scrambles/diffues bits on the diffusion path (lower to upper bits) of the Feistel network.
 
         F_k in Salmon et al."""
-        # nonce = jnp.hstack((x, key))
-        # my_key = chacha.cipher.set_nonce(rng_key, nonce)
-        # x = d3p.random.random_bits(my_key, 32, ())
-        # return x
-        # rng_key = jnp.array((x, key))
-        # x = jax._src.random._random_bits(rng_key, 32, ())
-        # return x
-
         return jnp.right_shift(x * key[1], bits_upper) ^ key[2]
 
     def scramble_for_lower(x, key):
-        """ Scrambling / diffusion function for the bijective path (upper to lower bits) of the Feistel network.
+        """ Scrambles/diffuses bits on the bijective path (upper to lower bits) of the Feistel network.
 
         B_k in Salmon et al. """
         return x * key[0]
 
     def permute_idx_power_of_two_capacity(position):
-        """ Permutation for integers less than the next larger power-of-two from capacity, i.e., 2**(bits).
+        """ Evaluates a random permutation (keyed by `rng_key`) for integers less
+            than the next larger power-of-two from `capacity`, i.e., `2**(bits)`.
 
         Essentially a Feistel network to build a permutation from some non-bijective scrambling/diffusion function
-        (scramble_for_upper).
+        (`scramble_for_upper`).
          """
         def loop_body(j, x):
             x_upper = jnp.right_shift(x, bits_lower)
@@ -294,7 +287,7 @@ def sample_from_array(rng_key, x, n, axis, rng_suite=strong_rng):
         return position
 
     def permute_idx(position):
-        """ Permutation over {0, ..., capacity-1}. """
+        """ Evaluates a random permutation (keyed by `rng_key`) over {0, ..., `capacity`-1}. """
 
         position = permute_idx_power_of_two_capacity(position)
         position = jax.lax.while_loop(
@@ -305,5 +298,5 @@ def sample_from_array(rng_key, x, n, axis, rng_suite=strong_rng):
 
         return position
 
-    idxs = jax.vmap(permute_idx)(idxs)
-    return jnp.take(x, idxs, axis)
+    idxs = jax.vmap(permute_idx)(idxs)  # randomly permute array indices {1,...,n}
+    return jnp.take(x, idxs, axis)  # select the array values corresponding to permuted indices

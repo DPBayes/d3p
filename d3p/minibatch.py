@@ -50,6 +50,8 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
         All arrays must have the same length on the first axis.
     :param batch_size: Size of the batches as absolute number. Mutually exclusive with q.
     :param q: Size of batches as ratio of the data set size. Mutually exlusive with batch_size.
+    :param with_replacement: Optional. Sample with replacements. Default: true.
+    :param rng_suite: Optional. The PRNG suite to use. Defaults to the cryptographically-secure d3p.random.
     :return: tuple (init_fn: () -> (num_batches, batchifier_state), get_batch: (i, batchifier_state) -> batch)
         init_fn() returns the number of batches per epoch and an initialized state of the batchifier for the epoch
         get_batch() returns the next batch_size amount of items from the data set
@@ -127,6 +129,7 @@ def split_batchify_data(dataset, batch_size=None, q=None, rng_suite=strong_rng):
         All arrays must have the same length on the first axis.
     :param batch_size: Size of the batches as absolute number. Mutually exclusive with q.
     :param q: Size of batches as ratio of the data set size. Mutually exlusive with batch_size.
+    :param rng_suite: Optional. The PRNG suite to use. Defaults to the cryptographically-secure d3p.random.
     :return: tuple (init_fn: () -> (num_batches, batchifier_state), get_batch: (i, batchifier_state) -> batch)
         init_fn() returns the number of batches per epoch and an initialized state of the batchifier for the epoch
         get_batch() returns the next batch_size amount of items from the data set

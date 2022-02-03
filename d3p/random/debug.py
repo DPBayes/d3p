@@ -12,6 +12,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+""" PRNG interface for use in d3p to sample DP perturbation noise when debugging.
+
+This is a simple wrapper around the standard jax.random PRNG. It is not
+cryptographically secure and should not be used in production settings, but
+runs faster than the secure variant and thus can be used to speed up debugging runs.
+"""
 
 import jax.numpy as jnp
 from typing import Optional
@@ -39,6 +45,11 @@ warnings.warn(
 
 
 def PRNGKey(seed: Optional[int] = None) -> PRNGState:
+    """Initializes a PRNGKey for the d3p debug random number generator.
+
+    :param seed: Optional. A seed to derive randomness from.  Default: None. In this case,
+        a seed is randomly sampled from the `secrets` module.
+    """
     if seed is None:
         nonopt_seed = int.from_bytes(secrets.token_bytes(KeyRandomnessInBytes), 'big', signed=False)
     else:
@@ -46,5 +57,10 @@ def PRNGKey(seed: Optional[int] = None) -> PRNGState:
     return jrng.PRNGKey(nonopt_seed)
 
 
-def convert_to_jax_rng_key(chacha_rng_key: PRNGState) -> jnp.array:
-    return chacha_rng_key
+def convert_to_jax_rng_key(rng_key: PRNGState) -> jnp.array:
+    """Converts a give d3p.random.debug RNG key to a jax.random RNG key.
+
+    :param rng_key: d3p.random.debug RNG key.
+    :return: jax.random RNG key derived from `rng_key`.
+    """
+    return rng_key

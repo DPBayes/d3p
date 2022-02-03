@@ -26,7 +26,7 @@ def adadp(
         alpha_min=0.9,
         alpha_max=1.1
     ):  # noqa: E121, E125
-    """Construct optimizer triple for the adaptive learning rate optimizer of
+    """Constructs optimizer triple for the adaptive learning rate optimizer of
     Koskela and Honkela.
 
     Reference:
@@ -34,15 +34,14 @@ def adadp(
     Differentially Private Learning (https://arxiv.org/abs/1809.03832).
 
     Args:
-    step_size: the initial step size
-    tol: error tolerance for the discretized gradient steps
-    stability_check: settings to True rejects some updates in favor of a more
-        stable algorithm
-    alpha_min: lower multiplitcative bound of learning rate update per step
-    alpha_max: upper multiplitcative bound of learning rate update per step
+    :param step_size: The initial step size.
+    :param tol: Error tolerance for the discretized gradient steps.
+    :param stability_check: Settings to True rejects some updates in favor of a more
+        stable algorithm.
+    :param alpha_min: Lower multiplitcative bound of learning rate update per step.
+    :param alpha_max: Upper multiplitcative bound of learning rate update per step.
 
-    Returns:
-        An (init_fun, update_fun, get_params) triple.
+    :return: An (init_fun, update_fun, get_params) triple.
     """
     step_size = make_schedule(step_size)
 
