@@ -127,7 +127,8 @@ See the `examples/` for more examples.
 ## Installing
 
 d3p is pure Python software. You can install the latest development version
-via pip with the following command:
+via pip with the following command (you will need the pip and git command line tools
+installed on your system):
 ```
 pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p
 ```
