@@ -108,7 +108,7 @@ def normalize_gradient(list_of_gradient_parts, ord=2):
     return normalized
 
 
-def clip_gradient(list_of_gradient_parts, c, rescale_factor=1.):
+def clip_gradient(list_of_gradient_parts, c):
     """Clips the total norm of a gradient by a given value C.
 
     The norm is computed by interpreting the given list of parts as a single
@@ -119,32 +119,16 @@ def clip_gradient(list_of_gradient_parts, c, rescale_factor=1.):
     :param list_of_gradient_parts: A list of values (of any shape) that make up
         the overall gradient vector.
     :param c: The clipping threshold C.
-    :param rescale_factor: Factor to scale the gradient by before clipping.
     :return: Clipped gradients given in the same format/layout/shape as
         list_of_gradient_parts.
     """
     if c == 0.:
         raise ValueError("The clipping threshold must be greater than 0.")
-    norm = full_norm(list_of_gradient_parts) * rescale_factor  # norm of rescale_factor * grad
+    norm = full_norm(list_of_gradient_parts)
     normalization_constant = 1./jnp.maximum(1., norm/c)
-    f = rescale_factor * normalization_constant  # to scale grad to max(rescale_factor * grad, C)
-    clipped_grads = [f * g for g in list_of_gradient_parts]
+    clipped_grads = [normalization_constant * g for g in list_of_gradient_parts]
     return clipped_grads
 
-
-def get_gradients_clipping_function(c, rescale_factor):
-    """Factory function to obtain a gradient clipping function for a fixed
-    clipping threshold C.
-
-    :param c: The clipping threshold C.
-    :param rescale_factor: Factor to scale the gradient by before clipping.
-    :return: `clip_gradient` function with fixed threshold C. Only takes a
-        list_of_gradient_parts as argument.
-    """
-    @functools.wraps(clip_gradient)
-    def gradient_clipping_fn_inner(list_of_gradient_parts):
-        return clip_gradient(list_of_gradient_parts, c, rescale_factor)
-    return gradient_clipping_fn_inner
 
 
 class DPSVI(SVI):
@@ -269,13 +253,18 @@ class DPSVI(SVI):
         # effect of the constraint transformation in the gradient)
         params = self.optim.get_params(dp_svi_state.optim_state)
 
+        obs_scale = dp_svi_state.observation_scale
+
         # we wrap the per-example loss (ELBO) to make it easier "digestable"
         # for jax.vmap(jax.value_and_grad()): slighly reordering parameters; fixing kwargs, model and guide
         def wrapped_px_loss(prms, rng_key, loss_args):
             # Vmap removes leading dimensions, we re-add those in a wrapper for loss so
             # that loss/the model can be oblivious of this.
+            # Additionally we scale down losses and gradients by the inverse of the
+            # observation scale so that the log-likelihood for each element is unscaled.
+            # This allows the coice of the clipping threshold to be agnostic of the data set size.
             new_args = (jnp.expand_dims(arg, 0) for arg in loss_args)
-            return self.loss.loss(
+            return 1/obs_scale * self.loss.loss(
                 rng_key, self.constrain_fn(prms), self.model, self.guide,
                 *new_args, **kwargs, **self.static_kwargs
             )
@@ -285,6 +274,10 @@ class DPSVI(SVI):
 
         px_value_and_grad = jax.vmap(jax.value_and_grad(wrapped_px_loss), in_axes=(None, 0, 0))
         per_example_loss, per_example_grads = px_value_and_grad(params, px_rng_keys, args)
+
+        # we will not be doing anything privacy-related with the loss value,
+        # so let's revert the downscaling we applied above; we only want that for the gradients.
+        per_example_loss *= obs_scale
 
         return dp_svi_state, per_example_loss, per_example_grads
 
@@ -301,20 +294,15 @@ class DPSVI(SVI):
             definition. The list is a flattened representation of the jax tree,
             the shape of per-example gradients per parameter is unaffected.
         """
-        obs_scale = dp_svi_state.observation_scale
-
         # px_gradients is a jax tree of jax jnp.arrays of shape
         #   [batch_size, (param_shape)] for each parameter. flatten it out!
         px_grads_list, px_grads_tree_def = jax.tree_flatten(
             px_gradients
         )
 
-        # scale the gradients by 1/obs_scale then clip them:
-        #  in the loss, every single examples loss contribution is scaled by obs_scale
-        #  but the clipping threshold assumes no scaling.
-        #  we scale by the reciprocal to ensure that clipping is correct.
-        clip_fn = get_gradients_clipping_function(self._clipping_threshold, 1./obs_scale)
-        px_grads_list = jax.vmap(clip_fn, in_axes=0)(px_grads_list)
+        px_clipped_grads_list = jax.vmap(
+            lambda px_grad: clip_gradient(px_grad, self._clipping_threshold), in_axes=0
+        )(px_grads_list)
 
         return dp_svi_state, px_grads_list, px_grads_tree_def
 
@@ -354,14 +342,14 @@ class DPSVI(SVI):
         :param px_grads_tree_def: Jax tree definition for the gradient tree as
             returned by `_apply_per_example_gradient_transformations`.
         """
-        perturbation_scale = self._dp_scale * self._clipping_threshold / batch_size
+        perturbation_scale = self._dp_scale * (self._clipping_threshold / batch_size)
         perturbed_grads_list = self.perturbation_function(
             self._rng_suite, step_rng_key, gradient_list, perturbation_scale
         )
 
-        # we multiply each parameter site by obs_scale to revert the downscaling
-        # performed before clipping, so that the final gradient is scaled as
-        # expected without DP
+        # Remember that in the very beginning we scaled down the loss and gradients
+        # by 1/observation_scale? Now we revert this, so that the final gradient is scaled as
+        # expected by the user
         obs_scale = dp_svi_state.observation_scale
         perturbed_grads_list = tuple(
             grad * obs_scale
