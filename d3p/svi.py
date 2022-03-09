@@ -67,18 +67,6 @@ def get_observations_scale(model, model_args, model_kwargs, params):
     return scales[0]
 
 
-class CombinedLoss(object):
-
-    def __init__(self, per_example_loss: ELBO, combiner_fn=jnp.mean):
-        self.px_loss = per_example_loss
-        self.combiner_fn = combiner_fn
-
-    def loss(self, rng_key, param_map, model, guide, *args, **kwargs):
-        return self.combiner_fn(self.px_loss.loss(
-            rng_key, param_map, model, guide, *args, **kwargs
-        ))
-
-
 def full_norm(list_of_parts_or_tree, ord=2):
     """Computes the total norm over a list of values (of any shape) or a jax
     tree by treating them as a single large vector.
@@ -214,8 +202,7 @@ class DPSVI(SVI):
         if (not np.isfinite(clipping_threshold)):
             raise ValueError("clipping_threshold must be finite!")
 
-        total_loss = CombinedLoss(per_example_loss, combiner_fn=jnp.mean)
-        super().__init__(model, guide, optim, total_loss, **static_kwargs)
+        super().__init__(model, guide, optim, per_example_loss, **static_kwargs)
 
     @staticmethod
     def _update_state_rng(dp_svi_state: DPSVIState, rng_key: PRNGState) -> DPSVIState:
@@ -285,10 +272,10 @@ class DPSVI(SVI):
         # we wrap the per-example loss (ELBO) to make it easier "digestable"
         # for jax.vmap(jax.value_and_grad()): slighly reordering parameters; fixing kwargs, model and guide
         def wrapped_px_loss(prms, rng_key, loss_args):
-            # vmap removes leading dimensions, we re-add those in a wrapper for fun so
-            # that fun can be oblivious of this
+            # Vmap removes leading dimensions, we re-add those in a wrapper for loss so
+            # that loss/the model can be oblivious of this.
             new_args = (jnp.expand_dims(arg, 0) for arg in loss_args)
-            return self.loss.px_loss.loss(
+            return self.loss.loss(
                 rng_key, self.constrain_fn(prms), self.model, self.guide,
                 *new_args, **kwargs, **self.static_kwargs
             )
