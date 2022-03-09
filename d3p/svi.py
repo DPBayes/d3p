@@ -242,8 +242,9 @@ class DPSVI(SVI):
         :param args: Arguments to the loss function.
         :param kwargs: All keyword arguments to model or guide.
         :returns: tuple consisting of the updated DPSVI state, an array of loss
-            values per example, and a jax tuple tree of per-example gradients
-            per parameter site (each site's gradients have shape (batch_size, *parameter_shape))
+            values per example, a jax tuple tree of per-example gradients
+            per parameter site (each site's gradients have shape (batch_size, *parameter_shape)),
+            and an integer denoting the batch size
         """
         jax_rng_key = self._rng_suite.convert_to_jax_rng_key(step_rng_key)
 
@@ -269,25 +270,25 @@ class DPSVI(SVI):
                 *new_args, **kwargs, **self.static_kwargs
             )
 
-        batch_size = jnp.shape(args[0])[0]  # todo: need checks to ensure this indexing is okay
+        batch_size = example_count(args[0])
         px_rng_keys = jax.random.split(jax_rng_key, batch_size)
 
-        px_value_and_grad = jax.vmap(jax.value_and_grad(wrapped_px_loss), in_axes=(None, 0, 0))
-        per_example_loss, per_example_grads = px_value_and_grad(params, px_rng_keys, args)
+        px_value_and_grad_fn = jax.vmap(jax.value_and_grad(wrapped_px_loss), in_axes=(None, 0, 0))
+        px_losses, px_grads = px_value_and_grad_fn(params, px_rng_keys, args)
 
         # we will not be doing anything privacy-related with the loss value,
         # so let's revert the downscaling we applied above; we only want that for the gradients.
-        per_example_loss *= obs_scale
+        px_losses *= obs_scale
 
-        return dp_svi_state, per_example_loss, per_example_grads
+        return dp_svi_state, px_losses, px_grads, batch_size
 
-    def _clip_gradients(self, dp_svi_state, px_gradients):
+    def _clip_gradients(self, dp_svi_state, px_grads):
         """ Clips each per-example gradient.
 
         This is the second step in a full update iteration.
 
         :param dp_svi_state: The current state of the DPSVI algorithm.
-        :param px_gradients: Jax tuple tree of per-example gradients as returned
+        :param px_grads: Jax tuple tree of per-example gradients as returned
             by `_compute_per_example_gradients`
         :returns: tuple consisting of the updated svi state, a list of
             transformed per-example gradients per site and the jax tree structure
@@ -297,24 +298,24 @@ class DPSVI(SVI):
         # px_gradients is a jax tree of jax jnp.arrays of shape
         #   [batch_size, (param_shape)] for each parameter. flatten it out!
         px_grads_list, px_grads_tree_def = jax.tree_flatten(
-            px_gradients
+            px_grads
         )
 
-        px_clipped_grads_list = jax.vmap(
+        px_clipped_grads = jax.vmap(
             lambda px_grad: clip_gradient(px_grad, self._clipping_threshold), in_axes=0
         )(px_grads_list)
 
-        return dp_svi_state, px_grads_list, px_grads_tree_def
+        return dp_svi_state, px_clipped_grads, px_grads_tree_def
 
-    def _combine_gradients(self, px_grads_list, px_loss):
+    def _combine_gradients(self, px_clipped_grads, px_loss):
         """ Combines the per-example gradients into the batch gradient and
             applies the batch gradient transformation given as
             `batch_grad_manipulation_fn`.
 
         This is the third step of a full update iteration.
 
-        :param px_grads_list: List of transformed per-example gradients as returned
-            by `_apply_per_example_gradient_transformations`
+        :param px_clipped_grads: List of clipped per-example gradients as returned
+            by `_clip_gradients`
         :param px_loss: Array of per-example loss values as output by
             `_compute_per_example_gradients`.
         :returns: tuple consisting of the updated svi state, the loss value for
@@ -324,12 +325,12 @@ class DPSVI(SVI):
         assert(self.loss.combiner_fn == jnp.mean)
 
         loss_val = jnp.mean(px_loss, axis=0)
-        grads_list = tuple(map(lambda px_grad_site: jnp.mean(px_grad_site, axis=0), px_grads_list))
+        avg_clipped_grads = tuple(map(lambda px_grad_site: jnp.mean(px_grad_site, axis=0), px_clipped_grads))
 
-        return loss_val, grads_list
+        return loss_val, avg_clipped_grads
 
     def _perturb_and_reassemble_gradients(
-            self, dp_svi_state, step_rng_key, gradient_list, batch_size, px_grads_tree_def
+            self, dp_svi_state, step_rng_key, avg_clipped_grads, batch_size, px_grads_tree_def
         ):  # noqa: E121, E125
         """ Perturbs the gradients using Gaussian noise and reassembles the gradient tree.
 
@@ -337,14 +338,14 @@ class DPSVI(SVI):
 
         :param dp_svi_state: The current state of the DPSVI algorithm.
         :param step_rng_key: RNG key for this step.
-        :param gradient_list: List of batch gradients for each parameter site
+        :param avg_clipped_grads: List of batch gradients for each parameter site
         :param batch_size: Size of the training batch.
         :param px_grads_tree_def: Jax tree definition for the gradient tree as
             returned by `_apply_per_example_gradient_transformations`.
         """
         perturbation_scale = self._dp_scale * (self._clipping_threshold / batch_size)
         perturbed_grads_list = self.perturbation_function(
-            self._rng_suite, step_rng_key, gradient_list, perturbation_scale
+            self._rng_suite, step_rng_key, avg_clipped_grads, perturbation_scale
         )
 
         # Remember that in the very beginning we scaled down the loss and gradients
@@ -363,18 +364,18 @@ class DPSVI(SVI):
 
         return dp_svi_state, perturbed_grads
 
-    def _apply_gradient(self, dp_svi_state, batch_gradient):
+    def _apply_gradient(self, dp_svi_state, perturbed_grads):
         """ Takes a (batch) gradient step in parameter space using the specified
             optimizer.
 
         This is the fifth and last step of a full update iteration.
         :param dp_svi_state: The current state of the DPSVI algorithm.
-        :param batch_gradient: Jax tree of batch gradients per parameter site,
-            as returned by `_combine_and_transform_gradient`.
+        :param perturbed_grads: Jax tree of batch gradients per parameter site,
+            as returned by `_perturb_and_reassemble_gradients`.
         :returns: tuple consisting of the updated svi state.
         """
         optim_state = dp_svi_state.optim_state
-        new_optim_state = self.optim.update(batch_gradient, optim_state)
+        new_optim_state = self.optim.update(perturbed_grads, optim_state)
 
         dp_svi_state = self._update_state_optim_state(dp_svi_state, new_optim_state)
         return dp_svi_state
@@ -396,25 +397,23 @@ class DPSVI(SVI):
         svi_state, update_rng_keys = self._split_rng_key(svi_state, 2)
         gradient_rng_key, perturbation_rng_key = update_rng_keys
 
-        svi_state, per_example_loss, per_example_grads = \
+        svi_state, px_losses, px_grads, batch_size = \
             self._compute_per_example_gradients(svi_state, gradient_rng_key, *args, **kwargs)
 
-        batch_size = example_count(per_example_loss)
-
-        svi_state, per_example_grads, tree_def = \
+        svi_state, px_clipped_grads, tree_def = \
             self._clip_gradients(
-                svi_state, per_example_grads
+                svi_state, px_grads
             )
 
-        loss, gradient = self._combine_gradients(
-            per_example_grads, per_example_loss
+        loss, avg_clipped_grads = self._combine_gradients(
+            px_clipped_grads, px_losses
         )
 
-        svi_state, gradient = self._perturb_and_reassemble_gradients(
-            svi_state, perturbation_rng_key, gradient, batch_size, tree_def
+        svi_state, perturbed_grads = self._perturb_and_reassemble_gradients(
+            svi_state, perturbation_rng_key, avg_clipped_grads, batch_size, tree_def
         )
 
-        svi_state = self._apply_gradient(svi_state, gradient)
+        svi_state = self._apply_gradient(svi_state, perturbed_grads)
 
         return svi_state, loss
 
