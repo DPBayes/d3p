@@ -43,7 +43,6 @@ class DPSVITestBase:
             jnp.zeros((self.batch_size, 10000)),
             jnp.zeros((self.batch_size, 10000))
         )
-        self.px_grads_list, self.tree_def = jax.tree_flatten(self.px_grads)
         self.px_loss = jnp.arange(self.batch_size, dtype=jnp.float32)
         self.dp_scale = 1.
         self.clipping_threshold = 2.
@@ -66,11 +65,14 @@ class DPSVITestBase:
         expected_px_norms = (np.sqrt(10), np.sqrt(2))
         self.assertTrue(np.allclose(px_norms, expected_px_norms))
 
-        new_svi_state, clipped_px_grads, px_grads_tree_def = \
+        new_svi_state, clipped_px_grads = \
             self.svi._clip_gradients(svi_state, px_grads)
 
         self.assertEqual(new_svi_state, svi_state)
-        self.assertEqual(px_grads_tree_def, self.tree_def)
+        self.assertEqual(
+            jax.tree_structure(clipped_px_grads),
+            jax.tree_structure(px_grads)
+        )
 
         clipped_px_norms = jax.vmap(full_norm)(clipped_px_grads)
         expected_clipped_px_norms = np.array([2., np.sqrt(2)])
@@ -82,59 +84,59 @@ class DPSVITestBase:
 
     def test_px_gradient_aggregation(self):
         np.random.seed(0)
-        px_grads_list, _ = jax.tree_flatten((
+        px_grads, _ = jax.tree_flatten((
             np.random.normal(1, 1, size=(self.batch_size, 10000)),
             np.random.normal(1, 1, size=(self.batch_size, 10000))
         ))
 
-        expected_grads_list = [jnp.mean(px_grads, axis=0) for px_grads in px_grads_list]
+        expected_grads_list = [jnp.mean(px_grads, axis=0) for px_grads in jax.tree_leaves(px_grads)]
         expected_loss = jnp.mean(self.px_loss)
 
-        loss, grads_list = self.svi._combine_gradients(px_grads_list, self.px_loss)
+        loss, grads = self.svi._combine_gradients(px_grads, self.px_loss)
 
         self.assertTrue(np.allclose(expected_loss, loss), f"expected loss {expected_loss} but was {loss}")
         self.assertTrue(
-            np.allclose(expected_grads_list, grads_list),
-            f"expected gradients {expected_grads_list} but was {grads_list}"
+            np.allclose(expected_grads_list, jax.tree_leaves(grads)),
+            f"expected gradients {expected_grads_list} but was {grads}"
         )
 
     def test_dp_noise_perturbation(self):
         svi_state = DPSVIState(None, self.rng, .3)
 
-        grads_list = [jnp.mean(px_grads, axis=0) for px_grads in self.px_grads_list]
+        grads = jax.tree_map(lambda x: jnp.mean(x, axis=0), self.px_grads)
 
-        new_svi_state, grads = \
+        new_svi_state, perturbed_grads = \
             self.svi._perturb_and_reassemble_gradients(
-                svi_state, self.rng, grads_list, self.batch_size, self.tree_def
+                svi_state, self.rng, grads, self.batch_size
             )
 
         self.assertIs(svi_state.optim_state, new_svi_state.optim_state)
-        self.assertEqual(self.tree_def, jax.tree_structure(grads))
+        self.assertEqual(jax.tree_structure(grads), jax.tree_structure(perturbed_grads))
 
-        expected_std = (self.dp_scale * self.clipping_threshold / self.batch_size) * svi_state.observation_scale
-        for site, px_site in zip(jax.tree_leaves(grads), jax.tree_leaves(self.px_grads_list)):
-            self.assertEqual(px_site.shape[1:], site.shape)
+        expected_std = self.dp_scale * (self.clipping_threshold / self.batch_size) * svi_state.observation_scale
+        for perturbed_site, site in zip(jax.tree_leaves(perturbed_grads), jax.tree_leaves(grads)):
+            self.assertEqual(perturbed_site.shape, site.shape)
             self.assertTrue(
-                np.allclose(expected_std, jnp.std(site), atol=1e-2),
-                f"expected stdev {expected_std} but was {jnp.std(site)}"
+                np.allclose(expected_std, jnp.std(perturbed_site), atol=1e-2),
+                f"expected stdev {expected_std} but was {jnp.std(perturbed_site)}"
             )
-            self.assertTrue(np.allclose(0., jnp.mean(site), atol=1e-2))
+            self.assertTrue(np.allclose(jnp.mean(site), jnp.mean(perturbed_site), atol=1e-2))
 
     def test_dp_noise_perturbation_not_deterministic_over_rngs(self):
         """ verifies that different randomness is used in subsequent calls """
         svi_state = DPSVIState(None, self.rng, .3)
         first_rng, second_rng = self.rng_suite.split(self.rng)
 
-        grads_list = [jnp.mean(px_grads, axis=0) for px_grads in self.px_grads_list]
+        grads = jax.tree_map(lambda x: jnp.mean(x, axis=0), self.px_grads)
 
         new_svi_state, first_grads = \
             self.svi._perturb_and_reassemble_gradients(
-                svi_state, first_rng, grads_list, self.batch_size, self.tree_def
+                svi_state, first_rng, grads, self.batch_size
             )
 
         _, second_grads = \
             self.svi._perturb_and_reassemble_gradients(
-                new_svi_state, second_rng, grads_list, self.batch_size, self.tree_def
+                new_svi_state, second_rng, grads, self.batch_size
             )
 
         some_gradient_noise_is_equal = reduce(
@@ -151,11 +153,11 @@ class DPSVITestBase:
         """ verifies that different randomness is used for different gradient sites """
         svi_state = DPSVIState(None, self.rng, .3)
 
-        grads_list = [jnp.mean(px_grads, axis=0) for px_grads in self.px_grads_list]
+        grads = jax.tree_map(lambda x: jnp.mean(x, axis=0), self.px_grads)
 
         _, grads = \
             self.svi._perturb_and_reassemble_gradients(
-                svi_state, self.rng, grads_list, self.batch_size, self.tree_def
+                svi_state, self.rng, grads, self.batch_size
             )
 
         noise_sites = jax.tree_leaves(grads)

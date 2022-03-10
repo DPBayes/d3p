@@ -67,48 +67,45 @@ def get_observations_scale(model, model_args, model_kwargs, params):
     return scales[0]
 
 
-def full_norm(list_of_parts_or_tree, ord=2):
+def full_norm(vector_parts, ord=2):
     """Computes the total norm over a list of values (of any shape) or a jax
     tree by treating them as a single large vector.
 
-    :param list_of_parts_or_tree: The list or jax tree of values that make up
+    :param vector_parts: A jax tree of values that make up
         the vector to compute the norm over.
     :param ord: Order of the norm. May take any value possible for
     `numpy.linalg.norm`.
     :return: The indicated norm over the full vector.
     """
-    if isinstance(list_of_parts_or_tree, list):
-        list_of_parts = list_of_parts_or_tree
-    else:
-        list_of_parts = jax.tree_leaves(list_of_parts_or_tree)
+    list_of_parts = jax.tree_leaves(vector_parts)
 
     if list_of_parts is None or len(list_of_parts) == 0:
         return 0.
 
-    ravelled = [g.ravel() for g in list_of_parts]
-    gradients = jnp.concatenate(ravelled)
+    flattened = tuple(g.ravel() for g in list_of_parts)
+    gradients = jnp.concatenate(flattened)
     assert(len(gradients.shape) == 1)
     norm = jnp.linalg.norm(gradients, ord=ord)
     return norm
 
 
-def normalize_gradient(list_of_gradient_parts, ord=2):
+def normalize_gradient(gradient_parts, ord=2):
     """Normalizes a gradient by its total norm.
 
     The norm is computed by interpreting the given list of parts as a single
     vector (see `full_norm`).
 
-    :param list_of_gradient_parts: A list of values (of any shape) that make up
+    :param gradient_parts: A jax tree of values (of any shape) that make up
         the overall gradient vector.
     :return: Normalized gradients given in the same format/layout/shape as
-        list_of_gradient_parts.
+        gradient_parts.
     """
-    norm_inv = 1./full_norm(list_of_gradient_parts, ord=ord)
-    normalized = [norm_inv * g for g in list_of_gradient_parts]
+    norm_inv = 1./full_norm(gradient_parts, ord=ord)
+    normalized = jax.tree_map(lambda g: norm_inv * g, gradient_parts)
     return normalized
 
 
-def clip_gradient(list_of_gradient_parts, c):
+def clip_gradient(gradient_parts, c):
     """Clips the total norm of a gradient by a given value C.
 
     The norm is computed by interpreting the given list of parts as a single
@@ -116,17 +113,16 @@ def clip_gradient(list_of_gradient_parts, c):
     (1/max(1, norm/C)) which effectively clips the norm to C. Additionally,
     the gradient can be scaled by a given factor before clipping.
 
-    :param list_of_gradient_parts: A list of values (of any shape) that make up
-        the overall gradient vector.
+    :param gradient_parts: A jax tree that represents the overall gradient vector.
     :param c: The clipping threshold C.
     :return: Clipped gradients given in the same format/layout/shape as
-        list_of_gradient_parts.
+        gradient_parts.
     """
     if c == 0.:
         raise ValueError("The clipping threshold must be greater than 0.")
-    norm = full_norm(list_of_gradient_parts)
-    normalization_constant = 1./jnp.maximum(1., norm/c)
-    clipped_grads = [normalization_constant * g for g in list_of_gradient_parts]
+    norm = full_norm(gradient_parts)
+    clip_scaling_factor = 1./jnp.maximum(1., norm/c)
+    clipped_grads = jax.tree_map(lambda g: clip_scaling_factor * g, gradient_parts)
     return clipped_grads
 
 
@@ -297,24 +293,16 @@ class DPSVI(SVI):
         This is the second step in a full update iteration.
 
         :param dp_svi_state: The current state of the DPSVI algorithm.
-        :param px_grads: Jax tuple tree of per-example gradients as returned
+        :param px_grads: Jax tree of per-example gradients as returned
             by `_compute_per_example_gradients`
-        :returns: tuple consisting of the updated svi state, a list of
-            transformed per-example gradients per site and the jax tree structure
-            definition. The list is a flattened representation of the jax tree,
-            the shape of per-example gradients per parameter is unaffected.
+        :returns: tuple consisting of the updated svi state and a jax tree of
+            clipped per-example gradients per site.
         """
-        # px_gradients is a jax tree of jax jnp.arrays of shape
-        #   [batch_size, (param_shape)] for each parameter. flatten it out!
-        px_grads_list, px_grads_tree_def = jax.tree_flatten(
-            px_grads
-        )
-
         px_clipped_grads = jax.vmap(
             lambda px_grad: clip_gradient(px_grad, self._clipping_threshold), in_axes=0
-        )(px_grads_list)
+        )(px_grads)
 
-        return dp_svi_state, px_clipped_grads, px_grads_tree_def
+        return dp_svi_state, px_clipped_grads
 
     def _combine_gradients(self, px_clipped_grads, px_loss):
         """ Combines the per-example gradients into the batch gradient and
@@ -323,7 +311,7 @@ class DPSVI(SVI):
 
         This is the third step of a full update iteration.
 
-        :param px_clipped_grads: List of clipped per-example gradients as returned
+        :param px_clipped_grads: Clipped per-example gradients as returned
             by `_clip_gradients`
         :param px_loss: Array of per-example loss values as output by
             `_compute_per_example_gradients`.
@@ -332,26 +320,24 @@ class DPSVI(SVI):
         """
 
         loss_val = jnp.mean(px_loss, axis=0)
-        avg_clipped_grads = tuple(map(lambda px_grad_site: jnp.mean(px_grad_site, axis=0), px_clipped_grads))
+        avg_clipped_grads = jax.tree_map(lambda px_grads_site: jnp.mean(px_grads_site, axis=0), px_clipped_grads)
 
         return loss_val, avg_clipped_grads
 
     def _perturb_and_reassemble_gradients(
-            self, dp_svi_state, step_rng_key, avg_clipped_grads, batch_size, px_grads_tree_def
+            self, dp_svi_state, step_rng_key, avg_clipped_grads, batch_size
         ):  # noqa: E121, E125
-        """ Perturbs the gradients using Gaussian noise and reassembles the gradient tree.
+        """ Perturbs the gradients using Gaussian noise.
 
         This is the fourth step of a full update iteration.
 
         :param dp_svi_state: The current state of the DPSVI algorithm.
         :param step_rng_key: RNG key for this step.
-        :param avg_clipped_grads: List of batch gradients for each parameter site
+        :param avg_clipped_grads: Jax tree of batch gradients for each parameter site
         :param batch_size: Size of the training batch.
-        :param px_grads_tree_def: Jax tree definition for the gradient tree as
-            returned by `_apply_per_example_gradient_transformations`.
         """
         perturbation_scale = self._dp_scale * (self._clipping_threshold / batch_size)
-        perturbed_grads_list = self.perturbation_function(
+        perturbed_grads = self.perturbation_function(
             self._rng_suite, step_rng_key, avg_clipped_grads, perturbation_scale
         )
 
@@ -359,15 +345,7 @@ class DPSVI(SVI):
         # by 1/observation_scale? Now we revert this, so that the final gradient is scaled as
         # expected by the user
         obs_scale = dp_svi_state.observation_scale
-        perturbed_grads_list = tuple(
-            grad * obs_scale
-            for grad in perturbed_grads_list
-        )
-
-        # reassemble the jax tree used by optimizer for the final gradients
-        perturbed_grads = jax.tree_unflatten(
-            px_grads_tree_def, perturbed_grads_list
-        )
+        perturbed_grads = jax.tree_map(lambda grad_site: grad_site * obs_scale, perturbed_grads)
 
         return dp_svi_state, perturbed_grads
 
@@ -407,7 +385,7 @@ class DPSVI(SVI):
         svi_state, px_losses, px_grads, batch_size = \
             self._compute_per_example_gradients(svi_state, gradient_rng_key, *args, **kwargs)
 
-        svi_state, px_clipped_grads, tree_def = \
+        svi_state, px_clipped_grads = \
             self._clip_gradients(
                 svi_state, px_grads
             )
@@ -417,7 +395,7 @@ class DPSVI(SVI):
         )
 
         svi_state, perturbed_grads = self._perturb_and_reassemble_gradients(
-            svi_state, perturbation_rng_key, avg_clipped_grads, batch_size, tree_def
+            svi_state, perturbation_rng_key, avg_clipped_grads, batch_size
         )
 
         svi_state = self._apply_gradient(svi_state, perturbed_grads)
@@ -460,8 +438,8 @@ class DPSVI(SVI):
 
     @staticmethod
     def perturbation_function(
-            rng_suite, rng: PRNGState, values: Sequence[jnp.ndarray], perturbation_scale: float
-        ) -> Sequence[jnp.ndarray]:  # noqa: E121, E125
+            rng_suite, rng: PRNGState, values: Any, perturbation_scale: float
+        ) -> Any:  # noqa: E121, E125
         """ Perturbs given values using Gaussian noise.
 
         `values` can be a list of array-like objects. Each value is independently
@@ -469,7 +447,7 @@ class DPSVI(SVI):
         standard deviation of `perturbation_scale`.
 
         :param rng: Jax PRNGKey for perturbation randomness.
-        :param values: Iterable of array-like where each value will be perturbed.
+        :param values: Jax tree of which each leaf will be perturbed element-wise.
         :param perturbation_scale: The scale/standard deviation of the noise
             distribution.
         """
@@ -478,9 +456,12 @@ class DPSVI(SVI):
             noise = rng_suite.normal(site_rng, a.shape) * perturbation_scale
             return a + noise
 
+        values, tree_def = jax.tree_flatten(values)
         per_site_rngs = rng_suite.split(rng, len(values))
-        values = tuple(
+        perturbed_values = (
             perturb_one(grad, site_rng)
             for grad, site_rng in zip(values, per_site_rngs)
         )
-        return values
+
+        perturbed_values = jax.tree_unflatten(tree_def, perturbed_values)
+        return perturbed_values
