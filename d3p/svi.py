@@ -322,8 +322,6 @@ class DPSVI(SVI):
             the batch and a jax tree of batch gradients per parameter site.
         """
 
-        assert(self.loss.combiner_fn == jnp.mean)
-
         loss_val = jnp.mean(px_loss, axis=0)
         avg_clipped_grads = tuple(map(lambda px_grad_site: jnp.mean(px_grad_site, axis=0), px_clipped_grads))
 

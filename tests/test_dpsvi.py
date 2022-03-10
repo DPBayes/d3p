@@ -39,10 +39,10 @@ class DPSVITestBase:
         self.rng = self.rng_suite.PRNGKey(9782346)
         self.batch_size = 10
         self.num_obs_total = 100
-        self.px_grads = ((
+        self.px_grads = (
             jnp.zeros((self.batch_size, 10000)),
             jnp.zeros((self.batch_size, 10000))
-        ))
+        )
         self.px_grads_list, self.tree_def = jax.tree_flatten(self.px_grads)
         self.px_loss = jnp.arange(self.batch_size, dtype=jnp.float32)
         self.dp_scale = 1.
@@ -57,13 +57,13 @@ class DPSVITestBase:
     def test_px_gradient_clipping(self):
         svi_state = DPSVIState(None, self.rng, 0.8)
 
-        px_grads = ((
-            jnp.array([[1., 0.], [0., 0.]]) @ jnp.ones((2, 10)),
-            jnp.array([[0., 0.], [0., 1.]]) @ jnp.ones((2, 2)),
-        ))
+        px_grads = (
+            jnp.repeat(jnp.array([1., 0]), 10).reshape(2, 10),
+            jnp.repeat(jnp.array([0., 1.]), 2).reshape(2, 2)
+        )
 
         px_norms = jax.vmap(full_norm)(px_grads)
-        expected_px_norms = np.array([np.sqrt(10), np.sqrt(2)])
+        expected_px_norms = (np.sqrt(10), np.sqrt(2))
         self.assertTrue(np.allclose(px_norms, expected_px_norms))
 
         new_svi_state, clipped_px_grads, px_grads_tree_def = \
@@ -73,7 +73,7 @@ class DPSVITestBase:
         self.assertEqual(px_grads_tree_def, self.tree_def)
 
         clipped_px_norms = jax.vmap(full_norm)(clipped_px_grads)
-        expected_clipped_px_norms = np.array([2., np.sqrt(2)/svi_state.observation_scale])
+        expected_clipped_px_norms = np.array([2., np.sqrt(2)])
         self.assertTrue(np.allclose(clipped_px_norms, expected_clipped_px_norms))
 
         _, clipped_grad = self.svi._combine_gradients(clipped_px_grads, jnp.ones((2,)))
