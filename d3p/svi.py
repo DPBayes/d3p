@@ -130,7 +130,6 @@ def clip_gradient(list_of_gradient_parts, c):
     return clipped_grads
 
 
-
 class DPSVI(SVI):
     """ Differentially-Private Stochastic Variational Inference given a per-example
     loss objective and a gradient clipping threshold.
@@ -163,6 +162,12 @@ class DPSVI(SVI):
         each dimension of the batch gradients.
     :param rng_suite: Optional. The PRNG suite to use. Defaults to the
         cryptographically-secure d3p.random.
+    :param clip_unscaled_observations: Optional. If True, the upscaling of the log-likelihood
+        of individual data examples in the model is undone before clipping. This has the effect of
+        changing the interpretation of the clipping threshold C to bound the effect
+        of unscaled individual example log-likelihoods. This unscaling is undone after
+        applying privacy perturbations so that the final gradients have the correct scale.
+        Defaults to True.
     :param static_kwargs: Static arguments for the model / guide, i.e. arguments
         that remain constant during fitting.
     """
@@ -176,12 +181,14 @@ class DPSVI(SVI):
             clipping_threshold,
             dp_scale,
             rng_suite=strong_rng,
+            clip_unscaled_observations=True,
             **static_kwargs
         ):  # noqa: E121, E125
 
         self._clipping_threshold = clipping_threshold
         self._dp_scale = dp_scale
         self._rng_suite = rng_suite
+        self._clip_unscaled_observations = clip_unscaled_observations
 
         if (not np.isfinite(clipping_threshold)):
             raise ValueError("clipping_threshold must be finite!")
@@ -216,19 +223,21 @@ class DPSVI(SVI):
         if svi_state.mutable_state is not None:
             raise RuntimeError("Mutable state is not supported.")
 
-        model_kwargs = dict(kwargs)
-        model_kwargs.update(self.static_kwargs)
+        observation_scale = 1.0
+        if self._clip_unscaled_observations:
+            model_kwargs = dict(kwargs)
+            model_kwargs.update(self.static_kwargs)
 
-        one_element_batch = [
-            jnp.expand_dims(a[0], 0) for a in args
-        ]
+            one_element_batch = [
+                jnp.expand_dims(a[0], 0) for a in args
+            ]
 
-        # note: DO use super().get_params here to get constrained/transformed params
-        #  for use in get_observations_scale (svi_state.optim_state holds unconstrained params)
-        params = super().get_params(svi_state)
-        observation_scale = get_observations_scale(
-            self.model, one_element_batch, model_kwargs, params
-        )
+            # note: DO use super().get_params here to get constrained/transformed params
+            #  for use in get_observations_scale (svi_state.optim_state holds unconstrained params)
+            params = super().get_params(svi_state)
+            observation_scale = get_observations_scale(
+                self.model, one_element_batch, model_kwargs, params
+            )
 
         return DPSVIState(svi_state.optim_state, rng_key, observation_scale)
 
