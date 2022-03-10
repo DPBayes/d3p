@@ -21,6 +21,7 @@ from functools import reduce
 
 import jax.numpy as jnp
 import jax
+import numpyro
 from numpyro.optim import SGD
 import d3p.random
 import d3p.random.debug
@@ -46,12 +47,56 @@ class DPSVITestBase:
         self.px_loss = jnp.arange(self.batch_size, dtype=jnp.float32)
         self.dp_scale = 1.
         self.clipping_threshold = 2.
-        optim = SGD(1.)
+        self.optim = SGD(1.)
         self.svi = DPSVI(
-            None, None, optim, None, self.clipping_threshold,
+            None, None, self.optim, None, self.clipping_threshold,
             self.dp_scale, num_obs_total=self.num_obs_total,
             rng_suite=self.rng_suite
         )
+
+    def test_init(self):
+        def model(X):
+            mu = numpyro.sample("mu", numpyro.distributions.Normal(np.zeros((X.shape[1],))))
+            with numpyro.plate("plate", size=self.num_obs_total, subsample_size=X.shape[0]):
+                numpyro.sample("X", numpyro.distributions.Normal(mu, 1.).to_event(1), obs=X)
+
+        guide = numpyro.infer.autoguide.AutoDiagonalNormal(model)
+
+        dpsvi = DPSVI(model, guide, self.optim, numpyro.infer.Trace_ELBO(), self.clipping_threshold, self.dp_scale, rng_suite=self.rng_suite)
+        svi = numpyro.infer.SVI(model, guide, self.optim, numpyro.infer.Trace_ELBO())
+
+        batch = (jnp.zeros((self.batch_size, 3)),)
+
+        dpsvi_state = dpsvi.init(self.rng, *batch)
+        svi_state = svi.init(self.rng_suite.convert_to_jax_rng_key(self.rng), *batch)
+
+        self.assertEqual(self.num_obs_total, dpsvi_state.observation_scale)
+        self.assertTrue(np.allclose(self.rng, dpsvi_state.rng_key))
+
+        self.assertEqual(jax.tree_structure(svi_state.optim_state), jax.tree_structure(dpsvi_state.optim_state))
+
+
+    def test_init_no_unscaling(self):
+        def model(X):
+            mu = numpyro.sample("mu", numpyro.distributions.Normal(np.zeros((X.shape[1],))))
+            with numpyro.plate("plate", size=self.num_obs_total, subsample_size=X.shape[0]):
+                numpyro.sample("X", numpyro.distributions.Normal(mu, 1.).to_event(1), obs=X)
+
+        guide = numpyro.infer.autoguide.AutoDiagonalNormal(model)
+
+        dpsvi = DPSVI(model, guide, self.optim, numpyro.infer.Trace_ELBO(), self.clipping_threshold, self.dp_scale, rng_suite=self.rng_suite, clip_unscaled_observations=False)
+        svi = numpyro.infer.SVI(model, guide, self.optim, numpyro.infer.Trace_ELBO())
+
+        batch = (jnp.zeros((self.batch_size, 3)),)
+
+        dpsvi_state = dpsvi.init(self.rng, *batch)
+        svi_state = svi.init(self.rng_suite.convert_to_jax_rng_key(self.rng), *batch)
+
+        self.assertEqual(1., dpsvi_state.observation_scale)
+        self.assertTrue(np.allclose(self.rng, dpsvi_state.rng_key))
+
+        self.assertEqual(jax.tree_structure(svi_state.optim_state), jax.tree_structure(dpsvi_state.optim_state))
+
 
     def test_px_gradient_clipping(self):
         svi_state = DPSVIState(None, self.rng, 0.8)
