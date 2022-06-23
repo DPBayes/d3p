@@ -80,7 +80,7 @@ def guide(k, obs=None, num_obs_total=None, d=None):
 
     mus_loc = param('mus_loc', jnp.zeros((k, d)))
     mus = sample('mus', dist.Normal(mus_loc, 1.))
-    sigs = sample('sigs', dist.InverseGamma(1., 1.), obs=jnp.ones_like(mus))
+    sigs = sample('sigs', dist.InverseGamma(1., 1.), sample_shape=jnp.shape(mus))
     return pis, mus, sigs
 
 def create_toy_data(rng_key, N, d):
