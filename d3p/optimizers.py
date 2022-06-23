@@ -16,7 +16,7 @@
 from numpyro.optim import _NumPyroOptim, _add_doc
 from jax.experimental.optimizers import make_schedule
 import jax.numpy as jnp
-from jax import tree_map, tree_multimap, tree_leaves, lax
+from jax import tree_map, tree_leaves, lax
 
 
 def adadp(
@@ -50,7 +50,7 @@ def adadp(
         return x0, lr, x_stepped, x0
 
     def _compute_update_step(x, g, step_size_):
-        return tree_multimap(lambda x_, g_: x_ - step_size_ * g_, x, g)
+        return tree_map(lambda x_, g_: x_ - step_size_ * g_, x, g)
 
     def _update_even_step(args):
         g, state, new_x = args
@@ -65,7 +65,7 @@ def adadp(
         g, state, new_x = args
         x, lr, x_stepped, x_prev = state
 
-        norm_partials = tree_multimap(
+        norm_partials = tree_map(
             lambda x_full, x_halfs: jnp.sum(((x_full - x_halfs)/jnp.maximum(1., x_full)) ** 2),
             x_stepped, new_x
         )
@@ -82,7 +82,7 @@ def adadp(
             jnp.maximum(jnp.sqrt(tol/err_e), 0.9), 1.1
         )
 
-        new_x = tree_multimap(
+        new_x = tree_map(
             lambda x_prev, new_x: jnp.where(
                 stability_check and err_e > tol, x_prev, new_x
             ),

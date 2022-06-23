@@ -187,7 +187,7 @@ class DPSVITestBase:
         some_gradient_noise_is_equal = reduce(
             lambda are_equal, acc: are_equal or acc,
             jax.tree_leaves(
-                jax.tree_multimap(
+                jax.tree_map(
                     lambda x, y: jnp.allclose(x, y), first_grads, second_grads
                 )
             )
