@@ -16,7 +16,6 @@
 """ Stochastic Variational Inference implementation with per-example gradient
     clipping and differnetially-private perturbation.
 """
-import functools
 from typing import Any, NamedTuple, Sequence, Tuple
 
 import jax
@@ -24,7 +23,6 @@ import jax.numpy as jnp
 import numpy as np
 
 from numpyro.infer.svi import SVI, SVIState
-from numpyro.infer.elbo import ELBO
 from numpyro.handlers import seed, trace, substitute, block
 
 from d3p.util import example_count
@@ -342,7 +340,8 @@ class DPSVI(SVI):
         :param avg_clipped_grads: Jax tree of batch gradients for each parameter site
         :param batch_size: Size of the training batch.
         """
-        sensitivity = (self._clipping_threshold / batch_size) # because avg_clipped_grads it the average of gradients clipped to norm self._clipping_threshold
+        # because avg_clipped_grads is the average of gradients clipped to norm self._clipping_threshold
+        sensitivity = (self._clipping_threshold / batch_size)
         perturbation_scale = self._dp_scale * sensitivity
         perturbed_grads = self.perturbation_function(
             self._rng_suite, step_rng_key, avg_clipped_grads, perturbation_scale

@@ -62,7 +62,10 @@ class DPSVITestBase:
 
         guide = numpyro.infer.autoguide.AutoDiagonalNormal(model)
 
-        dpsvi = DPSVI(model, guide, self.optim, numpyro.infer.Trace_ELBO(), self.clipping_threshold, self.dp_scale, rng_suite=self.rng_suite)
+        dpsvi = DPSVI(
+            model, guide, self.optim, numpyro.infer.Trace_ELBO(),
+            self.clipping_threshold, self.dp_scale, rng_suite=self.rng_suite
+        )
         svi = numpyro.infer.SVI(model, guide, self.optim, numpyro.infer.Trace_ELBO())
 
         batch = (jnp.zeros((self.batch_size, 3)),)
@@ -75,7 +78,6 @@ class DPSVITestBase:
 
         self.assertEqual(jax.tree_structure(svi_state.optim_state), jax.tree_structure(dpsvi_state.optim_state))
 
-
     def test_init_no_unscaling(self):
         def model(X):
             mu = numpyro.sample("mu", numpyro.distributions.Normal(np.zeros((X.shape[1],))))
@@ -84,7 +86,10 @@ class DPSVITestBase:
 
         guide = numpyro.infer.autoguide.AutoDiagonalNormal(model)
 
-        dpsvi = DPSVI(model, guide, self.optim, numpyro.infer.Trace_ELBO(), self.clipping_threshold, self.dp_scale, rng_suite=self.rng_suite, clip_unscaled_observations=False)
+        dpsvi = DPSVI(
+            model, guide, self.optim, numpyro.infer.Trace_ELBO(),
+            self.clipping_threshold, self.dp_scale, rng_suite=self.rng_suite, clip_unscaled_observations=False
+        )
         svi = numpyro.infer.SVI(model, guide, self.optim, numpyro.infer.Trace_ELBO())
 
         batch = (jnp.zeros((self.batch_size, 3)),)
@@ -96,7 +101,6 @@ class DPSVITestBase:
         self.assertTrue(np.allclose(self.rng, dpsvi_state.rng_key))
 
         self.assertEqual(jax.tree_structure(svi_state.optim_state), jax.tree_structure(dpsvi_state.optim_state))
-
 
     def test_px_gradient_clipping(self):
         svi_state = DPSVIState(None, self.rng, 0.8)
