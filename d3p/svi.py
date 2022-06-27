@@ -267,7 +267,7 @@ class DPSVI(SVI):
             # Vmap removes leading dimensions, we re-add those in a wrapper for loss so
             # that loss/the model can be oblivious of this.
             # Additionally we scale down losses and gradients by the inverse of the
-            # observation scale so that the log-likelihood for each element is unscaled.
+            # observation scale (= dataset size) so that the log-likelihood part for each element is unscaled.
             # This allows the coice of the clipping threshold to be agnostic of the data set size.
             new_args = (jnp.expand_dims(arg, 0) for arg in loss_args)
             return 1/obs_scale * self.loss.loss(
@@ -275,6 +275,12 @@ class DPSVI(SVI):
                 *new_args, **kwargs, **self.static_kwargs
             )
 
+        # note: the splitting of the rng key guarantees separate randomness for each example in the batch
+        #       for the sample from the guide as well as all latent variables in the model.
+        #       While it would arguably be better to keep the guide sample fixed
+        #       for all elements in the batch (be using the same rng key for all)
+        #       to more closely mirror the standard SVI implementation, this would result in all latent
+        #       samples to use the same randomness over the examples, which is something we certainly don't want.
         batch_size = example_count(args[0])
         px_rng_keys = jax.random.split(jax_rng_key, batch_size)
 
@@ -336,7 +342,8 @@ class DPSVI(SVI):
         :param avg_clipped_grads: Jax tree of batch gradients for each parameter site
         :param batch_size: Size of the training batch.
         """
-        perturbation_scale = self._dp_scale * (self._clipping_threshold / batch_size)
+        sensitivity = (self._clipping_threshold / batch_size) # because avg_clipped_grads it the average of gradients clipped to norm self._clipping_threshold
+        perturbation_scale = self._dp_scale * sensitivity
         perturbed_grads = self.perturbation_function(
             self._rng_suite, step_rng_key, avg_clipped_grads, perturbation_scale
         )
