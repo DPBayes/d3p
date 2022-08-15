@@ -204,10 +204,9 @@ When using d3p, please cite the following papers:
 
 1. L. Prediger, N. Loppi, S. Kaski, A. Honkela.
 d3p - A Python Package for Differentially-Private Probabilistic Programming
-*arXiv preprint 2103.11648*
-Link: https://arxiv.org/abs/2103.11648
+In *Proceedings on Privacy Enhancing Technologies, 2022(2)*.
+Link: [https://doi.org/10.2478/popets-2022-0052](https://doi.org/10.2478/popets-2022-0052)
 
 1. J. Jälkö, O. Dikmen, A. Honkela. Differentially Private Variational Inference for Non-conjugate Models
-In *Uncertainty in Artificial Intelligence 2017 Proceedings of the 33rd Conference, UAI 2017.*
-The Association for Uncertainty in Artificial Intelligence, 2017.
-Link: http://auai.org/uai2017/proceedings/papers/152.pdf
+In *Uncertainty in Artificial Intelligence 2017 Proceedings of the 33rd Conference, UAI 2017*.
+Link: [http://auai.org/uai2017/proceedings/papers/152.pdf](http://auai.org/uai2017/proceedings/papers/152.pdf)
