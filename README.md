@@ -167,15 +167,13 @@ pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[compatible-dep
 If you want to run on CUDA devices, replace the last command with:
 
 ```
-pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[cuda111] -f https://storage.googleapis.com/jax-releases/jax_releases.html
+pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[cuda] -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 ```
-
-Adapt `cuda111` to your CUDA version, e.g., `cuda102` for CUDA 10.2 .
 
 ### TPU installation
 Replace the installation command with
 ```
-pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.htmlhtml
 ```
 
 Refer to the [JAX installation instructions](https://github.com/google/jax#pip-installation-gpu-cuda)

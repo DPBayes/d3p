@@ -92,7 +92,7 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
         rng_key = batchifier_state
         batch_rng_key = rng_suite.fold_in(rng_key, i)
         batch_jax_rng_key = rng_suite.convert_to_jax_rng_key(batch_rng_key)
-        # todo: introduce own randint to avoid falling back to jax randint here
+        # TODO: introduce own randint to avoid falling back to jax randint here
         ret_idx = jax.random.randint(batch_jax_rng_key, (batch_size,), 0, num_records)
         return tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
 

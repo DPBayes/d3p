@@ -34,7 +34,7 @@ class ADADPTests(unittest.TestCase):
         self.assertTrue(tests.util.are_trees_close(expected, actual))
 
     def same_tree_with_value(self, tree, value):
-        return jax.tree_map(
+        return jax.tree_util.tree_map(
             lambda x: jnp.ones_like(x) * value, tree
         )
 

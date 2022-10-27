@@ -17,7 +17,7 @@ import jax
 import jax.numpy as jnp
 from functools import reduce
 
-
+# TODO: are these actually used?
 def _and_reduce(iterable):
     return reduce(lambda x, y: x and y, iterable, True)
 
@@ -25,7 +25,7 @@ def _and_reduce(iterable):
 def do_trees_have_same_structure(a, b):
     """Returns True if two jax trees have the same structure.
     """
-    return jax.tree_structure(a) == jax.tree_structure(b)
+    return jax.tree_util.tree_structure(a) == jax.tree_util.tree_structure(b)
 
 
 def do_trees_have_same_shape(a, b):
@@ -34,7 +34,7 @@ def do_trees_have_same_shape(a, b):
     """
     return do_trees_have_same_structure(a, b) and _and_reduce(
         jnp.shape(x) == jnp.shape(y)
-        for x, y, in zip(jax.tree_leaves(a), jax.tree_leaves(b))
+        for x, y, in zip(jax.tree_util.tree_leaves(a), jax.tree_util.tree_leaves(b))
     )
 
 
@@ -44,5 +44,5 @@ def are_trees_close(a, b):
     """
     return do_trees_have_same_shape(a, b) and _and_reduce(
         jnp.allclose(x, y)
-        for x, y, in zip(jax.tree_leaves(a), jax.tree_leaves(b))
+        for x, y, in zip(jax.tree_util.tree_leaves(a), jax.tree_util.tree_leaves(b))
     )

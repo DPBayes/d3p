@@ -34,23 +34,20 @@ setup(
     author='PADS @ Helsinki University and Aalto University',
     install_requires=[
         f'numpyro {_numpyro_version_lower_constraint}{_numpyro_version_optimistic_upper_constraint}',
+        'jax>=0.2.20',
         'fourier-accountant >= 0.12.0, < 1.0.0',
         'jax-chacha-prng @ git+https://github.com/DPBayes/jax-chacha-prng.git@v1-stable#egg=jax-chacha-prng',
     ],
     extras_require={
         'examples': ['matplotlib'],
         'compatible-dependencies': [
-            "numpyro[cpu] == 0.9.2",
-            "jax==0.3.13",
-            "jaxlib==0.3.10"
+            "numpyro==0.10.1",
+            "jax==0.3.23",
+            "jaxlib==0.3.22"
         ],
         'tpu': f"numpyro[tpu]",
         'cpu': f"numpyro[cpu]",
-        'cuda': "numpyro[cuda]", # after numpyro v0.8.0 (and some time after jax v0.2.13)
-        **{
-            f'cuda{version}': [f'numpyro[cuda{version}]']
-            for version in _available_cuda_versions
-        }
+        'cuda': "numpyro[cuda]"
     },
     long_description=long_description,
     long_description_content_type='text/markdown',

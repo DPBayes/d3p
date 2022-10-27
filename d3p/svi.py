@@ -75,7 +75,7 @@ def full_norm(vector_parts, ord=2):
     `numpy.linalg.norm`.
     :return: The indicated norm over the full vector.
     """
-    list_of_parts = jax.tree_leaves(vector_parts)
+    list_of_parts = jax.tree_util.tree_leaves(vector_parts)
 
     if list_of_parts is None or len(list_of_parts) == 0:
         return 0.
@@ -99,7 +99,7 @@ def normalize_gradient(gradient_parts, ord=2):
         gradient_parts.
     """
     norm_inv = 1./full_norm(gradient_parts, ord=ord)
-    normalized = jax.tree_map(lambda g: norm_inv * g, gradient_parts)
+    normalized = jax.tree_util.tree_map(lambda g: norm_inv * g, gradient_parts)
     return normalized
 
 
@@ -120,7 +120,7 @@ def clip_gradient(gradient_parts, c):
         raise ValueError("The clipping threshold must be greater than 0.")
     norm = full_norm(gradient_parts)
     clip_scaling_factor = 1./jnp.maximum(1., norm/c)
-    clipped_grads = jax.tree_map(lambda g: clip_scaling_factor * g, gradient_parts)
+    clipped_grads = jax.tree_util.tree_map(lambda g: clip_scaling_factor * g, gradient_parts)
     return clipped_grads
 
 
@@ -324,7 +324,7 @@ class DPSVI(SVI):
         """
 
         loss_val = jnp.mean(px_loss, axis=0)
-        avg_clipped_grads = jax.tree_map(lambda px_grads_site: jnp.mean(px_grads_site, axis=0), px_clipped_grads)
+        avg_clipped_grads = jax.tree_util.tree_map(lambda px_grads_site: jnp.mean(px_grads_site, axis=0), px_clipped_grads)
 
         return loss_val, avg_clipped_grads
 
@@ -351,7 +351,7 @@ class DPSVI(SVI):
         # by 1/observation_scale? Now we revert this, so that the final gradient is scaled as
         # expected by the user
         obs_scale = dp_svi_state.observation_scale
-        perturbed_grads = jax.tree_map(lambda grad_site: grad_site * obs_scale, perturbed_grads)
+        perturbed_grads = jax.tree_util.tree_map(lambda grad_site: grad_site * obs_scale, perturbed_grads)
 
         return dp_svi_state, perturbed_grads
 
@@ -462,12 +462,12 @@ class DPSVI(SVI):
             noise = rng_suite.normal(site_rng, a.shape) * perturbation_scale
             return a + noise
 
-        values, tree_def = jax.tree_flatten(values)
+        values, tree_def = jax.tree_util.tree_flatten(values)
         per_site_rngs = rng_suite.split(rng, len(values))
         perturbed_values = (
             perturb_one(grad, site_rng)
             for grad, site_rng in zip(values, per_site_rngs)
         )
 
-        perturbed_values = jax.tree_unflatten(tree_def, perturbed_values)
+        perturbed_values = jax.tree_util.tree_unflatten(tree_def, perturbed_values)
         return perturbed_values

@@ -14,10 +14,17 @@
 # limitations under the License.
 
 from numpyro.optim import _NumPyroOptim, _add_doc
-from jax.experimental.optimizers import make_schedule
 import jax.numpy as jnp
-from jax import tree_map, tree_leaves, lax
+from jax import lax
+from jax.tree_util import tree_map, tree_leaves
 
+try:
+    from jax.example_libraries.optimizers import make_schedule
+except (ImportError, AttributeError):
+    # pre jax v0.2.25
+    from jax.experimental.optimizers import make_schedule
+
+import numpyro.optim
 
 def adadp(
         step_size=1e-3,

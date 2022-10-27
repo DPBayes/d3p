@@ -25,14 +25,22 @@ import secrets
 import warnings
 
 import jax.random as jrng
-import jax
 
-PRNGState = jrng.KeyArray
+try:
+    from jax.random import KeyArray as PRNGState
+except (AttributeError, ImportError):
+    from jax._src.random import IntegerArray as PRNGState
+
 split = jrng.split
 fold_in = jrng.fold_in
-random_bits = jax._src.random._random_bits
+from jax._src.random import _random_bits as _random_bits
 uniform = jrng.uniform
 normal = jrng.normal
+
+try:
+    from jax._src.random import _check_prng_key as _check_prng_key
+except (AttributeError, ImportError):
+    def _check_prng_key(x): return x, False
 
 KeyRandomnessInBytes = 4
 
@@ -55,6 +63,11 @@ def PRNGKey(seed: Optional[int] = None) -> PRNGState:
     else:
         nonopt_seed = seed
     return jrng.PRNGKey(nonopt_seed)
+
+
+def random_bits(key, bit_width, shape):
+    key, _ = _check_prng_key(key)
+    return _random_bits(key, bit_width, shape)
 
 
 def convert_to_jax_rng_key(rng_key: PRNGState) -> jnp.array:
