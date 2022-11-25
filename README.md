@@ -126,9 +126,16 @@ See the `examples/` for more examples.
 
 ## Installing
 
-d3p is pure Python software. You can install the latest development version
-via pip with the following command (you will need the pip and git command line tools
-installed on your system):
+d3p is pure Python software. You can install it via the pip command line tool
+```
+pip install d3p
+```
+
+This will install d3p with all required dependencies (NumPyro, JAX, ..) for CPU usage.
+
+
+You can also install the latest development version
+via pip with the following command:
 ```
 pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p
 ```
@@ -140,11 +147,8 @@ cd d3p
 pip install .
 ```
 
-This will install d3p with all required dependencies (NumPyro, JAX, ..) for CPU usage.
-
 If you want to run the included examples, use the `examples` installation target:
 ```
-pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[examples] # or,
 pip install .[examples]
 ```
 
@@ -164,20 +168,23 @@ pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[compatible-dep
 ```
 
 ### GPU installation
-If you want to run on CUDA devices, replace the last command with:
+d3p supports hardware acceleration on CUDA devices. You will need to make sure that
+you have the CUDA libraries set up on your system.
 
+You can then install d3p using
 ```
-pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[cuda] -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install d3p[cuda] -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+```
+
+Unfortunately, the `jax-chacha-prng` package which provides the secure randomness
+generator d3p relies on does not provide prebuilt packages for CUDA, so will need to
+reinstall it from sources. To do so, issue the following command after the previous one:
+```
+pip install --force-reinstall --no-binaries :all: "jax-chacha-prng<2"
 ```
 
 ### TPU installation
-Replace the installation command with
-```
-pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.htmlhtml
-```
-
-Refer to the [JAX installation instructions](https://github.com/google/jax#pip-installation-gpu-cuda)
-for more details.
+TPUs are currently not supported.
 
 ## Versioning Policy
 

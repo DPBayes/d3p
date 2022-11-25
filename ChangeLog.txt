@@ -1,4 +1,4 @@
-- 1.0.0:
+- 0.2.0:
     - ! Renamed main package 'dppp' to 'd3p' !
     - Upgraded stable numpyro dependency to 0.8.0, removed supported for earlier versions
     - Removed support for jax versions prior to v0.2.20.

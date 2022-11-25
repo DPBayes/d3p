@@ -17,9 +17,6 @@ spec.loader.exec_module(version_module)
 
 _version = version_module.VERSION
 
-
-_available_cuda_versions = ['101', '102', '110', '111']
-
 PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
 
 _numpyro_version_lower_constraint = '>=0.8.0'
@@ -29,24 +26,23 @@ setup(
     name='d3p',
     python_requires='>=3.7',
     version=_version,
-    description='Differentially-Private Probabilistic Programming',
+    description='Differentially-Private Probabilistic Programming using NumPyro and the differentially-private variational inference algorithm',
     packages=find_packages(include=['d3p', 'd3p.*']),
-    author='PADS @ Helsinki University and Aalto University',
+    author='FCAI R4 @ Helsinki University and Aalto University',
     install_requires=[
-        f'numpyro {_numpyro_version_lower_constraint}{_numpyro_version_optimistic_upper_constraint}',
-        'jax>=0.2.20',
+        f'numpyro[cpu] {_numpyro_version_lower_constraint}{_numpyro_version_optimistic_upper_constraint}',
+        'jax >= 0.2.20',
         'fourier-accountant >= 0.12.0, < 1.0.0',
-        'jax-chacha-prng @ git+https://github.com/DPBayes/jax-chacha-prng.git@v1-stable#egg=jax-chacha-prng',
+        'jax-chacha-prng >= 1, < 2',
     ],
     extras_require={
         'examples': ['matplotlib'],
         'compatible-dependencies': [
             "numpyro==0.10.1",
-            "jax==0.3.23",
-            "jaxlib==0.3.22"
+            "jax[cpu]==0.3.23",
         ],
-        'tpu': f"numpyro[tpu]",
-        'cpu': f"numpyro[cpu]",
+        'tpu': "numpyro[tpu]",
+        'cpu': "",
         'cuda': "numpyro[cuda]"
     },
     long_description=long_description,
@@ -60,8 +56,6 @@ setup(
         'Intended Audience :: Science/Research',
         'Operating System :: POSIX :: Linux',
         'Operating System :: MacOS :: MacOS X',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3'
     ],
 )
