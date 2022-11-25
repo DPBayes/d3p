@@ -13,10 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-MAJOR_VERSION = 1
-MINOR_VERSION = 0
+MAJOR_VERSION = 0
+MINOR_VERSION = 2
 PATCH_VERSION = 0
-EXT_VERSION = "rc.2"
+EXT_VERSION = ""
 
 EXT_VERSION_SUFFIX = f"-{EXT_VERSION}" if len(EXT_VERSION) > 0 else ""
 

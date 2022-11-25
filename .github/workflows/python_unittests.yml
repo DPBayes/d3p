@@ -35,7 +35,7 @@ jobs:
         flake8 --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics --ignore=E266,E226,W504 d3p tests
     - name: Install dependencies
       run: |
-        python -m pip install -e .[cpu,compatible-dependencies]
+        python -m pip install -e .[compatible-dependencies]
     - name: Test with pytest
       run: |
         pytest --cov=d3p --cov-report term-missing tests/
@@ -43,11 +43,11 @@ jobs:
   reuse-compliance:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
       with:
         submodules: true
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v3
     - name: Install environment
       run: |
         python -m pip install --upgrade pip
