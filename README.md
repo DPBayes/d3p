@@ -169,7 +169,7 @@ pip install git+https://github.com/DPBayes/d3p.git@master#egg=d3p[compatible-dep
 
 ### GPU installation
 d3p supports hardware acceleration on CUDA devices. You will need to make sure that
-you have the CUDA libraries set up on your system.
+you have the CUDA libraries set up on your system as well as a working compiler for C++.
 
 You can then install d3p using
 ```
@@ -180,7 +180,7 @@ Unfortunately, the `jax-chacha-prng` package which provides the secure randomnes
 generator d3p relies on does not provide prebuilt packages for CUDA, so will need to
 reinstall it from sources. To do so, issue the following command after the previous one:
 ```
-pip install --force-reinstall --no-binaries :all: "jax-chacha-prng<2"
+pip install --force-reinstall --no-binary jax-chacha-prng "jax-chacha-prng<2"
 ```
 
 ### TPU installation
