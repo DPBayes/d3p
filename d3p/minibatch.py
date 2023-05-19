@@ -17,11 +17,137 @@ from d3p.util import example_count, sample_from_array
 import d3p.random as strong_rng
 import jax.numpy as jnp
 import jax
+import scipy.stats
+from functools import partial
 
 __all__ = [
-    'subsample_batchify_data', 'split_batchify_data',
+    'subsample_batchify_data', 'split_batchify_data', 'poisson_batchify_data',
     'q_to_batch_size', 'batch_size_to_q'
 ]
+
+
+@partial(jax.jit, static_argnames=("N", "rng_suite", "cutoff_size"))
+def poisson_sample_idxs(rng_key, q, N, rng_suite, cutoff_size=None):
+    if cutoff_size is None:
+        cutoff_size = N
+
+    selectors = rng_suite.uniform(rng_key, (N,), dtype=jnp.float32) <= q
+    num_selected = jnp.sum(selectors)
+
+    sorted_idxs = jnp.empty(N, dtype=jnp.int32)
+    def sort(i, state):
+        sorted_idxs, active_offset, inactive_offset = state
+        is_active = selectors[i]  # int, 0 or 1
+        is_inactive = 1 - is_active
+        offset = active_offset * is_active + inactive_offset * is_inactive
+
+        sorted_idxs = jax.lax.dynamic_update_index_in_dim(sorted_idxs, i, offset, 0)
+
+        active_offset += is_active
+        inactive_offset += is_inactive
+        return sorted_idxs, active_offset, inactive_offset
+    
+    sorted_idxs, _, _ = jax.lax.fori_loop(0, N, sort, (sorted_idxs, 0, num_selected))
+    
+    return sorted_idxs[:cutoff_size], num_selected
+# TODO: the above has a runtime of O(2N), which is not really optimal. A faster variant could
+#   draw num_selected from the Poisson distribution and then use sample_from_array to
+#   performantly draw a random subset of that size; but there is currently no support
+#   for poisson sampling from safe rng_suite
+
+
+def poisson_batchify_data(dataset, q, max_batch_size, handle_oversized_batch='truncate', rng_suite=strong_rng):
+    """ Returns functions to fetch (randomized) batches of a given dataset by
+    Poisson sampling.
+
+    As `split_batchify_data` and `subsample_batchify_data, this takes the common epoch
+    viewpoint to training, where an epoch is understood to be one pass over the data set.
+    However, the data set is not shuffled and split to generate batches - instead
+    every element is included in a batch with probability `q`, independent of any other element.
+
+    This means that the number of elements in a batch varies (it follows a Poisson distribution).
+    In order to facilitate efficient computation, returned batches are always of size
+    `max_batch_size` - padding is used whenever the number of sampled elements in a batch is lower
+    and a boolean mask is returned additionally to the batch to indicate which elements are valid (not padded).
+
+    If the number of sampled elements is larger than `max_batch_size`, two different behaviors are possible
+    depending on the value of `handle_oversized_batch`:
+        - `truncate`: the batch is simply truncated to `max_batch_size`
+        - `suppress`: the batch sample is discarded as invalid, i.e., an empty batch is returned.
+
+
+    :param arrays: Tuple of arrays constituting the data set to be batchified.
+        All arrays must have the same length on the first axis.
+    :param q: The subsampling ratio, i.e., the probability with which an element is included in a batch.
+    :param max_batch_size: The structural size of batches returned as an integer. Alternatively, a float between 0 and 1,
+        in which case max_batch_size is set to the corresponding quantile of the Poisson distribution of batch sizes.
+    :param handle_oversized_batch: Optional. How to handle cases when the number of sampled elements exceeds `max_batch_size`.
+        Must be `truncate` or `suppress`. Default: `truncate`.
+    :param rng_suite: Optional. The PRNG suite to use. Defaults to the cryptographically-secure d3p.random.
+    :return: tuple (init_fn: () -> (num_batches, batchifier_state), get_batch: (i, batchifier_state) -> batch)
+        init_fn() returns the number of batches per epoch and an initialized state of the batchifier for the epoch.
+        get_batch() returns the next batch of elements from the data set and a Boolean mask indicating padding (True indicates a valid element).
+    """
+        
+    if not dataset:
+        raise ValueError("The data set must not be empty")
+    if not isinstance(dataset, tuple):
+        raise ValueError("Parameter dataset must be a tuple containing arrays of equal length.")
+    if q < 0 or q > 1:
+        raise ValueError("Parameter q must be >=0 and <=1.")
+
+    num_records = example_count(dataset[0])
+    for arr in dataset:
+        if num_records != example_count(arr):
+            raise ValueError("All arrays constituting the data set must have the same number of records")
+
+    if max_batch_size < 0:
+        raise ValueError("max_batch_size must be a positive integer denoting the maximum batch size,"
+                         " or a float between 0 and 1 denoting the maximum batch size in terms of Poisson probability mass.")
+    if not isinstance(max_batch_size, int):
+        max_batch_size = scipy.stats.poisson(num_records * q).ppf(max_batch_size)
+    
+    @jax.jit
+    def init(rng_key: rng_suite.PRNGState):
+        """ Initializes the batchifier for a new epoch.
+
+        :param rng_key: The base PRNG key the batchifier will use for randomness.
+        :return: tuple consisting of: number of batches in the epoch,
+            initialized state of the batchifier for the epoch
+        """
+        return num_records // int(q * num_records), rng_key
+
+    @jax.jit
+    def get_batch(i, batchifier_state):
+        """ Fetches the next batch for the current epoch.
+
+        :param i: The number of the batch in the epoch.
+        :param batchifier_state: The initialized state returned by init.
+        :return: tuple (batch, mask), where
+            - batch is a tuple of arrays, each of length `max_batch_size` and containing
+                the sampled elements from the arrays in `data` corresponding to the batch,
+            - mask is a Boolean array of length `max_batch_size` indicating which elements in
+                batch arrays correspond to batch elements (`True`) and which constitute padding (`False`).
+        """
+        rng_key = rng_suite.fold_in(batchifier_state, i)
+        idxs, num_selected = poisson_sample_idxs(rng_key, q, num_records, rng_suite, cutoff_size=max_batch_size)
+        assert len(idxs) == max_batch_size
+
+        if handle_oversized_batch == "suppress":
+            num_selected = (num_selected <= max_batch_size) * num_selected # => 0 if num_selected > max_batch_size
+        else:
+            num_selected = jnp.minimum(num_selected, max_batch_size)
+
+        mask = jnp.arange(max_batch_size) < num_selected
+
+        def map_single(a):
+            taken = jnp.take(a, idxs, axis=0, unique_indices=True)
+            mask_shape = (-1,) + (1,) * len(taken.shape[1:])
+            return jnp.reshape(mask, mask_shape) * taken
+
+        return tuple(map_single(a) for a in dataset), mask
+
+    return init, get_batch
 
 
 def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=False, rng_suite=strong_rng):
