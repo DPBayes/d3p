@@ -1,3 +1,6 @@
+- 0.3.0:
+    - Added: poisson_batchify_data for Poisson subsampling of data sets
+    - Added: DPSVI.update now accepts a mask indicating padded samples in the batch.
 - 0.2.0:
     - ! Renamed main package 'dppp' to 'd3p' !
     - Upgraded stable numpyro dependency to 0.8.0, removed supported for earlier versions
