@@ -28,32 +28,15 @@ __all__ = [
 
 @partial(jax.jit, static_argnames=("N", "rng_suite", "cutoff_size"))
 def poisson_sample_idxs(rng_key, q, N, rng_suite, cutoff_size=None):
-    if cutoff_size is None:
+    if cutoff_size is None or cutoff_size > N:
         cutoff_size = N
 
     selectors = rng_suite.uniform(rng_key, (N,), dtype=jnp.float32) <= q
     num_selected = jnp.sum(selectors)
 
-    sorted_idxs = jnp.empty(N, dtype=jnp.int32)
-    def sort(i, state):
-        sorted_idxs, active_offset, inactive_offset = state
-        is_active = selectors[i]  # int, 0 or 1
-        is_inactive = 1 - is_active
-        offset = active_offset * is_active + inactive_offset * is_inactive
+    idxs = jnp.argsort(selectors)[::-1][:cutoff_size]
 
-        sorted_idxs = jax.lax.dynamic_update_index_in_dim(sorted_idxs, i, offset, 0)
-
-        active_offset += is_active
-        inactive_offset += is_inactive
-        return sorted_idxs, active_offset, inactive_offset
-    
-    sorted_idxs, _, _ = jax.lax.fori_loop(0, N, sort, (sorted_idxs, 0, num_selected))
-    
-    return sorted_idxs[:cutoff_size], num_selected
-# TODO: the above has a runtime of O(2N), which is not really optimal. A faster variant could
-#   draw num_selected from the Poisson distribution and then use sample_from_array to
-#   performantly draw a random subset of that size; but there is currently no support
-#   for poisson sampling from safe rng_suite
+    return idxs, num_selected
 
 
 def poisson_batchify_data(dataset, q, max_batch_size, handle_oversized_batch='truncate', rng_suite=strong_rng):
