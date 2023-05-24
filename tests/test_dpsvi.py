@@ -28,7 +28,7 @@ import d3p.random.debug
 import numpy as np
 
 from d3p.svi import DPSVI, DPSVIState, full_norm
-from util import are_trees_close
+from tests.util import are_trees_close
 
 
 class DPSVITestBase:
