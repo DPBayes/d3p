@@ -105,7 +105,7 @@ def poisson_batchify_data(dataset, q, max_batch_size, handle_oversized_batch='tr
         raise ValueError("max_batch_size must be a positive integer denoting the maximum batch size,"
                          " or a float between 0 and 1 denoting the maximum batch size in terms of Poisson probability mass.")
     if not isinstance(max_batch_size, int):
-        max_batch_size = scipy.stats.poisson(num_records * q).ppf(max_batch_size)
+        max_batch_size = int(scipy.stats.poisson(num_records * q).ppf(max_batch_size))
     
     @jax.jit
     def init(rng_key: rng_suite.PRNGState):
