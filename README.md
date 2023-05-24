@@ -53,9 +53,13 @@ or any purely modelling and sampling related functionality of NumPyro/JAX. These
 DP-VI relies on uniform sampling of random minibatches for each update step to guarantee privacy. This is different
 from simply shuffling the data set and taking consecutive batches from it, as is often done in machine learning.
 
-`d3p` implements a high-performant GPU-optimised minibatch sampling routine in `d3p.minibatch.subsample_batchify_data`.
+`d3p` implements a high-performant GPU-optimised minibatch sampling routine in `d3p.minibatch.subsample_batchify_data`
+for sampling without replacement.
 It accepts the data set and a minibatch size (or, equivalently, a subsampling ratio) and returns functions
 `batchify_init` and `batchify_sample` which initialise a batchifier state from a `rng_key` and sample a random minibatch given the batchifier state respectively.
+Similarly, `d3p.minibatch.poisson_batchify_data` implements Poisson subsampling of batches given a sampling probability `q`.
+For architectural reasons, `poisson_batchify_data` always returns a (padded) array of a fixed maximum batch size and indicates
+the padded entries in a Boolean mask which is also returned alongside each batch.
 
 ### Requirements for Model Implementation
 `d3p.svi.DPSVI` only requires the `model` function to be properly setup for minibatches of independent data. This
@@ -76,9 +80,9 @@ from numpyro.primitives import sample, plate
 from numpyro.distributions import Normal, Bernoulli
 from numpyro.infer.autoguide import AutoDiagonalNormal
 
-from d3p.minibatch import subsample_batchify_data
+from d3p.minibatch import poisson_batchify_data
 from d3p.svi import DPSVI
-from d3p.dputil import approximate_sigma
+from d3p.dputil import approximate_sigma_remove_relation
 import d3p.random
 
 def sigmoid(x):
@@ -97,15 +101,15 @@ def model(xs, ys, N):
 
 guide = AutoDiagonalNormal(model) # variational guide approximates posterior of theta and w with independent Gaussians
 
-def infer(data, labels, batch_size, num_iter, epsilon, delta, seed):
+def infer(data, labels, q, num_iter, epsilon, delta, seed):
     rng_key = d3p.random.PRNGKey(seed)
     # set up minibatch sampling
-    batchifier_init, get_batch = subsample_batchify_data((data, labels), batch_size)
+    expected_batch_size = int(q * len(data))
+    batchifier_init, get_batch = poisson_batchify_data((data, labels), q, max_batch_size=2 * expected_batch_size)
     _, batchifier_state = batchifier_init(rng_key)
 
     # set up DP-VI algorithm
-    q = batch_size / len(data)
-    dp_scale, _, _ = approximate_sigma(epsilon, delta, q, num_iter)
+    dp_scale, _, _ = approximate_sigma_remove_relation(epsilon, delta, q, num_iter)
     loss = Trace_ELBO()
     optimiser = Adam(1e-3)
     clipping_threshold = 10.
@@ -114,8 +118,8 @@ def infer(data, labels, batch_size, num_iter, epsilon, delta, seed):
 
     # run inference
     def step_function(i, svi_state):
-        data_batch, label_batch = get_batch(i, batchifier_state)
-        svi_state, loss = dpsvi.update(svi_state, data_batch, label_batch)
+        (data_batch, label_batch), mask = get_batch(i, batchifier_state)
+        svi_state, loss = dpsvi.update(svi_state, data_batch, label_batch, mask=mask)
         return svi_state
 
     svi_state = jax.lax.fori_loop(0, num_iter, step_function, svi_state)
