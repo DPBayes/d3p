@@ -43,9 +43,10 @@ from numpyro.infer import Trace_ELBO as ELBO
 
 from d3p.svi import DPSVI
 from d3p.modelling import sample_prior_predictive
-from d3p.minibatch import split_batchify_data, subsample_batchify_data
+from d3p.minibatch import split_batchify_data, poisson_batchify_data
 from d3p.gmm import GaussianMixture
 import d3p.random as rng_suite
+from d3p.dputil import approximate_sigma_remove_relation
 
 def model(k, obs=None, num_obs_total=None, d=None):
     # this is our model function using the GaussianMixture distribution
@@ -168,10 +169,15 @@ def main(args):
     d = args.dimensions
 
     toy_data_rng = jax.random.PRNGKey(1234)
+    q = args.batch_size / N
 
     X_train, X_test, latent_vals = create_toy_data(toy_data_rng, N, d)
-    train_init, train_fetch = subsample_batchify_data((X_train,), batch_size=args.batch_size)
+    train_init, train_fetch = poisson_batchify_data((X_train,), q=q, max_batch_size=.99)
     test_init, test_fetch = split_batchify_data((X_test,), batch_size=args.batch_size)
+
+    dpsvi_rng = rng_suite.PRNGKey(0)
+    dpsvi_rng, svi_init_rng, fetch_rng = rng_suite.split(dpsvi_rng, 3)
+    iters_per_batch, batchifier_state = train_init(fetch_rng)
 
     ## Init optimizer and training algorithms
     optimizer = optimizers.Adam(args.learning_rate)
@@ -185,24 +191,25 @@ def main(args):
     model_fixed = fix_params(model, k)
     guide_fixed = fix_params(guide, k)
 
+    delta = 1 / N**2
+    dp_scale, _, _ = approximate_sigma_remove_relation(args.epsilon, delta, q, num_iter=iters_per_batch * args.num_epochs)
+    print(f"{dp_scale=}")
+
     svi = DPSVI(
         model_fixed, guide_fixed, optimizer, ELBO(),
-        dp_scale=0.01,  clipping_threshold=20., num_obs_total=args.num_samples
+        dp_scale=dp_scale,  clipping_threshold=20., num_obs_total=args.num_samples
     )
 
-    dpsvi_rng = rng_suite.PRNGKey(0)
-    dpsvi_rng, svi_init_rng, fetch_rng = rng_suite.split(dpsvi_rng, 3)
-    _, batchifier_state = train_init(fetch_rng)
-    batch = train_fetch(0, batchifier_state)
+    batch, _ = train_fetch(0, batchifier_state)
     svi_state = svi.init(svi_init_rng, *batch)
 
     @jit
     def epoch_train(svi_state, batchifier_state, num_batch):
         def body_fn(i, val):
             svi_state, loss = val
-            batch = train_fetch(i, batchifier_state)
+            batch, mask = train_fetch(i, batchifier_state)
             svi_state, batch_loss = svi.update(
-                svi_state, *batch
+                svi_state, *batch, mask=mask
             )
             loss += batch_loss / (args.num_samples * num_batch)
             return svi_state, loss
@@ -257,11 +264,12 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', default=2000, type=int, help='number of training epochs')
+    parser.add_argument('-e', '--epsilon', default=10., type=float, help='privacy parameter epsilon')
+    parser.add_argument('-n', '--num-epochs', default=400, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
     parser.add_argument('-batch-size', default=32, type=int, help='batch size')
     parser.add_argument('-d', '--dimensions', default=2, type=int, help='data dimension')
-    parser.add_argument('-N', '--num-samples', default=2048, type=int, help='data samples count')
+    parser.add_argument('-N', '--num-samples', default=10000, type=int, help='data samples count')
     parser.add_argument('-k', '--num-components', default=3, type=int, help='number of components in the mixture model')
     args = parser.parse_args()
     main(args)
