@@ -31,6 +31,8 @@ fold_in = ccrng.fold_in
 random_bits = ccrng.random_bits
 uniform = ccrng.uniform
 
+safety_factor = 10
+
 
 def PRNGKey(seed: Optional[Union[jnp.ndarray, int, bytes]] = None) -> PRNGState:
     """Initializes a PRNGKey for the d3p.random secure random number generator.
@@ -53,11 +55,13 @@ def normal(key: ccrng.RNGState,
     """Samples standard normal random values with given shape and float dtype
         derived from a cryptographically-secure pseudo-random number generator.
 
-    The sampling follows `jax.random.normal` exactly but uses `jax-chacha-prng`
-    as underlying generator instead of JAX's default generator.
+    The sampling follows `jax.random.normal` with two important distinctions:
+    - 1. It uses `jax-chacha-prng` as underlying generator instead of JAX's default generator,
+    - 2. It oversamples by `d3p.random.safety_factor` and aggregates the obtained samples
+        for the output to decrease vulnerability to Mironov style attacks [1], following [2].
 
-    Note that this currently leaves this vulnerable to attacks on imprecise sampling
-    as described in Mironov, "On Significance of the Least Significant Bits For Differential Privacy".
+    [1]: Mironov, "On Significance of the Least Significant Bits For Differential Privacy".
+    [2]: Holohan, Braghin "Secure Random Sampling in Differential Privacy"
 
     :param key: A PRNGKey used as the random key.
     :param shape: Optional. A tuple of nonnegative integers representing the result
@@ -70,11 +74,18 @@ def normal(key: ccrng.RNGState,
     if not jax.dtypes.issubdtype(dtype, np.floating):
         raise ValueError(f"dtype argument to `normal` must be a float dtype, got {dtype}")
     dtype = jax.dtypes.canonicalize_dtype(dtype)
-    return _normal(key, shape, dtype)
+    return _safe_normal_primitive(key, shape, dtype)
 
 
 @partial(jax.jit, static_argnums=(1, 2))
-def _normal(key, shape, dtype) -> jnp.ndarray:
+def _safe_normal_primitive(key, shape, dtype) -> jnp.ndarray:
+    new_shape = shape + (safety_factor,)
+    xs = _unsafe_normal_primitive(key, new_shape, dtype)
+    return jnp.sum(xs / np.sqrt(safety_factor), axis=-1)
+
+
+@partial(jax.jit, static_argnums=(1, 2))
+def _unsafe_normal_primitive(key, shape, dtype) -> jnp.ndarray:
     lo = np.nextafter(np.array(-1., dtype), 0., dtype=dtype)
     hi = np.array(1., dtype)
     u = ccrng.uniform(key, shape, dtype, lo, hi)

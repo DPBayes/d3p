@@ -20,6 +20,7 @@ import numpy as np
 
 import d3p.random
 import d3p.random.debug
+import scipy.stats
 
 
 class RNGSuiteTests:
@@ -47,6 +48,8 @@ class RNGSuiteTests:
         self.assertTrue(np.any(result != 0))
 
         self.assertTrue(np.abs(np.mean(result) - .5) <= 5/(12*np.sqrt(total)))
+        res = scipy.stats.kstest(np.ravel(result), "uniform")
+        self.assertTrue(res.pvalue > 0.05)
 
     def test_normal(self) -> None:
         key = self.rng_suite.PRNGKey(98734)
@@ -59,6 +62,8 @@ class RNGSuiteTests:
         self.assertTrue(np.any(result != 0))
 
         self.assertTrue(np.abs(np.mean(result)) <= 5/np.sqrt(total))
+        res = scipy.stats.kstest(np.ravel(result), "norm")
+        self.assertTrue(res.pvalue > 0.05)
 
 
 class StrongRNGSuiteTests(RNGSuiteTests, unittest.TestCase):
