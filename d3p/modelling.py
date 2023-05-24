@@ -15,6 +15,7 @@
 
 import jax
 from numpyro.handlers import seed, trace, substitute, condition
+from d3p.numpyro_primitives import mask_observed
 from d3p.util import unvectorize_shape_2d
 
 
@@ -245,3 +246,15 @@ def make_observed_model(model, obs_to_model_args_fn):
         mapped_args, mapped_kwargs, fixed_obs = obs_to_model_args_fn(*args, **kwargs)
         return condition(model, data=fixed_obs)(*mapped_args, **mapped_kwargs)
     return transformed_model_fn
+
+
+def mask_model(model):
+    def masked_model(mask, *args, **kwargs):
+        return mask_observed(model, mask)(*args, **kwargs)
+    return masked_model
+
+
+def mask_guide(guide):
+    def masked_guide(mask, *args, **kwargs):
+        return guide(*args, **kwargs)
+    return masked_guide
