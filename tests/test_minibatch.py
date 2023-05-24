@@ -304,6 +304,18 @@ class PoissonBatchifierTestsBase:
         _, mask = fetch(0, batchifier_state)
         self.assertEqual(0, np.sum(mask))
 
+    def test_poisson_batchify_max_batch_size_float(self):
+        N = 105
+        data = (np.arange(N) + 100,)
+        q = .3
+        max_batch_size = .9
+        _, fetch = poisson_batchify_data(data, q=q, max_batch_size=max_batch_size, handle_oversized_batch='suppress', rng_suite=self.rng_suite)
+        batchifier_state = self.rng_suite.PRNGKey(2)
+
+        batch, _ = fetch(0, batchifier_state)
+        expected_batch_size = 39
+        self.assertEqual(expected_batch_size, len(batch[0]))
+        
 
 class PoissonBatchifierStrongRNGTests(PoissonBatchifierTestsBase, unittest.TestCase):
 
