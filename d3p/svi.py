@@ -235,7 +235,7 @@ class DPSVI(SVI):
 
         return DPSVIState(svi_state.optim_state, rng_key, observation_scale)
 
-    def _compute_per_example_gradients(self, dp_svi_state, step_rng_key, *args, **kwargs):
+    def _compute_per_example_gradients(self, dp_svi_state, step_rng_key, *args, mask=True, **kwargs):
         """ Computes the raw per-example gradients of the model.
 
         This is the first step in a full update iteration.
@@ -243,11 +243,18 @@ class DPSVI(SVI):
         :param dp_svi_state: The current state of the DPSVI algorithm.
         :param step_rng_key: RNG key for this step.
         :param args: Arguments to the loss function.
+        :param mask: Array of booleans to ignore samples
+            to allow for padding in batches. Value of `False` indicates
+            that the corresponding element should be ignored (i.e., corresponding loss and
+            gradients are set to zero). May be a scalar boolean value
+            which is then broadcasted over the batch.
         :param kwargs: All keyword arguments to model or guide.
         :returns: tuple consisting of the updated DPSVI state, an array of loss
             values per example, a jax tuple tree of per-example gradients
             per parameter site (each site's gradients have shape (batch_size, *parameter_shape)),
-            and an integer denoting the batch size
+            an integer denoting the unmasked number of samples/elements in the batch,
+            and a scaling factor to correct scaling of gradients to account for
+            masked batch elements.
         """
         jax_rng_key = self._rng_suite.convert_to_jax_rng_key(step_rng_key)
 
@@ -261,7 +268,7 @@ class DPSVI(SVI):
 
         # we wrap the per-example loss (ELBO) to make it easier "digestable"
         # for jax.vmap(jax.value_and_grad()): slighly reordering parameters; fixing kwargs, model and guide
-        def wrapped_px_loss(prms, rng_key, loss_args):
+        def wrapped_px_loss(prms, rng_key, loss_args, mask):
             # Vmap removes leading dimensions, we re-add those in a wrapper for loss so
             # that loss/the model can be oblivious of this.
             # Additionally we scale down losses and gradients by the inverse of the
@@ -271,7 +278,7 @@ class DPSVI(SVI):
             return 1/obs_scale * self.loss.loss(
                 rng_key, self.constrain_fn(prms), self.model, self.guide,
                 *new_args, **kwargs, **self.static_kwargs
-            )
+            ) * mask
 
         # note: the splitting of the rng key guarantees separate randomness for each example in the batch
         #       for the sample from the guide as well as all latent variables in the model.
@@ -279,17 +286,26 @@ class DPSVI(SVI):
         #       for all elements in the batch (be using the same rng key for all)
         #       to more closely mirror the standard SVI implementation, this would result in all latent
         #       samples to use the same randomness over the examples, which is something we certainly don't want.
-        batch_size = example_count(args[0])
-        px_rng_keys = jax.random.split(jax_rng_key, batch_size)
+        max_batch_size = example_count(args[0])
+        px_rng_keys = jax.random.split(jax_rng_key, max_batch_size)
 
-        px_value_and_grad_fn = jax.vmap(jax.value_and_grad(wrapped_px_loss), in_axes=(None, 0, 0))
-        px_losses, px_grads = px_value_and_grad_fn(params, px_rng_keys, args)
+        if isinstance(mask, bool):
+            mask_vmap_ax = None
+            num_elements = max_batch_size * mask
+        else:
+            mask_vmap_ax = 0
+            num_elements = jnp.sum(mask)
+
+        px_value_and_grad_fn = jax.vmap(jax.value_and_grad(wrapped_px_loss), in_axes=(None, 0, 0, mask_vmap_ax))
+        px_losses, px_grads = px_value_and_grad_fn(params, px_rng_keys, args, mask)
 
         # we will not be doing anything privacy-related with the loss value,
         # so let's revert the downscaling we applied above; we only want that for the gradients.
-        px_losses *= obs_scale
+        # we also correct the scaling in case we zero'd out elements with the provided mask
+        batch_mask_scaling_factor = jnp.where(num_elements == 0, 0., max_batch_size / num_elements)
+        px_losses *= obs_scale * batch_mask_scaling_factor
 
-        return dp_svi_state, px_losses, px_grads, batch_size
+        return dp_svi_state, px_losses, px_grads, num_elements, batch_mask_scaling_factor
 
     def _clip_gradients(self, dp_svi_state, px_grads):
         """ Clips each per-example gradient.
@@ -324,12 +340,15 @@ class DPSVI(SVI):
         """
 
         loss_val = jnp.mean(px_loss, axis=0)
-        avg_clipped_grads = jax.tree_util.tree_map(lambda px_grads_site: jnp.mean(px_grads_site, axis=0), px_clipped_grads)
+        avg_clipped_grads = jax.tree_util.tree_map(
+            lambda px_grads_site: jnp.mean(px_grads_site, axis=0),
+            px_clipped_grads
+        )
 
         return loss_val, avg_clipped_grads
 
     def _perturb_and_reassemble_gradients(
-            self, dp_svi_state, step_rng_key, avg_clipped_grads, batch_size
+            self, dp_svi_state, step_rng_key, avg_clipped_grads, num_elements, batch_mask_scaling_factor
         ):  # noqa: E121, E125
         """ Perturbs the gradients using Gaussian noise.
 
@@ -338,10 +357,12 @@ class DPSVI(SVI):
         :param dp_svi_state: The current state of the DPSVI algorithm.
         :param step_rng_key: RNG key for this step.
         :param avg_clipped_grads: Jax tree of batch gradients for each parameter site
-        :param batch_size: Size of the training batch.
+        :param num_elements: Number of unmasked elements in the batch.
+        :param batch_mask_scaling_factor: Factor to correct scaling of gradients to account for
+            masked batch elements.
         """
         # because avg_clipped_grads is the average of gradients clipped to norm self._clipping_threshold
-        sensitivity = (self._clipping_threshold / batch_size)
+        sensitivity = (self._clipping_threshold / num_elements)
         perturbation_scale = self._dp_scale * sensitivity
         perturbed_grads = self.perturbation_function(
             self._rng_suite, step_rng_key, avg_clipped_grads, perturbation_scale
@@ -351,7 +372,7 @@ class DPSVI(SVI):
         # by 1/observation_scale? Now we revert this, so that the final gradient is scaled as
         # expected by the user
         obs_scale = dp_svi_state.observation_scale
-        perturbed_grads = jax.tree_util.tree_map(lambda grad_site: grad_site * obs_scale, perturbed_grads)
+        perturbed_grads = jax.tree_util.tree_map(lambda grad_site: grad_site * obs_scale * batch_mask_scaling_factor, perturbed_grads)
 
         return dp_svi_state, perturbed_grads
 
@@ -371,13 +392,17 @@ class DPSVI(SVI):
         dp_svi_state = self._update_state_optim_state(dp_svi_state, new_optim_state)
         return dp_svi_state
 
-    def update(self, svi_state, *args, **kwargs):
+    def update(self, svi_state, *args, mask=True, **kwargs):
         """ Takes a single step of SVI (possibly on a batch / minibatch of data),
         using the optimizer.
 
         :param svi_state: Current state of SVI.
         :param args: Arguments to the model / guide (these can possibly vary during
             the course of fitting).
+        :param mask: Array of boolean to ignore samples
+            to allow for padding in batches. Value of `False` indicates
+            that the corresponding element should be ignored. May be a scalar boolean value
+            which is then broadcasted over the batch.
         :param kwargs: Keyword arguments to the model / guide (these can possibly vary
             during the course of fitting).
         :return: Tuple of `(svi_state, loss)`, where `svi_state` is the updated
@@ -388,8 +413,8 @@ class DPSVI(SVI):
         svi_state, update_rng_keys = self._split_rng_key(svi_state, 2)
         gradient_rng_key, perturbation_rng_key = update_rng_keys
 
-        svi_state, px_losses, px_grads, batch_size = \
-            self._compute_per_example_gradients(svi_state, gradient_rng_key, *args, **kwargs)
+        svi_state, px_losses, px_grads, num_elements, batch_mask_scaling_factor = \
+            self._compute_per_example_gradients(svi_state, gradient_rng_key, *args, mask=mask, **kwargs)
 
         svi_state, px_clipped_grads = \
             self._clip_gradients(
@@ -401,7 +426,7 @@ class DPSVI(SVI):
         )
 
         svi_state, perturbed_grads = self._perturb_and_reassemble_gradients(
-            svi_state, perturbation_rng_key, avg_clipped_grads, batch_size
+            svi_state, perturbation_rng_key, avg_clipped_grads, num_elements, batch_mask_scaling_factor
         )
 
         svi_state = self._apply_gradient(svi_state, perturbed_grads)
@@ -471,3 +496,44 @@ class DPSVI(SVI):
 
         perturbed_values = jax.tree_util.tree_unflatten(tree_def, perturbed_values)
         return perturbed_values
+
+# from minibatch import Batchifier
+
+# class DPSVIRun:
+
+#     def __init__(self, svi: SVI, batchifier: Batchifier, iteration_chunk_size = None, chunk_callback = None):
+#         self._svi = svi
+#         self._batchifier = batchifier
+#         self._iteration_chunk_size = iteration_chunk_size
+#         if self._iteration_chunk_size is None:
+#             self._iteration_chunk_size = batchifier.num_data // batchifier.minibatch_size
+#         self._chunk_callback = chunk_callback
+
+#     def run(self, rng_key, num_iterations, **kwargs):
+#         def run_iteration_chunk(iter, state):
+            
+#             def has_more_minibatches(loss, svi_state, batchifier_state):
+#                 _, _, has_more_minibatches, _ = self._batchifier.next_minibatch(iter, batchifier_state)
+#                 return has_more_minibatches
+            
+#             def run_minibatch_body(loss, svi_state, batchifier_state):
+#                 minibatch, mask, _, batchifier_state = self._batchifier.next_minibatch(iter, batchifier_state)
+#                 loss, svi_state = self._svi.update(svi_state, *minibatch, *mask, **kwargs)
+#                 return loss, svi_state, batchifier_state
+            
+#             return jax.lax.while_loop(has_more_minibatches, run_minibatch_body, (jnp.array(0), *state))
+        
+#         chunks_rng, svi_rng = jax.random.split(rng_key, 2)
+        
+#         svi_state = self._svi.init(svi_rng) #  todo: add arguments here
+#         chunks = [self._iteration_chunk_size] * (num_iterations // self._iteration_chunk_size) + [num_iterations % self._iteration_chunk_size]
+#         for i, chunk_size in enumerate(chunks):
+#             chunk_rng = jax.random.fold_in(chunks_rng, i)
+#             batchifier_state = self._batchifier.init(chunk_rng)
+#             state = (svi_state, batchifier_state)
+#             loss, state = jax.lax.fori_loop(i, i + chunk_size, run_iteration_chunk, state)
+#             svi_state, _ = state
+#             if self._chunk_callback is not None:
+#                 self._chunk_callback(i, loss, svi_state)
+                
+#         return loss, state

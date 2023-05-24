@@ -16,11 +16,13 @@
 import jax
 import jax.numpy as jnp
 from functools import reduce
+import unittest
 
-# TODO: are these actually used?
 def _and_reduce(iterable):
     return reduce(lambda x, y: x and y, iterable, True)
 
+def _tree_and_reduce(tree):
+    return jax.tree_util.tree_reduce(lambda x, y: x and y, tree, True)
 
 def do_trees_have_same_structure(a, b):
     """Returns True if two jax trees have the same structure.
@@ -32,17 +34,23 @@ def do_trees_have_same_shape(a, b):
     """Returns True if two jax trees have the same structure and the shapes of
         all corresponding leaves are identical.
     """
-    return do_trees_have_same_structure(a, b) and _and_reduce(
-        jnp.shape(x) == jnp.shape(y)
-        for x, y, in zip(jax.tree_util.tree_leaves(a), jax.tree_util.tree_leaves(b))
+    return do_trees_have_same_structure(a, b)  and _tree_and_reduce(
+        jax.tree_util.tree_map(lambda x, y: jnp.shape(x) == jnp.shape(y), a, b)
     )
 
 
 def are_trees_close(a, b):
-    """Returns True if two jax trees have the same structure and all values are
-    close.
+    """Returns True if two jax trees have the same structure and all corresponding
+    leaf values are close.
     """
-    return do_trees_have_same_shape(a, b) and _and_reduce(
-        jnp.allclose(x, y)
-        for x, y, in zip(jax.tree_util.tree_leaves(a), jax.tree_util.tree_leaves(b))
+    return do_trees_have_same_shape(a, b) and _tree_and_reduce(
+        jax.tree_util.tree_map(lambda x, y: jnp.allclose(x, y), a, b)
+    )
+
+
+def are_trees_equal(a, b):
+    """Returns True if two jax trees have the same structure and all corresponding
+    leaf values are equal."""
+    return do_trees_have_same_shape(a, b) and _tree_and_reduce(
+        jax.tree_util.tree_map(lambda x, y: jnp.all(x == y), a, b)
     )

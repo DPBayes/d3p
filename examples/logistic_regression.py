@@ -43,7 +43,8 @@ import numpyro.optim as optimizers
 from d3p.util import example_count, normalize
 from d3p.svi import DPSVI
 from d3p.modelling import sample_prior_predictive, sample_multi_prior_predictive, sample_multi_posterior_predictive
-from d3p.minibatch import split_batchify_data, subsample_batchify_data
+from d3p.minibatch import split_batchify_data, poisson_batchify_data
+from d3p.dputil import approximate_sigma_remove_relation
 
 def model(batch_X, batch_y=None, num_obs_total=None):
     """Defines the generative probabilistic model: p(y|z,X)p(z)
@@ -59,7 +60,7 @@ def model(batch_X, batch_y=None, num_obs_total=None):
 
     z_w = sample('w', dist.Normal(jnp.zeros((d,)), jnp.ones((d,)))) # prior is N(0,I)
     z_intercept = sample('intercept', dist.Normal(0,1)) # prior is N(0,1)
-    logits = batch_X.dot(z_w)+z_intercept
+    logits = batch_X.dot(z_w) + z_intercept
 
     with plate("batch", num_obs_total, batch_size):
         return sample('obs', dist.Bernoulli(logits=logits), obs=batch_y)
@@ -122,30 +123,37 @@ def main(args):
         toy_data_rng, args.num_samples, args.dimensions
     )
 
-    train_init, train_fetch = subsample_batchify_data(train_data, batch_size=args.batch_size, rng_suite=rng_suite)
+    q = args.batch_size / len(train_data[0])
+    train_init, train_fetch = poisson_batchify_data(train_data, q, max_batch_size=.99, rng_suite=rng_suite)
     test_init, test_fetch = split_batchify_data(test_data, batch_size=args.batch_size, rng_suite=rng_suite)
+
+    dpsvi_rng = rng_suite.PRNGKey(0)
+    dpsvi_rng, svi_init_rng, data_fetch_rng = rng_suite.split(dpsvi_rng, 3)
+    num_iter_per_epoch, batchifier_state = train_init(rng_key=data_fetch_rng)
+    sample_batch, _ = train_fetch(0, batchifier_state)
+
+    dp_scale, _, _ = approximate_sigma_remove_relation(
+        args.epsilon, delta=1/len(train_data[0])**2, q=q, num_iter=num_iter_per_epoch * args.num_epochs
+    )
+
 
     ## Init optimizer and training algorithms
     optimizer = optimizers.Adam(args.learning_rate)
 
     svi = DPSVI(model, guide, optimizer, ELBO(),
-        dp_scale=0.01, clipping_threshold=20., num_obs_total=args.num_samples, rng_suite=rng_suite
+        dp_scale=dp_scale, clipping_threshold=1., num_obs_total=args.num_samples, rng_suite=rng_suite
     )
-
-    dpsvi_rng = rng_suite.PRNGKey(0)
-    dpsvi_rng, svi_init_rng, data_fetch_rng = rng_suite.split(dpsvi_rng, 3)
-    _, batchifier_state = train_init(rng_key=data_fetch_rng)
-    sample_batch = train_fetch(0, batchifier_state)
+    
     svi_state = svi.init(svi_init_rng, *sample_batch)
 
     @jit
     def epoch_train(svi_state, batchifier_state, num_batch):
         def body_fn(i, val):
             svi_state, loss = val
-            batch = train_fetch(i, batchifier_state)
+            batch, mask = train_fetch(i, batchifier_state)
             batch_X, batch_Y = batch
 
-            svi_state, batch_loss = svi.update(svi_state, batch_X, batch_Y)
+            svi_state, batch_loss = svi.update(svi_state, batch_X, batch_Y, mask=mask)
             loss += batch_loss / (args.num_samples * num_batch)
             return svi_state, loss
 
@@ -218,14 +226,15 @@ def main(args):
     # for evaluation accuracy with true parameters, we scale them to the same
     #   scale as the found posterior. (gives better results than normalized
     #   parameters (probably due to numerical instabilities))
-    acc_true = estimate_accuracy_fixed_params(X_test, y_test, w_true, intercept_true, rng_acc_true, 10)
-    acc_post = estimate_accuracy(X_test, y_test, params, rng_acc_post, 10)
+    acc_true = estimate_accuracy_fixed_params(X_test, y_test, w_true, intercept_true, rng_acc_true, 100)
+    acc_post = estimate_accuracy(X_test, y_test, params, rng_acc_post, 100)
 
     print("avg accuracy on test set:  with true parameters: {} ; with found posterior: {}\n".format(acc_true, acc_post))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse args")
+    parser.add_argument('-e', '--epsilon', default=.1, type=float, help='privacy epsilon')
     parser.add_argument('-n', '--num-epochs', default=600, type=int, help='number of training epochs')
     parser.add_argument('-lr', '--learning-rate', default=1.0e-3, type=float, help='learning rate')
     parser.add_argument('-batch-size', default=200, type=int, help='batch size')
