@@ -133,7 +133,7 @@ def poisson_batchify_data(dataset, q, max_batch_size, handle_oversized_batch='tr
     return init, get_batch
 
 
-def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=False, rng_suite=strong_rng):
+def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=False, rng_suite=strong_rng, return_mask=False):
     """ Returns functions to fetch (randomized) batches of a given dataset by
     uniformly random subsampling.
 
@@ -161,6 +161,7 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
     :param q: Size of batches as ratio of the data set size. Mutually exlusive with batch_size.
     :param with_replacement: Optional. Sample with replacements. Default: true.
     :param rng_suite: Optional. The PRNG suite to use. Defaults to the cryptographically-secure d3p.random.
+    :param return_mask: Optional. If True, `get_batch` returns a Boolean mask indicating valid (unpadded) elements in the batch.
     :return: tuple (init_fn: () -> (num_batches, batchifier_state), get_batch: (i, batchifier_state) -> batch)
         init_fn() returns the number of batches per epoch and an initialized state of the batchifier for the epoch
         get_batch() returns the next batch_size amount of items from the data set
@@ -196,12 +197,22 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
 
         :param i: The number of the batch in the epoch.
         :param batchifier_state: The initialized state returned by init.
-        :return: the batch
+        :return: batch or, if `return_mask` was `True`, tuple (batch, mask), where
+            - batch is a tuple of arrays, each of length `batch_size` and containing
+                the sampled elements from the arrays in `data` corresponding to the batch,
+            - mask is a Boolean array of length `batch_size` indicating which elements in
+                batch arrays correspond to batch elements (`True`) and which constitute padding (`False`).
         """
         rng_key = batchifier_state
         batch_rng_key = rng_suite.fold_in(rng_key, i)
         ret_idx = rng_suite.randint(batch_rng_key, (batch_size,), 0, num_records)
-        return tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
+
+        batch = tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
+        if return_mask:
+            mask = jnp.ones(batch_size, dtype=bool)
+            return batch, mask
+        return batch
+        
 
     @jax.jit
     def get_batch_without_replacement(i, batchifier_state):
@@ -209,17 +220,26 @@ def subsample_batchify_data(dataset, batch_size=None, q=None, with_replacement=F
 
         :param i: The number of the batch in the epoch.
         :param batchifier_state: The initialized state returned by init.
-        :return: the batch
+        :return: batch or, if `return_mask` was `True`, tuple (batch, mask), where
+            - batch is a tuple of arrays, each of length `batch_size` and containing
+                the sampled elements from the arrays in `data` corresponding to the batch,
+            - mask is a Boolean array of length `batch_size` indicating which elements in
+                batch arrays correspond to batch elements (`True`) and which constitute padding (`False`).
         """
         rng_key = batchifier_state
         batch_rng_key = rng_suite.fold_in(rng_key, i)
         ret_idx = sample_from_array(batch_rng_key, jnp.arange(num_records), batch_size, 0, rng_suite=rng_suite)
-        return tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
+
+        batch = tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
+        if return_mask:
+            mask = jnp.ones(batch_size, dtype=bool)
+            return batch, mask
+        return batch
 
     return init, get_batch_with_replacement if with_replacement else get_batch_without_replacement
 
 
-def split_batchify_data(dataset, batch_size=None, q=None, rng_suite=strong_rng):
+def split_batchify_data(dataset, batch_size=None, q=None, rng_suite=strong_rng, return_mask=False):
     """ Returns functions to fetch (randomized) batches of a given data set by
     shuffling and splitting the data set.
 
@@ -237,6 +257,7 @@ def split_batchify_data(dataset, batch_size=None, q=None, rng_suite=strong_rng):
     :param batch_size: Size of the batches as absolute number. Mutually exclusive with q.
     :param q: Size of batches as ratio of the data set size. Mutually exlusive with batch_size.
     :param rng_suite: Optional. The PRNG suite to use. Defaults to the cryptographically-secure d3p.random.
+    :param return_mask: Optional. If True, `get_batch` returns a Boolean mask indicating valid (unpadded) elements in the batch.
     :return: tuple (init_fn: () -> (num_batches, batchifier_state), get_batch: (i, batchifier_state) -> batch)
         init_fn() returns the number of batches per epoch and an initialized state of the batchifier for the epoch
         get_batch() returns the next batch_size amount of items from the data set
@@ -274,10 +295,19 @@ def split_batchify_data(dataset, batch_size=None, q=None, rng_suite=strong_rng):
 
         :param i: The number of the batch in the epoch.
         :param batchifier_state: The initialized state returned by init.
-        :return: the batch
+        :return: batch or, if `return_mask` was `True`, tuple (batch, mask), where
+            - batch is a tuple of arrays, each of length `batch_size` and containing
+                the sampled elements from the arrays in `data` corresponding to the batch,
+            - mask is a Boolean array of length `batch_size` indicating which elements in
+                batch arrays correspond to batch elements (`True`) and which constitute padding (`False`).
         """
         ret_idx = jax.lax.dynamic_slice_in_dim(idxs, i * batch_size, batch_size)
-        return tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
+    
+        batch = tuple(jnp.take(a, ret_idx, axis=0) for a in dataset)
+        if return_mask:
+            mask = jnp.ones(batch_size, dtype=bool)
+            return batch, mask
+        return batch
 
     return init, get_batch
 

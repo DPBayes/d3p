@@ -88,6 +88,17 @@ class SplitBatchifierTestsBase:
         batch = batch[0]
         self.assertEqual((10, 3), jnp.shape(batch))
 
+    def test_split_batchify_return_mask(self):
+        data = np.random.normal(size=(105, 3))
+        _, fetch = split_batchify_data((data,), 10, rng_suite=self.rng_suite, return_mask=True)
+        batchifier_state = jax.random.permutation(jax.random.PRNGKey(0), jnp.arange(0, 105))
+
+        batch, mask = fetch(6, batchifier_state)
+        batch = batch[0]
+        self.assertEqual((10, 3), jnp.shape(batch))
+        self.assertEqual((10,), jnp.shape(mask))
+        self.assertTrue(jnp.all(mask))
+
 
 class SplitBatchifierStrongRNGTests(SplitBatchifierTestsBase, unittest.TestCase):
 
@@ -158,6 +169,18 @@ class SubsamplingBatchifierTestsBase:
         batch = batch[0]
         self.assertEqual((10, 3), jnp.shape(batch))
 
+    def test_subsample_batchify_return_mask_without_replacement(self):
+        data = np.random.normal(size=(105, 3))
+        _, fetch = subsample_batchify_data((data,), 10, rng_suite=self.rng_suite, return_mask=True)
+        batchifier_state = self.rng_suite.PRNGKey(2)
+
+        batch, mask = fetch(6, batchifier_state)
+        batch = batch[0]
+        self.assertEqual((10, 3), jnp.shape(batch))
+        self.assertEqual((10,), jnp.shape(mask))
+        self.assertTrue(jnp.all(mask))
+
+
     def test_subsample_batchify_fetch_with_replacement(self):
         data = np.arange(105) + 100
         _, fetch = subsample_batchify_data((data,), 10, with_replacement=True, rng_suite=self.rng_suite)
@@ -189,6 +212,17 @@ class SubsamplingBatchifierTestsBase:
         batch = fetch(6, batchifier_state)
         batch = batch[0]
         self.assertEqual((10, 3), jnp.shape(batch))
+    
+    def test_subsample_batchify_return_mask_with_replacement(self):
+        data = np.random.normal(size=(105, 3))
+        _, fetch = subsample_batchify_data((data,), 10, with_replacement=True, rng_suite=self.rng_suite, return_mask=True)
+        batchifier_state = self.rng_suite.PRNGKey(2)
+
+        batch, mask = fetch(6, batchifier_state)
+        batch = batch[0]
+        self.assertEqual((10, 3), jnp.shape(batch))
+        self.assertEqual((10,), jnp.shape(mask))
+        self.assertTrue(jnp.all(mask))
 
 
 class SubsamplingBatchifierStrongRNGTests(SubsamplingBatchifierTestsBase, unittest.TestCase):
