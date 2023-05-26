@@ -36,6 +36,7 @@ fold_in = jrng.fold_in
 from jax._src.random import _random_bits as _random_bits
 uniform = jrng.uniform
 normal = jrng.normal
+randint = jrng.randint
 
 try:
     from jax._src.random import _check_prng_key as _check_prng_key
