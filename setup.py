@@ -3,6 +3,7 @@
 
 from __future__ import absolute_import, division, print_function
 import os
+import sys
 
 from setuptools import find_packages, setup
 
@@ -22,6 +23,18 @@ PROJECT_PATH = os.path.dirname(os.path.abspath(__file__))
 _numpyro_version_lower_constraint = '>=0.8.0'
 _numpyro_version_optimistic_upper_constraint = ', < 2.0.0'
 
+_compatible_dependencies = [
+    "numpyro<=0.11.0",
+    "jax[cpu]<=0.4.10",
+]
+if sys.version_info.minor == 7:
+    _compatible_dependencies = [
+        "numpyro<0.11.0",
+        "jax[cpu]==0.3.25",
+    ]
+
+print(_compatible_dependencies)
+
 setup(
     name='d3p',
     python_requires='>=3.7',
@@ -37,10 +50,7 @@ setup(
     ],
     extras_require={
         'examples': ['matplotlib'],
-        'compatible-dependencies': [
-            "numpyro==0.11.0",
-            "jax[cpu]==0.4.10",
-        ],
+        'compatible-dependencies': _compatible_dependencies,
         'tpu': "numpyro[tpu]",
         'cpu': "",
         'cuda': "numpyro[cuda]"

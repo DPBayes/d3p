@@ -193,7 +193,7 @@ def main(args):
 
     delta = 1 / N**2
     dp_scale, _, _ = approximate_sigma_remove_relation(args.epsilon, delta, q, num_iter=iters_per_batch * args.num_epochs)
-    print(f"{dp_scale=}")
+    print(f"dp_scale={dp_scale}")
 
     svi = DPSVI(
         model_fixed, guide_fixed, optimizer, ELBO(),
