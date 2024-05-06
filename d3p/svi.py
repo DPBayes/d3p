@@ -362,7 +362,9 @@ class DPSVI(SVI):
             masked batch elements.
         """
         # because avg_clipped_grads is the average of gradients clipped to norm self._clipping_threshold
-        sensitivity = (self._clipping_threshold / num_elements)
+        # and that average is computed over (num_elements * batch_mask_scaling_factor) many elements,
+        # i.e., every per-example gradient is scaled by 1 / (num_elements * batch_mask_scaling_factor) after clipping
+        sensitivity = (self._clipping_threshold / (num_elements * batch_mask_scaling_factor))
         perturbation_scale = self._dp_scale * sensitivity
         perturbed_grads = self.perturbation_function(
             self._rng_suite, step_rng_key, avg_clipped_grads, perturbation_scale

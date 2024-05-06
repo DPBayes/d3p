@@ -204,8 +204,7 @@ class DPSVITestBase:
         self.assertIs(svi_state.optim_state, new_svi_state.optim_state)
         self.assertEqual(jax.tree_util.tree_structure(grads), jax.tree_util.tree_structure(perturbed_grads))
 
-        corrected_observation_scale = svi_state.observation_scale * self.rescale_factor
-        expected_std = self.dp_scale * (self.clipping_threshold / self.num_elements) * corrected_observation_scale
+        expected_std = self.dp_scale * (self.clipping_threshold / self.num_elements) * svi_state.observation_scale
         for perturbed_site, site in zip(jax.tree_util.tree_leaves(perturbed_grads), jax.tree_util.tree_leaves(grads)):
             self.assertEqual(perturbed_site.shape, site.shape)
             self.assertTrue(
