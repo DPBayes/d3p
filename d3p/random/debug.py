@@ -19,11 +19,14 @@ cryptographically secure and should not be used in production settings, but
 runs faster than the secure variant and thus can be used to speed up debugging runs.
 """
 
-import jax.numpy as jnp
-from typing import Optional
 import secrets
 import warnings
+from functools import partial
+from typing import Optional
+from packaging.version import Version
 
+import jax
+import jax.numpy as jnp
 import jax.random as jrng
 
 try:
@@ -31,17 +34,20 @@ try:
 except (AttributeError, ImportError):
     from jax._src.random import IntegerArray as PRNGState
 
+if Version(jax.__version__) >= Version("0.10.2"):
+    from jax._src.random.core import _check_prng_key
+    from jax._src.random.core import _random_bits as _random_bits
+
+    _check_prng_key = partial(_check_prng_key, name="random_bits")
+else:
+    from jax._src.random import _check_prng_key
+    from jax._src.random import _random_bits as _random_bits
+
 split = jrng.split
 fold_in = jrng.fold_in
-from jax._src.random import _random_bits as _random_bits
 uniform = jrng.uniform
 normal = jrng.normal
 randint = jrng.randint
-
-try:
-    from jax._src.random import _check_prng_key as _check_prng_key
-except (AttributeError, ImportError):
-    def _check_prng_key(x): return x, False
 
 KeyRandomnessInBytes = 4
 
@@ -49,7 +55,7 @@ warnings.warn(
     "d3p is currently using a non-cryptographic random number generator!\n"
     "This is intended for debugging only! Please make sure to switch to using d3p.random to"
     " ensure privacy guarantees hold!",
-    stacklevel=2
+    stacklevel=2,
 )
 
 
@@ -60,14 +66,16 @@ def PRNGKey(seed: Optional[int] = None) -> PRNGState:
         a seed is randomly sampled from the `secrets` module.
     """
     if seed is None:
-        nonopt_seed = int.from_bytes(secrets.token_bytes(KeyRandomnessInBytes), 'big', signed=False)
+        nonopt_seed = int.from_bytes(
+            secrets.token_bytes(KeyRandomnessInBytes), "big", signed=False
+        )
     else:
         nonopt_seed = seed
     return jrng.PRNGKey(nonopt_seed)
 
 
 def random_bits(key, bit_width, shape):
-    key, _ = _check_prng_key(key)
+    key, _ = _check_prng_key(key=key)
     return _random_bits(key, bit_width, shape)
 
 

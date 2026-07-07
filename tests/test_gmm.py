@@ -67,7 +67,7 @@ class GaussianMixtureTests(unittest.TestCase):
         self.assertEqual((10, n_total//10), jnp.shape(zs))
         self.assertEqual((10, n_total//10, 2), jnp.shape(vals))
 
-        self.assertTrue(jnp.alltrue(zs >= 0) and jnp.alltrue(zs < 3))
+        self.assertTrue(jnp.all(zs >= 0) and jnp.all(zs < 3))
 
         unq_vals, unq_counts = np.unique(zs, return_counts=True)
         unq_counts = unq_counts / n_total

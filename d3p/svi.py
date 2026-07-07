@@ -511,20 +511,20 @@ class DPSVI(SVI):
 
 #     def run(self, rng_key, num_iterations, **kwargs):
 #         def run_iteration_chunk(iter, state):
-            
+
 #             def has_more_minibatches(loss, svi_state, batchifier_state):
 #                 _, _, has_more_minibatches, _ = self._batchifier.next_minibatch(iter, batchifier_state)
 #                 return has_more_minibatches
-            
+
 #             def run_minibatch_body(loss, svi_state, batchifier_state):
 #                 minibatch, mask, _, batchifier_state = self._batchifier.next_minibatch(iter, batchifier_state)
 #                 loss, svi_state = self._svi.update(svi_state, *minibatch, *mask, **kwargs)
 #                 return loss, svi_state, batchifier_state
-            
+
 #             return jax.lax.while_loop(has_more_minibatches, run_minibatch_body, (jnp.array(0), *state))
-        
+
 #         chunks_rng, svi_rng = jax.random.split(rng_key, 2)
-        
+
 #         svi_state = self._svi.init(svi_rng) #  todo: add arguments here
 #         chunks = [self._iteration_chunk_size] * (num_iterations // self._iteration_chunk_size) + [num_iterations % self._iteration_chunk_size]
 #         for i, chunk_size in enumerate(chunks):
@@ -535,5 +535,5 @@ class DPSVI(SVI):
 #             svi_state, _ = state
 #             if self._chunk_callback is not None:
 #                 self._chunk_callback(i, loss, svi_state)
-                
+
 #         return loss, state

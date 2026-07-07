@@ -46,7 +46,7 @@ class SplitBatchifierTestsBase:
         num_batches, batchifier_state = init(rng_key)
 
         self.assertEqual(10, num_batches)
-        self.assertTrue(np.alltrue(np.unique(batchifier_state, return_counts=True)[1] < 2))
+        self.assertTrue(np.all(np.unique(batchifier_state, return_counts=True)[1] < 2))
 
     def test_split_batchify_fetch(self):
         data = np.arange(105) + 100
@@ -61,12 +61,12 @@ class SplitBatchifierTestsBase:
             unq_idxs, unq_counts = np.unique(batch, return_counts=True)
             counts[unq_idxs - 100] = unq_counts
             # ensure each item occurs at most once in the batch
-            self.assertTrue(np.alltrue(unq_counts <= 1))
+            self.assertTrue(np.all(unq_counts <= 1))
             # ensure batch was plausibly drawn from data
-            self.assertTrue(np.alltrue(batch >= 100) and np.alltrue(batch < 205))
+            self.assertTrue(np.all(batch >= 100) and np.all(batch < 205))
 
         # ensure each item occurs at most once in the epoch
-        self.assertTrue(np.alltrue(counts <= 1))
+        self.assertTrue(np.all(counts <= 1))
         # ensure that amount of elements in batches cover an epoch worth of data
         self.assertEqual(100, np.sum(counts))
 
@@ -145,9 +145,9 @@ class SubsamplingBatchifierTestsBase:
             batch = batch[0]
             _, unq_counts = np.unique(batch, return_counts=True)
             # ensure each item occurs at most once in the batch
-            self.assertTrue(np.alltrue(unq_counts <= 1))
+            self.assertTrue(np.all(unq_counts <= 1))
             # ensure batch was plausibly drawn from data
-            self.assertTrue(np.alltrue(batch >= 100) and np.alltrue(batch < 205))
+            self.assertTrue(np.all(batch >= 100) and np.all(batch < 205))
 
     def test_subsample_batchify_fetch_batches_differ_without_replacement(self):
         data = np.arange(105) + 100
@@ -191,7 +191,7 @@ class SubsamplingBatchifierTestsBase:
             batch = fetch(i, batchifier_state)
             batch = batch[0]
             # ensure batch was plausibly drawn from data
-            self.assertTrue(np.alltrue(batch >= 100) and np.alltrue(batch < 205))
+            self.assertTrue(np.all(batch >= 100) and np.all(batch < 205))
 
     def test_subsample_batchify_fetch_batches_differ_with_replacement(self):
         data = np.arange(105) + 100
@@ -268,9 +268,9 @@ class PoissonBatchifierTestsBase:
             batch = batch[0][mask]
             _, unq_counts = np.unique(batch, return_counts=True)
             # ensure each item occurs at most once in the batch
-            self.assertTrue(np.alltrue(unq_counts <= 1))
+            self.assertTrue(np.all(unq_counts <= 1))
             # ensure batch was plausibly drawn from data
-            self.assertTrue(np.alltrue(batch >= 100) and np.alltrue(batch < 205))
+            self.assertTrue(np.all(batch >= 100) and np.all(batch < 205))
 
         # check that retrieved batch sizes follows Poisson distribution
         size_frequencies = size_counts / num_trials
